@@ -1,6 +1,6 @@
 import os
 import re
-import pickle
+import sqlite3
 import datetime
 import feedparser
 import html
@@ -21,6 +21,20 @@ TIME_DELTA = datetime.timedelta(days=182)  # Approximately 6 months
 MAIN_DIR = '/uu/nemes/cond-mat/'
 ARCHIVE_DIR = '/uu/nemes/cond-mat/archive/'
 ASSETS_DIR = '/uu/nemes/cond-mat/assets/'
+
+# Initialize SQLite database for tracking seen entries
+DB_PATH = os.path.join(ASSETS_DIR, 'seen_entries.db')
+conn = sqlite3.connect(DB_PATH)
+cursor = conn.cursor()
+cursor.execute(
+    """CREATE TABLE IF NOT EXISTS seen_entries (
+        feed_name TEXT,
+        search_type TEXT,
+        entry_id TEXT PRIMARY KEY,
+        timestamp TEXT
+    )"""
+)
+conn.commit()
 
 # FTP credentials are provided via environment variables
 FTP_HOST = os.environ.get('FTP_HOST', 'nemeslab.com')
@@ -133,19 +147,29 @@ feeds = [
     'adv-phys-res'
 ]
 
-def load_seen_entries(tracking_file):
-    """Load the set of seen entry IDs from the tracking file."""
-    if os.path.exists(ASSETS_DIR + tracking_file):
-        with open(ASSETS_DIR + tracking_file, 'rb') as f:
-            seen_entries = pickle.load(f)
-    else:
-        seen_entries = {}
-    return seen_entries
+def load_seen_entries(feed_name, search_type):
+    """Load seen entries for a feed/search type from the database."""
+    cursor.execute(
+        "SELECT entry_id, timestamp FROM seen_entries WHERE feed_name=? AND search_type=?",
+        (feed_name, search_type),
+    )
+    rows = cursor.fetchall()
+    return {entry_id: datetime.datetime.fromisoformat(ts) for entry_id, ts in rows}
 
-def save_seen_entries(seen_entries, tracking_file):
-    """Save the set of seen entry IDs to the tracking file."""
-    with open(ASSETS_DIR + tracking_file, 'wb') as f:
-        pickle.dump(seen_entries, f)
+
+def save_seen_entries(entries, feed_name, search_type):
+    """Persist seen entries for a feed/search type to the database."""
+    cutoff = (datetime.datetime.now() - TIME_DELTA).isoformat()
+    cursor.execute(
+        "DELETE FROM seen_entries WHERE feed_name=? AND search_type=? AND timestamp < ?",
+        (feed_name, search_type, cutoff),
+    )
+    for entry_id, ts in entries.items():
+        cursor.execute(
+            "INSERT OR REPLACE INTO seen_entries (feed_name, search_type, entry_id, timestamp) VALUES (?, ?, ?, ?)",
+            (feed_name, search_type, entry_id, ts.isoformat()),
+        )
+    conn.commit()
 
 def matches_search_terms(entry, search_pattern):
     """Check if the entry matches the given search pattern."""
@@ -355,19 +379,10 @@ def main():
 
         logging.info(f"Processing feed '{feed_name}'")
 
-        # Each feed has its own tracking files
-        tracking_file_primary = f'{feed_name}_seen_entries_primary.pkl'
-        tracking_file_rg = f'{feed_name}_seen_entries_rg.pkl'
-        tracking_file_perovs = f'{feed_name}_seen_entries_perovs.pkl'
-
-        # Load previously seen entries for primary search
-        seen_entries_primary = load_seen_entries(tracking_file_primary)
-
-        # Load previously seen entries for RG search
-        seen_entries_rg = load_seen_entries(tracking_file_rg)
-
-        # Load previously seen entries for perovskite search
-        seen_entries_perovs = load_seen_entries(tracking_file_perovs)
+        # Load previously seen entries from the database
+        seen_entries_primary = load_seen_entries(feed_name, "primary")
+        seen_entries_rg = load_seen_entries(feed_name, "rg")
+        seen_entries_perovs = load_seen_entries(feed_name, "perovs")
 
         # Fetch and parse the RSS feed
         feed = feedparser.parse(rss_feed_url)
@@ -399,15 +414,10 @@ def main():
         # Clean old entries from seen_entries_perosv
         clean_old_entries(seen_entries_perovs)
 
-        # Save updated seen entries for primary search
-        # `get_new_entries` updates the seen_entries
-        save_seen_entries(seen_entries_primary, tracking_file_primary)
-
-        # Save updated seen entries for RG search
-        save_seen_entries(seen_entries_rg, tracking_file_rg)
-
-        # Save updated seen entries for perovskite search
-        save_seen_entries(seen_entries_perovs, tracking_file_perovs)
+        # Save updated seen entries back to the database
+        save_seen_entries(seen_entries_primary, feed_name, "primary")
+        save_seen_entries(seen_entries_rg, feed_name, "rg")
+        save_seen_entries(seen_entries_perovs, feed_name, "perovs")
 
     # Generate and save primary HTML
     generate_html(
@@ -478,4 +488,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    conn.close()
     
