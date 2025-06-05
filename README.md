@@ -15,7 +15,10 @@ For FTP upload to a website, you have to set this up for yourself.
    object mapping feed names to their RSS URLs. The script will exit with an
    error if this file is missing.
 3. Optionally place a `search_terms.json` file next to `rssparser.py` to
-   override the default search regular expressions. The file should contain a
-   JSON object with keys `primary`, `rg`, and `perovskites`.
+   override the default search regular expressions. The file may define any
+   number of topics as key/value pairs where the key is a name and the value is
+   a regular expression.  The special topic `rg` is updated in-place each run,
+   while all other topics (including `primary` and `perovskites`) generate daily
+   HTML files which are archived automatically.
 
 The generated HTML files will be uploaded to the FTP server.
