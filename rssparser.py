@@ -71,9 +71,11 @@ def load_searchterms():
 # Load and compile the search terms
 terms = load_searchterms()
 
-search_pattern_all = re.compile(terms['primary'], re.IGNORECASE)
-search_pattern_rg = re.compile(terms['rg'], re.IGNORECASE)
-search_pattern_perovs = re.compile(terms['perovskites'], re.IGNORECASE)
+# Compile each search term into a regular expression.  This allows adding new
+# topics by simply inserting additional key/value pairs in ``search_terms.json``.
+search_patterns = {
+    key: re.compile(pattern, re.IGNORECASE) for key, pattern in terms.items()
+}
 
 # Path to the file containing the list of feeds
 FEEDS_FILE = os.path.join(os.path.dirname(__file__), 'feeds.json')
@@ -312,16 +314,33 @@ def generate_html(all_entries_per_feed, html_file_path, search_description):
         f.write(updated_html)
 
 def main():
-    # Initialize dictionaries to hold new entries for each search
-    all_new_entries_primary = {feed: [] for feed in feeds}
-    all_new_entries_rg = {feed: [] for feed in feeds}
-    all_new_entries_perovs = {feed: [] for feed in feeds}
-    
-    # Define output HTML file paths
-    primary_html_file = f'filtered_articles_{datetime.date.today()}.html'
-    rg_html_file = f'rg_filtered_articles.html'
-    rg_html_file_archive = f'rg_filtered_articles_{datetime.date.today()}.html'
-    perovs_html_file = f'perovs_filtered_articles_{datetime.date.today()}.html'
+    today = datetime.date.today()
+
+    topics = list(search_patterns.keys())
+
+    # Dictionary holding new entries per topic and per feed
+    all_new_entries = {
+        topic: {feed: [] for feed in feeds} for topic in topics
+    }
+
+    # Pre-compute output file names for each topic
+    html_files = {}
+    archive_files = {}
+    stable_files = {}
+
+    for topic in topics:
+        if topic == 'primary':
+            archive_files[topic] = f'filtered_articles_{today}.html'
+            html_files[topic] = archive_files[topic]
+            stable_files[topic] = 'results_primary.html'
+        elif topic == 'rg':
+            html_files[topic] = 'rg_filtered_articles.html'
+            archive_files[topic] = f'rg_filtered_articles_{today}.html'
+            stable_files[topic] = html_files[topic]
+        else:
+            archive_files[topic] = f'{topic}_filtered_articles_{today}.html'
+            html_files[topic] = archive_files[topic]
+            stable_files[topic] = f'{topic}_filtered_articles.html'
 
     for feed_name in feeds:
         rss_feed_url = database.get(feed_name)
@@ -330,11 +349,6 @@ def main():
             continue
 
         logging.info(f"Processing feed '{feed_name}'")
-
-        # Load previously seen entries from the database
-        seen_entries_primary = load_seen_entries(feed_name, "primary")
-        seen_entries_rg = load_seen_entries(feed_name, "rg")
-        seen_entries_perovs = load_seen_entries(feed_name, "perovs")
 
         # Fetch and parse the RSS feed
         feed = feedparser.parse(rss_feed_url)
@@ -345,94 +359,55 @@ def main():
         for entry in feed_entries:
             entry['feed_title'] = feed_title
 
-        # Get new entries that match the primary search terms
-        new_entries_primary = get_new_entries(feed_entries, seen_entries_primary, search_pattern_all)
-        all_new_entries_primary[feed_name].extend(new_entries_primary)
+        for topic, pattern in search_patterns.items():
+            seen_entries = load_seen_entries(feed_name, topic)
+            new_entries = get_new_entries(feed_entries, seen_entries, pattern)
+            all_new_entries[topic][feed_name].extend(new_entries)
 
-        # Get new entries that match the RG search terms
-        new_entries_rg = get_new_entries(feed_entries, seen_entries_rg, search_pattern_rg)
-        all_new_entries_rg[feed_name].extend(new_entries_rg)
-
-        # Get new entries that match the perovskite search terms
-        new_entries_perovs = get_new_entries(feed_entries, seen_entries_perovs, search_pattern_perovs)
-        all_new_entries_perovs[feed_name].extend(new_entries_perovs)
-
-        # Clean old entries from seen_entries_primary
-        clean_old_entries(seen_entries_primary)
-
-        # Clean old entries from seen_entries_rg
-        clean_old_entries(seen_entries_rg)
-
-        # Clean old entries from seen_entries_perosv
-        clean_old_entries(seen_entries_perovs)
-
-        # Save updated seen entries back to the database
-        save_seen_entries(seen_entries_primary, feed_name, "primary")
-        save_seen_entries(seen_entries_rg, feed_name, "rg")
-        save_seen_entries(seen_entries_perovs, feed_name, "perovs")
-
-    # Generate and save primary HTML
-    generate_html(
-        all_new_entries_primary,
-        MAIN_DIR + primary_html_file,
-        search_description="Filtered Articles Matching Search Terms"
-    )
-    print(f"Generated/Updated HTML file: {primary_html_file}")
-    # copy the search terms to a new file to be uploaded
-    shutil.copy(MAIN_DIR + primary_html_file, MAIN_DIR + 'results_primary.html')
-    # move the archive to the archive directory
-    shutil.move(MAIN_DIR + primary_html_file, ARCHIVE_DIR + primary_html_file)
-
-    # Generate and save RG HTML (always update)
-    generate_html(
-        all_new_entries_rg,
-        MAIN_DIR + rg_html_file,
-        search_description="Articles related to rhombohedral graphite"
-    )
-    print(f"Generated/Updated HTML file: {rg_html_file}")
-
-    # Generate and save RG HTML as backup
-    generate_html(
-        all_new_entries_rg,
-        MAIN_DIR + rg_html_file_archive,
-        search_description="Articles related to rhombohedral graphite"
-    )
-    print(f"Generated/Updated HTML file: {rg_html_file_archive}")
-    # move the archive to the archive directory
-    shutil.move(MAIN_DIR + rg_html_file_archive, ARCHIVE_DIR + rg_html_file_archive)
-
-    # Generate and save perovskite HTML (always update)
-    generate_html(
-        all_new_entries_perovs,
-        MAIN_DIR + perovs_html_file,
-        search_description="Articles related to perovskites"
-    )
-    print(f"Generated/Updated HTML file: {perovs_html_file}")
-    # copy the to a new file to be uploaded
-    shutil.copy(MAIN_DIR + perovs_html_file, MAIN_DIR + 'perovs_filtered_articles.html')
-    # move to the archive directory
-    shutil.move(MAIN_DIR + perovs_html_file, ARCHIVE_DIR + perovs_html_file)
+            clean_old_entries(seen_entries)
+            save_seen_entries(seen_entries, feed_name, topic)
 
 
+
+    for topic in topics:
+        description = (
+            "Filtered Articles Matching Search Terms" if topic == "primary" else
+            f"Articles related to {topic}"
+        )
+
+        generate_html(
+            all_new_entries[topic],
+            MAIN_DIR + html_files[topic],
+            search_description=description,
+        )
+        print(f"Generated/Updated HTML file: {html_files[topic]}")
+
+        if topic == "rg":
+            generate_html(
+                all_new_entries[topic],
+                MAIN_DIR + archive_files[topic],
+                search_description=description,
+            )
+            shutil.move(MAIN_DIR + archive_files[topic], ARCHIVE_DIR + archive_files[topic])
+        else:
+            shutil.copy(MAIN_DIR + html_files[topic], MAIN_DIR + stable_files[topic])
+            shutil.move(MAIN_DIR + html_files[topic], ARCHIVE_DIR + archive_files[topic])
     ## write to FTP server using credentials from environment variables
     try:
         with ftplib.FTP(FTP_HOST) as session:
             session.login(user=FTP_USER, passwd=FTP_PASS)
             session.cwd('/public_html/cond-mat/')
-            with open('/uu/nemes/cond-mat/results_primary.html', 'rb') as f:
-                session.storbinary('STOR ' + 'results_primary.html', f)
-            with open('/uu/nemes/cond-mat/' + rg_html_file, 'rb') as f:
-                session.storbinary('STOR ' + rg_html_file, f)
-            with open('/uu/nemes/cond-mat/' + 'perovs_filtered_articles.html', 'rb') as f:
-                session.storbinary('STOR ' + 'perovs_filtered_articles.html', f)
+            for topic in topics:
+                filename = stable_files[topic]
+                with open(MAIN_DIR + filename, 'rb') as f:
+                    session.storbinary('STOR ' + filename, f)
+
             # upload to archive
             session.cwd('/public_html/wp-content/uploads/simple-file-list/')
-            with open('/uu/nemes/cond-mat/archive/' + primary_html_file, 'rb') as f:
-                session.storbinary('STOR ' + primary_html_file, f)
-            with open('/uu/nemes/cond-mat/archive/' + rg_html_file_archive, 'rb') as f:
-                session.storbinary('STOR ' + rg_html_file_archive, f)
-            with open('/uu/nemes/cond-mat/archive/' + perovs_html_file, 'rb') as f:
-                session.storbinary('STOR ' + perovs_html_file, f)
+            for topic in topics:
+                archive_name = archive_files[topic]
+                with open(ARCHIVE_DIR + archive_name, 'rb') as f:
+                    session.storbinary('STOR ' + archive_name, f)
     except ftplib.all_errors as e:
         logging.error("FTP upload failed: %s", e)
         sys.exit(1)
