@@ -11,8 +11,11 @@ For FTP upload to a website, you have to set this up for yourself.
    - `FTP_USER` – FTP username
    - `FTP_PASS` – FTP password
 
-2. Optionally place a `search_terms.json` file next to `rssparser.py` to
+2. Create a `feeds.json` file next to `rssparser.py` containing a JSON
+   object mapping feed names to their RSS URLs. The script will exit with an
+   error if this file is missing.
+3. Optionally place a `search_terms.json` file next to `rssparser.py` to
    override the default search regular expressions. The file should contain a
    JSON object with keys `primary`, `rg`, and `perovskites`.
 
-The generated HTML files will be uploaded to the FTP server. 
+The generated HTML files will be uploaded to the FTP server.
