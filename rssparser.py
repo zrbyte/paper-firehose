@@ -75,77 +75,29 @@ search_pattern_all = re.compile(terms['primary'], re.IGNORECASE)
 search_pattern_rg = re.compile(terms['rg'], re.IGNORECASE)
 search_pattern_perovs = re.compile(terms['perovskites'], re.IGNORECASE)
 
-# Database of feed URLs
-database = {
-    'cond-mat': 'https://rss.arxiv.org/rss/cond-mat',
-    'nature': 'https://www.nature.com/nature.rss',
-    'science': 'https://www.science.org/action/showFeed?type=axatoc&feed=rss&jc=science',
-    'nat-mat': 'https://www.nature.com/nmat.rss',
-    'nat-nanotech': 'https://www.nature.com/nnano.rss',
-    'nat-phys': 'https://www.nature.com/nphys.rss',
-    'nat-chem': 'https://www.nature.com/nchem.rss',
-    'nat-ener': 'https://www.nature.com/nenergy.rss',
-    'nat-catal': 'https://www.nature.com/natcatal.rss',
-    'nat-chem-eng': 'https://www.nature.com/natchemeng.rss',
-    'nat-rev-phys': 'https://www.nature.com/natrevphys.rss',
-    'pnas': 'https://www.pnas.org/action/showFeed?type=searchTopic&taxonomyCode=topic&tagCode=phys-sci',
-    'joule': 'https://www.cell.com/joule/inpress.rss',
-    'prb': 'http://feeds.aps.org/rss/recent/prb.xml',
-    'prl': 'http://feeds.aps.org/rss/recent/prl.xml',
-    'prx': 'http://feeds.aps.org/rss/recent/prx.xml',
-    'pr_res': 'http://feeds.aps.org/rss/recent/prresearch.xml',
-    'nano-lett': 'https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=nalefd',
-    'acs-nano': 'https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ancac3',
-    'acs-en-lett': 'https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=aelccp',
-    'en-env-sci': 'http://feeds.rsc.org/rss/ee',
-    'science-adv': 'https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv',
-    'sci-rep': 'http://feeds.nature.com/srep/rss/current',
-    'nat-comm': 'https://www.nature.com/subjects/physical-sciences/ncomms.rss',
-    'comm-phys': 'https://www.nature.com/commsphys.rss',
-    'comm-mater': 'https://www.nature.com/commsmat.rss',
-    'scipost': 'https://scipost.org/rss/submissions/',
-    'small': 'https://onlinelibrary.wiley.com/feed/16136829/most-recent',
-    'adv-mater': 'https://onlinelibrary.wiley.com/feed/15214095/most-recent',
-    'adv-sci': 'https://onlinelibrary.wiley.com/feed/21983844/most-recent',
-    'adv-func-mater': 'https://onlinelibrary.wiley.com/feed/16163028/most-recent',
-    'adv-phys-res': 'https://onlinelibrary.wiley.com/feed/27511200/most-recent'
-}
+# Path to the file containing the list of feeds
+FEEDS_FILE = os.path.join(os.path.dirname(__file__), 'feeds.json')
+
+
+def load_feeds():
+    """Load feed URLs from FEEDS_FILE or exit on failure."""
+    if not os.path.exists(FEEDS_FILE):
+        logging.error(f"Feed list file '{FEEDS_FILE}' not found. Exiting.")
+        sys.exit(1)
+    try:
+        with open(FEEDS_FILE, 'r', encoding='utf-8') as f:
+            feeds_data = json.load(f)
+    except Exception as e:
+        logging.error(f"Could not read feed list: {e}. Exiting.")
+        sys.exit(1)
+    return feeds_data
+
+
+# Database of feed URLs loaded from the JSON file
+database = load_feeds()
 
 # List of feeds to process
-feeds = [
-    'cond-mat',
-    'nature',
-    'science',
-    'nat-mat',
-    'nat-nanotech',
-    'nat-phys',
-    'nat-chem',
-    'nat-ener',
-    'nat-catal',
-    'nat-chem-eng',
-    'nat-rev-phys',
-    'pnas',
-    'joule',
-    'prb',
-    'prl',
-    'prx',
-    'pr_res',
-    'nano-lett',
-    'acs-nano',
-    'acs-en-lett',
-    'en-env-sci',
-    'science-adv',
-    'sci-rep',
-    'nat-comm',
-    'comm-phys',
-    'comm-mater',
-    'scipost',
-    'small',
-    'adv-mater',
-    'adv-sci',
-    'adv-func-mater',
-    'adv-phys-res'
-]
+feeds = list(database.keys())
 
 def load_seen_entries(feed_name, search_type):
     """Load seen entries for a feed/search type from the database."""
