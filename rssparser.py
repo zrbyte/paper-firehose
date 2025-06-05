@@ -32,6 +32,8 @@ if not FTP_USER or not FTP_PASS:
 
 # Path to the file containing the regular expressions used for searching
 SEARCHTERMS_FILE = os.path.join(os.path.dirname(__file__), 'search_terms.json')
+# Path to the file containing the RSS feed URLs
+FEEDS_FILE = os.path.join(os.path.dirname(__file__), 'feeds.json')
 
 # Default search terms in case the external file is missing
 DEFAULT_SEARCHTERMS = {
@@ -61,77 +63,29 @@ search_pattern_all = re.compile(terms['primary'], re.IGNORECASE)
 search_pattern_rg = re.compile(terms['rg'], re.IGNORECASE)
 search_pattern_perovs = re.compile(terms['perovskites'], re.IGNORECASE)
 
-# Database of feed URLs
-database = {
-    'cond-mat': 'https://rss.arxiv.org/rss/cond-mat',
-    'nature': 'https://www.nature.com/nature.rss',
-    'science': 'https://www.science.org/action/showFeed?type=axatoc&feed=rss&jc=science',
-    'nat-mat': 'https://www.nature.com/nmat.rss',
-    'nat-nanotech': 'https://www.nature.com/nnano.rss',
-    'nat-phys': 'https://www.nature.com/nphys.rss',
-    'nat-chem': 'https://www.nature.com/nchem.rss',
-    'nat-ener': 'https://www.nature.com/nenergy.rss',
-    'nat-catal': 'https://www.nature.com/natcatal.rss',
-    'nat-chem-eng': 'https://www.nature.com/natchemeng.rss',
-    'nat-rev-phys': 'https://www.nature.com/natrevphys.rss',
-    'pnas': 'https://www.pnas.org/action/showFeed?type=searchTopic&taxonomyCode=topic&tagCode=phys-sci',
-    'joule': 'https://www.cell.com/joule/inpress.rss',
-    'prb': 'http://feeds.aps.org/rss/recent/prb.xml',
-    'prl': 'http://feeds.aps.org/rss/recent/prl.xml',
-    'prx': 'http://feeds.aps.org/rss/recent/prx.xml',
-    'pr_res': 'http://feeds.aps.org/rss/recent/prresearch.xml',
-    'nano-lett': 'https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=nalefd',
-    'acs-nano': 'https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ancac3',
-    'acs-en-lett': 'https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=aelccp',
-    'en-env-sci': 'http://feeds.rsc.org/rss/ee',
-    'science-adv': 'https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv',
-    'sci-rep': 'http://feeds.nature.com/srep/rss/current',
-    'nat-comm': 'https://www.nature.com/subjects/physical-sciences/ncomms.rss',
-    'comm-phys': 'https://www.nature.com/commsphys.rss',
-    'comm-mater': 'https://www.nature.com/commsmat.rss',
-    'scipost': 'https://scipost.org/rss/submissions/',
-    'small': 'https://onlinelibrary.wiley.com/feed/16136829/most-recent',
-    'adv-mater': 'https://onlinelibrary.wiley.com/feed/15214095/most-recent',
-    'adv-sci': 'https://onlinelibrary.wiley.com/feed/21983844/most-recent',
-    'adv-func-mater': 'https://onlinelibrary.wiley.com/feed/16163028/most-recent',
-    'adv-phys-res': 'https://onlinelibrary.wiley.com/feed/27511200/most-recent'
+# Default feed URLs in case the external file is missing
+# Only the arXiv condensed matter feed is enabled by default. Use ``feeds.json``
+# to provide a custom list with additional sources.
+DEFAULT_FEEDS = {
+    'cond-mat': 'https://rss.arxiv.org/rss/cond-mat'
 }
 
+def load_feeds():
+    """Load feed URLs from FEEDS_FILE or fall back to defaults."""
+    try:
+        with open(FEEDS_FILE, 'r', encoding='utf-8') as f:
+            feeds = json.load(f)
+            logging.info(f"Loaded feeds from {FEEDS_FILE}")
+    except Exception as e:
+        logging.warning(f"Could not read feeds file: {e}. Using defaults.")
+        feeds = DEFAULT_FEEDS
+    return feeds
+
+# Database of feed URLs
+database = load_feeds()
+
 # List of feeds to process
-feeds = [
-    'cond-mat',
-    'nature',
-    'science',
-    'nat-mat',
-    'nat-nanotech',
-    'nat-phys',
-    'nat-chem',
-    'nat-ener',
-    'nat-catal',
-    'nat-chem-eng',
-    'nat-rev-phys',
-    'pnas',
-    'joule',
-    'prb',
-    'prl',
-    'prx',
-    'pr_res',
-    'nano-lett',
-    'acs-nano',
-    'acs-en-lett',
-    'en-env-sci',
-    'science-adv',
-    'sci-rep',
-    'nat-comm',
-    'comm-phys',
-    'comm-mater',
-    'scipost',
-    'small',
-    'adv-mater',
-    'adv-sci',
-    'adv-func-mater',
-    'adv-phys-res'
-]
+feeds = list(database.keys())
 
 def load_seen_entries(tracking_file):
     """Load the set of seen entry IDs from the tracking file."""
