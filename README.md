@@ -15,7 +15,11 @@ For FTP upload to a website, you have to set this up for yourself.
    override the default search regular expressions. The file should contain a
    JSON object with keys `primary`, `rg`, and `perovskites`.
 
-3. Run the parser:
+3. By default the parser only checks the arXiv `cond-mat` feed. To use a
+   custom list of sources, place a `feeds.json` file next to `rssparser.py`
+   containing a JSON object that maps feed names to their URLs.
+
+4. Run the parser:
 
 ```bash
 python3 'server version/rewrite/rssparser.py'
