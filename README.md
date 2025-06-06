@@ -4,6 +4,13 @@ This project fetches articles from various scientific feeds, filters them by
 regular expressions, and uploads HTML summaries via FTP. Seen article IDs are
 tracked in an SQLite database stored under `assets/seen_entries.db`.
 
+The scripts are developed with **Python&nbsp;3.11**. Install the required
+dependencies using:
+
+```bash
+pip install -r requirements.txt
+```
+
 For FTP upload to a website, you have to set this up for yourself.
 
 1. Set the following environment variables (for example in your crontab):
