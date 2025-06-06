@@ -1,7 +1,12 @@
+*.ipynb
+*.code-workspace
+
 __pycache__/
 *.pyc
 *.backup*
-*.code-workspace
+
+assets/
+*.*
 
 archive/
 *.html
