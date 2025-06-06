@@ -1,5 +1,5 @@
-*.ipynb
 *.code-workspace
+testing.ipynb
 
 __pycache__/
 *.pyc
@@ -10,3 +10,4 @@ assets/seen_entries.db
 archive/
 *.html
 !html_template.html
+
