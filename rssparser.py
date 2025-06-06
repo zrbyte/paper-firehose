@@ -125,6 +125,11 @@ def save_seen_entries(entries, feed_name, search_type):
         )
     conn.commit()
 
+def clear_database():
+    """Remove all entries from the SQLite database."""
+    cursor.execute("DELETE FROM seen_entries")
+    conn.commit()
+
 def matches_search_terms(entry, search_pattern):
     """Check if the entry matches the given search pattern."""
     fields_to_search = []
@@ -429,7 +434,19 @@ if __name__ == "__main__":
         dest="upload",
         help="skip FTP upload",
     )
+    parser.add_argument(
+        "--clear-db",
+        action="store_true",
+        dest="clear_db",
+        help="remove all entries in the SQLite database and exit",
+    )
     args = parser.parse_args()
+
+    if args.clear_db:
+        clear_database()
+        print("All entries removed from the database.")
+        conn.close()
+        sys.exit(0)
 
     main(upload=args.upload)
     conn.close()
