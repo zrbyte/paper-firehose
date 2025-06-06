@@ -10,6 +10,7 @@ import shutil
 import ftplib
 import json
 import sys
+from string import Template
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +22,42 @@ TIME_DELTA = datetime.timedelta(days=182)  # Approximately 6 months
 MAIN_DIR = '/uu/nemes/cond-mat/'
 ARCHIVE_DIR = '/uu/nemes/cond-mat/archive/'
 ASSETS_DIR = '/uu/nemes/cond-mat/assets/'
+
+# HTML template used when creating new files
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>$title</title>
+<script type="text/javascript">
+  MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']],
+      processEscapes: true
+    }
+  };
+</script>
+<script type="text/javascript" id="MathJax-script" async
+  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+</script>
+<style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .entry { margin-bottom: 20px; }
+    h2 { color: #2E8B57; }
+    h3 { color: #4682B4; }
+    hr { border: 0; border-top: 1px solid #ccc; }
+    .no-entries { font-style: italic; color: #555; }
+</style>
+</head>
+<body>
+<h1>$title</h1>
+<h1>New papers on $date</h1>
+<hr>
+$content
+</body>
+</html>
+"""
 
 # FTP credentials are provided via environment variables
 FTP_HOST = os.environ.get('FTP_HOST', 'nemeslab.com')
@@ -178,51 +215,15 @@ def generate_html(all_entries_per_feed, html_file_path, search_description):
 
     # if the file doesn't exist
     if not file_exists:
-        # Create the initial HTML structure
+        # Create the initial HTML structure using a template
+        template = Template(HTML_TEMPLATE)
+        rendered = template.safe_substitute(
+            title=html.escape(search_description),
+            date=datetime.date.today(),
+            content="",
+        )
         with open(html_file_path, 'w', encoding='utf-8') as f:
-            html_content = []
-            html_content.append('<!DOCTYPE html>')
-            html_content.append('<html>')
-            html_content.append('<head>')
-            html_content.append('<meta charset="UTF-8">')
-            html_content.append(f'<title>{html.escape(search_description)}</title>')
-            # Include MathJax configuration
-            html_content.append('''
-            <script type="text/javascript">
-              MathJax = {
-                tex: {
-                  inlineMath: [['$', '$'], ['\\(', '\\)']],
-                  displayMath: [['$$', '$$'], ['\\[', '\\]']],
-                  processEscapes: true
-                }
-              };
-            </script>
-            ''')
-            # Include MathJax
-            html_content.append('''
-            <script type="text/javascript" id="MathJax-script" async
-              src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
-            </script>
-            ''')
-            # Add basic styling (optional)
-            html_content.append('''
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                .entry { margin-bottom: 20px; }
-                h2 { color: #2E8B57; }
-                h3 { color: #4682B4; }
-                hr { border: 0; border-top: 1px solid #ccc; }
-                .no-entries { font-style: italic; color: #555; }
-            </style>
-            ''')
-            html_content.append('</head>')
-            html_content.append('<body>')
-            html_content.append(f'<h1>{html.escape(search_description)}</h1>')
-            html_content.append(f'<h1>New papers on {datetime.date.today()}</h1>')
-            html_content.append('<hr>')
-            html_content.append('</body>')
-            html_content.append('</html>')
-            f.write('\n'.join(html_content))
+            f.write(rendered)
 
     # Read the existing HTML content if the file exists
     with open(html_file_path, 'r', encoding='utf-8') as f:
