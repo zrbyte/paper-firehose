@@ -200,8 +200,11 @@ def generate_html(all_entries_per_feed, html_file_path, search_description):
     file_exists = os.path.exists(html_file_path)
 
     if not file_exists:
+        class PercentTemplate(Template):
+            delimiter = '%'
+
         with open(HTML_TEMPLATE_PATH, 'r', encoding='utf-8') as tmpl:
-            template = Template(tmpl.read())
+            template = PercentTemplate(tmpl.read())
         rendered = template.substitute(
             title=html.escape(search_description),
             date=datetime.date.today(),
