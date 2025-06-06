@@ -18,9 +18,9 @@ logging.basicConfig(level=logging.INFO)
 
 # Constants
 TIME_DELTA = datetime.timedelta(days=182)  # Approximately 6 months
-MAIN_DIR = os.getcwd() + '/'
-ASSETS_DIR = MAIN_DIR + 'assets' + '/'
-ARCHIVE_DIR = MAIN_DIR + 'archive/' + '/'
+MAIN_DIR = os.getcwd()
+ASSETS_DIR = os.path.join(MAIN_DIR, 'assets')
+ARCHIVE_DIR = os.path.join(MAIN_DIR, 'archive')
 # MAIN_DIR = '/uu/nemes/cond-mat/'
 # ASSETS_DIR = '/uu/nemes/cond-mat/assets/'
 
@@ -370,7 +370,7 @@ def main(upload: bool = True):
 
         generate_html(
             all_new_entries[topic],
-            MAIN_DIR + html_files[topic],
+            os.path.join(MAIN_DIR, html_files[topic]),
             search_description=description,
         )
         print(f"Generated/Updated HTML file: {html_files[topic]}")
@@ -378,13 +378,22 @@ def main(upload: bool = True):
         if topic == "rg":
             generate_html(
                 all_new_entries[topic],
-                MAIN_DIR + archive_files[topic],
+                os.path.join(MAIN_DIR, archive_files[topic]),
                 search_description=description,
             )
-            shutil.move(MAIN_DIR + archive_files[topic], ARCHIVE_DIR + archive_files[topic])
+            shutil.move(
+                os.path.join(MAIN_DIR, archive_files[topic]),
+                os.path.join(ARCHIVE_DIR, archive_files[topic]),
+            )
         else:
-            shutil.copy(MAIN_DIR + html_files[topic], MAIN_DIR + stable_files[topic])
-            shutil.move(MAIN_DIR + html_files[topic], ARCHIVE_DIR + archive_files[topic])
+            shutil.copy(
+                os.path.join(MAIN_DIR, html_files[topic]),
+                os.path.join(MAIN_DIR, stable_files[topic]),
+            )
+            shutil.move(
+                os.path.join(MAIN_DIR, html_files[topic]),
+                os.path.join(ARCHIVE_DIR, archive_files[topic]),
+            )
     if upload:
         if not FTP_USER or not FTP_PASS:
             raise ValueError(
@@ -398,14 +407,14 @@ def main(upload: bool = True):
                 session.cwd('/public_html/cond-mat/')
                 for topic in topics:
                     filename = stable_files[topic]
-                    with open(MAIN_DIR + filename, 'rb') as f:
+                    with open(os.path.join(MAIN_DIR, filename), 'rb') as f:
                         session.storbinary('STOR ' + filename, f)
 
                 # upload to archive
                 session.cwd('/public_html/wp-content/uploads/simple-file-list/')
                 for topic in topics:
                     archive_name = archive_files[topic]
-                    with open(ARCHIVE_DIR + archive_name, 'rb') as f:
+                    with open(os.path.join(ARCHIVE_DIR, archive_name), 'rb') as f:
                         session.storbinary('STOR ' + archive_name, f)
         except ftplib.all_errors as e:
             logging.error("FTP upload failed: %s", e)
