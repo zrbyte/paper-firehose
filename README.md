@@ -27,6 +27,10 @@ For FTP upload to a website, you have to set this up for yourself.
    a regular expression.  The special topic `rg` is updated in-place each run,
    while all other topics (including `primary` and `perovskites`) generate daily
    HTML files which are archived automatically.
+4. To add your own topics, edit `search_terms.json` and add a new key/value
+   pair with the topic name as the key and a regular expression as the value.
+   The parser will automatically generate an HTML summary for every topic it
+   finds in this file.
 
 The generated HTML files will be uploaded to the FTP server by default. Pass
 `--no-upload` when running the script to skip the FTP step, which can be useful
