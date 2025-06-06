@@ -34,5 +34,6 @@ For FTP upload to a website, you have to set this up for yourself.
 
 The generated HTML files will be uploaded to the FTP server by default. Pass
 `--no-upload` when running the script to skip the FTP step, which can be useful
-for testing.
+for testing.  Pass `--clear-db` to remove all stored article IDs from the
+database and exit.
 
