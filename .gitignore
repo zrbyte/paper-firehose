@@ -5,8 +5,7 @@ __pycache__/
 *.pyc
 *.backup*
 
-assets/
-*.db
+assets/seen_entries.db
 
 archive/
 *.html
