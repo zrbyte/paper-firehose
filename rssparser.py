@@ -359,13 +359,45 @@ def main():
         for entry in feed_entries:
             entry['feed_title'] = feed_title
 
-        for topic, pattern in search_patterns.items():
-            seen_entries = load_seen_entries(feed_name, topic)
-            new_entries = get_new_entries(feed_entries, seen_entries, pattern)
-            all_new_entries[topic][feed_name].extend(new_entries)
+        # Load seen entries for all topics once
+        seen_entries_per_topic = {
+            topic: load_seen_entries(feed_name, topic) for topic in topics
+        }
 
-            clean_old_entries(seen_entries)
-            save_seen_entries(seen_entries, feed_name, topic)
+        current_time = datetime.datetime.now()
+
+        # Iterate over each entry a single time and test against all patterns
+        for entry in feed_entries:
+            entry_id = entry.get('id', entry.get('link'))
+            entry_published = entry.get('published_parsed') or entry.get('updated_parsed')
+
+            if entry_published:
+                if isinstance(entry_published, time.struct_time):
+                    entry_datetime = datetime.datetime(*entry_published[:6])
+                else:
+                    entry_datetime = entry_published
+            else:
+                entry_datetime = current_time
+
+            # Skip entries older than the TIME_DELTA window
+            if (current_time - entry_datetime) > TIME_DELTA:
+                continue
+
+            for topic, pattern in search_patterns.items():
+                seen_entries = seen_entries_per_topic[topic]
+
+                if (
+                    entry_id not in seen_entries
+                    and matches_search_terms(entry, pattern)
+                ):
+                    # Record new entry for this topic
+                    all_new_entries[topic][feed_name].append(entry)
+                    seen_entries[entry_id] = entry_datetime
+
+        # After processing all entries, persist the databases per topic
+        for topic in topics:
+            clean_old_entries(seen_entries_per_topic[topic])
+            save_seen_entries(seen_entries_per_topic[topic], feed_name, topic)
 
 
 
