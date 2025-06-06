@@ -11,6 +11,7 @@ import shutil
 import ftplib
 import json
 import sys
+import argparse
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -41,9 +42,6 @@ conn.commit()
 FTP_HOST = os.environ.get('FTP_HOST', 'nemeslab.com')
 FTP_USER = os.environ.get('FTP_USER')
 FTP_PASS = os.environ.get('FTP_PASS')
-
-if not FTP_USER or not FTP_PASS:
-    raise ValueError('FTP_USER and FTP_PASS must be set as environment variables')
 
 # Path to the file containing the regular expressions used for searching
 SEARCHTERMS_FILE = os.path.join(os.path.dirname(__file__), 'search_terms.json')
@@ -273,7 +271,7 @@ def generate_html(all_entries_per_feed, html_file_path, search_description):
     with open(html_file_path, 'w', encoding='utf-8') as f:
         f.write(updated_html)
 
-def main():
+def main(upload: bool = True):
     today = datetime.date.today()
 
     topics = list(search_patterns.keys())
@@ -384,28 +382,43 @@ def main():
         else:
             shutil.copy(MAIN_DIR + html_files[topic], MAIN_DIR + stable_files[topic])
             shutil.move(MAIN_DIR + html_files[topic], ARCHIVE_DIR + archive_files[topic])
-    ## write to FTP server using credentials from environment variables
-    try:
-        with ftplib.FTP(FTP_HOST) as session:
-            session.login(user=FTP_USER, passwd=FTP_PASS)
-            session.cwd('/public_html/cond-mat/')
-            for topic in topics:
-                filename = stable_files[topic]
-                with open(MAIN_DIR + filename, 'rb') as f:
-                    session.storbinary('STOR ' + filename, f)
+    if upload:
+        if not FTP_USER or not FTP_PASS:
+            raise ValueError(
+                "FTP_USER and FTP_PASS must be set as environment variables for FTP upload"
+            )
 
-            # upload to archive
-            session.cwd('/public_html/wp-content/uploads/simple-file-list/')
-            for topic in topics:
-                archive_name = archive_files[topic]
-                with open(ARCHIVE_DIR + archive_name, 'rb') as f:
-                    session.storbinary('STOR ' + archive_name, f)
-    except ftplib.all_errors as e:
-        logging.error("FTP upload failed: %s", e)
-        sys.exit(1)
+        ## write to FTP server using credentials from environment variables
+        try:
+            with ftplib.FTP(FTP_HOST) as session:
+                session.login(user=FTP_USER, passwd=FTP_PASS)
+                session.cwd('/public_html/cond-mat/')
+                for topic in topics:
+                    filename = stable_files[topic]
+                    with open(MAIN_DIR + filename, 'rb') as f:
+                        session.storbinary('STOR ' + filename, f)
+
+                # upload to archive
+                session.cwd('/public_html/wp-content/uploads/simple-file-list/')
+                for topic in topics:
+                    archive_name = archive_files[topic]
+                    with open(ARCHIVE_DIR + archive_name, 'rb') as f:
+                        session.storbinary('STOR ' + archive_name, f)
+        except ftplib.all_errors as e:
+            logging.error("FTP upload failed: %s", e)
+            sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Process RSS feeds")
+    parser.add_argument(
+        "--no-upload",
+        action="store_false",
+        dest="upload",
+        help="skip FTP upload",
+    )
+    args = parser.parse_args()
+
+    main(upload=args.upload)
     conn.close()
     
