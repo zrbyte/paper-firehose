@@ -18,11 +18,11 @@ logging.basicConfig(level=logging.INFO)
 
 # Constants
 TIME_DELTA = datetime.timedelta(days=182)  # Approximately 6 months
-# MAIN_DIR = os.getcwd() + '/'
-# ASSETS_DIR = os.getcwd() + '/assets' + '/'
-MAIN_DIR = '/uu/nemes/cond-mat/'
-ARCHIVE_DIR = '/uu/nemes/cond-mat/archive/'
-ASSETS_DIR = '/uu/nemes/cond-mat/assets/'
+MAIN_DIR = os.getcwd() + '/'
+ASSETS_DIR = MAIN_DIR + 'assets' + '/'
+ARCHIVE_DIR = MAIN_DIR + 'archive/' + '/'
+# MAIN_DIR = '/uu/nemes/cond-mat/'
+# ASSETS_DIR = '/uu/nemes/cond-mat/assets/'
 
 # Initialize SQLite database for tracking seen entries
 DB_PATH = os.path.join(ASSETS_DIR, 'seen_entries.db')
