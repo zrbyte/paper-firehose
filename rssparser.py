@@ -4,6 +4,7 @@ import sqlite3
 import datetime
 import feedparser
 import html
+from string import Template
 import logging
 import time
 import shutil
@@ -79,6 +80,7 @@ search_patterns = {
 
 # Path to the file containing the list of feeds
 FEEDS_FILE = os.path.join(os.path.dirname(__file__), 'feeds.json')
+HTML_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), 'html_template.html')
 
 
 def load_feeds():
@@ -196,120 +198,78 @@ def process_text(text):
     return text
 
 def generate_html(all_entries_per_feed, html_file_path, search_description):
-    """Generate or append HTML content for the list of entries, including MathJax support."""
-    # Check if the HTML file exists
+    """Generate or append HTML content using a simple template."""
     file_exists = os.path.exists(html_file_path)
 
-    # if the file doesn't exist
     if not file_exists:
-        # Create the initial HTML structure
+        with open(HTML_TEMPLATE_PATH, 'r', encoding='utf-8') as tmpl:
+            template = Template(tmpl.read())
+        rendered = template.substitute(
+            title=html.escape(search_description),
+            date=datetime.date.today(),
+            content="",
+        )
         with open(html_file_path, 'w', encoding='utf-8') as f:
-            html_content = []
-            html_content.append('<!DOCTYPE html>')
-            html_content.append('<html>')
-            html_content.append('<head>')
-            html_content.append('<meta charset="UTF-8">')
-            html_content.append(f'<title>{html.escape(search_description)}</title>')
-            # Include MathJax configuration
-            html_content.append('''
-            <script type="text/javascript">
-              MathJax = {
-                tex: {
-                  inlineMath: [['$', '$'], ['\\(', '\\)']],
-                  displayMath: [['$$', '$$'], ['\\[', '\\]']],
-                  processEscapes: true
-                }
-              };
-            </script>
-            ''')
-            # Include MathJax
-            html_content.append('''
-            <script type="text/javascript" id="MathJax-script" async
-              src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
-            </script>
-            ''')
-            # Add basic styling (optional)
-            html_content.append('''
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                .entry { margin-bottom: 20px; }
-                h2 { color: #2E8B57; }
-                h3 { color: #4682B4; }
-                hr { border: 0; border-top: 1px solid #ccc; }
-                .no-entries { font-style: italic; color: #555; }
-            </style>
-            ''')
-            html_content.append('</head>')
-            html_content.append('<body>')
-            html_content.append(f'<h1>{html.escape(search_description)}</h1>')
-            html_content.append(f'<h1>New papers on {datetime.date.today()}</h1>')
-            html_content.append('<hr>')
-            html_content.append('</body>')
-            html_content.append('</html>')
-            f.write('\n'.join(html_content))
+            f.write(rendered)
 
-    # Read the existing HTML content if the file exists
     with open(html_file_path, 'r', encoding='utf-8') as f:
         html_content = f.read()
 
-    # Find the position before the closing </body> tag
     insert_position = html_content.rfind('</body>')
-    
     if insert_position == -1:
-        # If </body> not found, append at the end
         insert_position = len(html_content)
 
-    # Prepare new entries to insert
     new_entries_html = []
 
-    # If no new entries, add a message indicating no matches
+    FEED_HEADER = Template('<h2>Feed: $title</h2>')
+    ENTRY_TEMPLATE = Template(
+        '<div class="entry">\n'
+        '  <h3><a href="$link">$title</a></h3>\n'
+        '  <p><strong>Authors:</strong> $authors</p>\n'
+        '  <p><em>Published: $published</em></p>\n'
+        '  <p>$summary</p>\n'
+        '</div>\n<hr>'
+    )
+
     if not any(all_entries_per_feed.values()):
-        new_entries_html.append('<p class="no-entries"> </p>') # append a blank message if there are no new entries
-        # new_entries_html.append('<hr>') # adds a horizontal line
+        new_entries_html.append('<p class="no-entries"> </p>')
     else:
-        # new_entries_html.append(f'<h1>New papers on {datetime.date.today()}</h1>')
         for feed_name in feeds:
             entries = all_entries_per_feed.get(feed_name, [])
             if not entries:
-                continue  # Skip feeds with no new entries
+                continue
 
-            # Add a header for the feed
             feed_title = entries[0].get('feed_title', feed_name) if entries else feed_name
-            new_entries_html.append(f'<h2>Feed: {html.escape(feed_title)}</h2>')
+            new_entries_html.append(FEED_HEADER.substitute(title=html.escape(feed_title)))
 
             for entry in entries:
-                title = entry.get('title', 'No title')
+                title = process_text(entry.get('title', 'No title'))
                 link = entry.get('link', '#')
                 published = entry.get('published', entry.get('updated', 'No published date'))
-                summary = entry.get('summary', entry.get('description', 'No summary'))
-                feed_title = entry.get('feed_title', 'Unknown Feed')
+                summary = process_text(entry.get('summary', entry.get('description', 'No summary')))
 
-                # Process the title, author(s), and summary to handle LaTeX
-                title = process_text(title)
-
-                # Handle authors
                 authors = entry.get('authors', [])
                 if authors:
-                    # Combine author names
-                    author_names = ', '.join([author.get('name', '') for author in authors])
+                    author_names = ', '.join(author.get('name', '') for author in authors)
                 else:
                     author_names = entry.get('author', 'No author')
                 author_names = process_text(author_names)
 
-                summary = process_text(summary)
+                context = {
+                    'link': link,
+                    'title': title,
+                    'authors': author_names,
+                    'published': published,
+                    'summary': summary,
+                }
+                new_entries_html.append(ENTRY_TEMPLATE.substitute(context))
 
-                new_entries_html.append('<div class="entry">')
-                new_entries_html.append(f'<h3><a href="{link}">{title}</a></h3>')
-                new_entries_html.append(f'<p><strong>Authors:</strong> {author_names}</p>')
-                new_entries_html.append(f'<p><em>Published: {published}</em></p>')
-                new_entries_html.append(f'<p>{summary}</p>')
-                new_entries_html.append('</div>')
-                new_entries_html.append('<hr>')
+    updated_html = (
+        html_content[:insert_position]
+        + '\n'.join(new_entries_html)
+        + html_content[insert_position:]
+    )
 
-    # Insert the new entries before </body>
-    updated_html = html_content[:insert_position] + '\n'.join(new_entries_html) + html_content[insert_position:]
-
-    # Write back the updated HTML content
     with open(html_file_path, 'w', encoding='utf-8') as f:
         f.write(updated_html)
 
