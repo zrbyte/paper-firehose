@@ -271,7 +271,7 @@ def generate_html(all_entries_per_feed, html_file_path, search_description):
     with open(html_file_path, 'w', encoding='utf-8') as f:
         f.write(updated_html)
 
-def main(upload: bool = False):
+def main(upload: bool = True):
     today = datetime.date.today()
 
     topics = list(search_patterns.keys())
@@ -412,9 +412,10 @@ def main(upload: bool = False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process RSS feeds")
     parser.add_argument(
-        "--upload",
-        action="store_true",
-        help="upload generated files via FTP",
+        "--no-upload",
+        action="store_false",
+        dest="upload",
+        help="skip FTP upload",
     )
     args = parser.parse_args()
 

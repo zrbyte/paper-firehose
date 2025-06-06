@@ -28,4 +28,7 @@ For FTP upload to a website, you have to set this up for yourself.
    while all other topics (including `primary` and `perovskites`) generate daily
    HTML files which are archived automatically.
 
-The generated HTML files will be uploaded to the FTP server.
+The generated HTML files will be uploaded to the FTP server by default. Pass
+`--no-upload` when running the script to skip the FTP step, which can be useful
+for testing.
+
