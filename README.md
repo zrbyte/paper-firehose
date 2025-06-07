@@ -4,7 +4,7 @@ This project fetches articles from various scientific feeds, filters them by
 regular expressions, and uploads HTML summaries via FTP.
 
 ## Usage
-For FTP upload to a website, you have to set this up for yourself.
+Current use case is FTP upload to a website, you can set this up for yourself. However, FTP upload is not needed, in this case use it with the --no-upload option.
 
 1. Set the following environment variables (for example in your crontab):
    - `FTP_HOST` – hostname of the FTP server
@@ -22,7 +22,6 @@ For FTP upload to a website, you have to set this up for yourself.
 4. Run the parser:
 
 ```bash
-python3 'server version/rewrite/rssparser.py'
+python3 rssparser.py
 ```
 
-The generated HTML files will be uploaded to the FTP server.
