@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 
 # Constants
 TIME_DELTA = datetime.timedelta(days=182)  # Approximately 6 months
-MAIN_DIR = os.getcwd()
+MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(MAIN_DIR, 'assets')
 ARCHIVE_DIR = os.path.join(MAIN_DIR, 'archive')
 # MAIN_DIR = '/uu/nemes/cond-mat/'
