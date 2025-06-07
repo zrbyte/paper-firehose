@@ -321,7 +321,7 @@ def main(upload: bool = True):
         feed_entries = feed.entries
 
         # Add feed title to each entry
-        feed_title = feed.feed.get('title', feed_name)
+        feed_title = feed.feed.get('title', feed_name) # type: ignore
         for entry in feed_entries:
             entry['feed_title'] = feed_title
 
@@ -346,7 +346,7 @@ def main(upload: bool = True):
                 entry_datetime = current_time
 
             # Skip entries older than the TIME_DELTA window
-            if (current_time - entry_datetime) > TIME_DELTA:
+            if (current_time - entry_datetime) > TIME_DELTA: # type: ignore
                 continue
 
             for topic, pattern in search_patterns.items():
@@ -358,7 +358,7 @@ def main(upload: bool = True):
                 ):
                     # Record new entry for this topic
                     all_new_entries[topic][feed_name].append(entry)
-                    seen_entries[entry_id] = entry_datetime
+                    seen_entries[entry_id] = entry_datetime # type: ignore
 
         # After processing all entries, persist the databases per topic
         for topic in topics:
