@@ -1,9 +1,12 @@
 import json
+import os
 import urllib.request
 
 
 def load_api_key(path="openaikulcs.env"):
     """Read the OpenAI API key from a file."""
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.dirname(__file__), path)
     with open(path, "r", encoding="utf-8") as f:
         return f.read().strip()
 
