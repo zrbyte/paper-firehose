@@ -8,7 +8,6 @@ archive/
 *.html
 !html_template.html
 
-assets/*.db
+*.db
 *.ipynb
 *.env
-assets/seen_entries.db
