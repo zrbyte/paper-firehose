@@ -24,6 +24,10 @@ ARCHIVE_DIR = os.path.join(MAIN_DIR, 'archive')
 # MAIN_DIR = '/uu/nemes/cond-mat/'
 # ASSETS_DIR = '/uu/nemes/cond-mat/assets/'
 
+# Ensure required directories exist
+os.makedirs(ASSETS_DIR, exist_ok=True)
+os.makedirs(ARCHIVE_DIR, exist_ok=True)
+
 # Initialize SQLite database for tracking seen entries
 DB_PATH = os.path.join(ASSETS_DIR, 'seen_entries.db')
 conn = sqlite3.connect(DB_PATH)
