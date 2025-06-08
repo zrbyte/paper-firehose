@@ -10,3 +10,4 @@ archive/
 
 assets/*.db
 *.ipynbs
+assets/seen_entries.db
