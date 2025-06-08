@@ -58,7 +58,7 @@ def chat_completion(prompt, max_tokens=200):
     return result['choices'][0]['message']['content']
 
 
-def summarize_titles(titles, prompt_prefix, char_limit=400):
+def summarize_titles(titles, prompt_prefix, char_limit=1000):
     if not titles:
         return 'No new papers.'
     joined = '; '.join(t for t, _ in titles)
@@ -66,7 +66,7 @@ def summarize_titles(titles, prompt_prefix, char_limit=400):
         f"{prompt_prefix}\nTitles: {joined}\n"
         f"Provide a concise summary under {char_limit} characters."
     )
-    return chat_completion(prompt, max_tokens=200)
+    return chat_completion(prompt, max_tokens=500)
 
 
 def generate_html(primary_summary, rg_info, topic_summaries, output_path):
@@ -103,7 +103,7 @@ def main():
     primary_titles = extract_titles(os.path.join(MAIN_DIR, stable_files['primary']))
     primary_summary = summarize_titles(
         primary_titles,
-        "Summarize the following papers with emphasis on those best matching the search terms.",
+        "Summarize the following papers with emphasis on those best matching the primary search terms.",
         char_limit=400,
     )
 
