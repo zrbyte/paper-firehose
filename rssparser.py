@@ -1,37 +1,89 @@
 import os
 import re
-import pickle
+import sqlite3
 import datetime
 import feedparser
 import html
+from string import Template
 import logging
 import time
 import shutil
 import ftplib
 import json
 import sys
+import argparse
+from string import Template
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 
 # Constants
 TIME_DELTA = datetime.timedelta(days=182)  # Approximately 6 months
-# MAIN_DIR = os.getcwd() + '/'
-# ASSETS_DIR = os.getcwd() + '/assets' + '/'
-MAIN_DIR = '/uu/nemes/cond-mat/'
-ARCHIVE_DIR = '/uu/nemes/cond-mat/archive/'
-ASSETS_DIR = '/uu/nemes/cond-mat/assets/'
+MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSETS_DIR = os.path.join(MAIN_DIR, 'assets')
+ARCHIVE_DIR = os.path.join(MAIN_DIR, 'archive')
+# MAIN_DIR = '/uu/nemes/cond-mat/'
+# ASSETS_DIR = '/uu/nemes/cond-mat/assets/'
+
+# Initialize SQLite database for tracking seen entries
+DB_PATH = os.path.join(ASSETS_DIR, 'seen_entries.db')
+conn = sqlite3.connect(DB_PATH)
+cursor = conn.cursor()
+cursor.execute(
+    """CREATE TABLE IF NOT EXISTS seen_entries (
+        feed_name TEXT,
+        search_type TEXT,
+        entry_id TEXT PRIMARY KEY,
+        timestamp TEXT
+    )"""
+)
+conn.commit()
+
+# HTML template used when creating new files
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>$title</title>
+<script type="text/javascript">
+  MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']],
+      processEscapes: true
+    }
+  };
+</script>
+<script type="text/javascript" id="MathJax-script" async
+  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+</script>
+<style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .entry { margin-bottom: 20px; }
+    h2 { color: #2E8B57; }
+    h3 { color: #4682B4; }
+    hr { border: 0; border-top: 1px solid #ccc; }
+    .no-entries { font-style: italic; color: #555; }
+</style>
+</head>
+<body>
+<h1>$title</h1>
+<h1>New papers on $date</h1>
+<hr>
+$content
+</body>
+</html>
+"""
 
 # FTP credentials are provided via environment variables
 FTP_HOST = os.environ.get('FTP_HOST', 'nemeslab.com')
 FTP_USER = os.environ.get('FTP_USER')
 FTP_PASS = os.environ.get('FTP_PASS')
 
-if not FTP_USER or not FTP_PASS:
-    raise ValueError('FTP_USER and FTP_PASS must be set as environment variables')
-
 # Path to the file containing the regular expressions used for searching
 SEARCHTERMS_FILE = os.path.join(os.path.dirname(__file__), 'search_terms.json')
+# Path to the file containing the RSS feed URLs
+FEEDS_FILE = os.path.join(os.path.dirname(__file__), 'feeds.json')
 
 # Default search terms in case the external file is missing
 DEFAULT_SEARCHTERMS = {
@@ -57,81 +109,36 @@ def load_searchterms():
 # Load and compile the search terms
 terms = load_searchterms()
 
-search_pattern_all = re.compile(terms['primary'], re.IGNORECASE)
-search_pattern_rg = re.compile(terms['rg'], re.IGNORECASE)
-search_pattern_perovs = re.compile(terms['perovskites'], re.IGNORECASE)
-
-# Database of feed URLs
-database = {
-    'cond-mat': 'https://rss.arxiv.org/rss/cond-mat',
-    'nature': 'https://www.nature.com/nature.rss',
-    'science': 'https://www.science.org/action/showFeed?type=axatoc&feed=rss&jc=science',
-    'nat-mat': 'https://www.nature.com/nmat.rss',
-    'nat-nanotech': 'https://www.nature.com/nnano.rss',
-    'nat-phys': 'https://www.nature.com/nphys.rss',
-    'nat-chem': 'https://www.nature.com/nchem.rss',
-    'nat-ener': 'https://www.nature.com/nenergy.rss',
-    'nat-catal': 'https://www.nature.com/natcatal.rss',
-    'nat-chem-eng': 'https://www.nature.com/natchemeng.rss',
-    'nat-rev-phys': 'https://www.nature.com/natrevphys.rss',
-    'pnas': 'https://www.pnas.org/action/showFeed?type=searchTopic&taxonomyCode=topic&tagCode=phys-sci',
-    'joule': 'https://www.cell.com/joule/inpress.rss',
-    'prb': 'http://feeds.aps.org/rss/recent/prb.xml',
-    'prl': 'http://feeds.aps.org/rss/recent/prl.xml',
-    'prx': 'http://feeds.aps.org/rss/recent/prx.xml',
-    'pr_res': 'http://feeds.aps.org/rss/recent/prresearch.xml',
-    'nano-lett': 'https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=nalefd',
-    'acs-nano': 'https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ancac3',
-    'acs-en-lett': 'https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=aelccp',
-    'en-env-sci': 'http://feeds.rsc.org/rss/ee',
-    'science-adv': 'https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv',
-    'sci-rep': 'http://feeds.nature.com/srep/rss/current',
-    'nat-comm': 'https://www.nature.com/subjects/physical-sciences/ncomms.rss',
-    'comm-phys': 'https://www.nature.com/commsphys.rss',
-    'comm-mater': 'https://www.nature.com/commsmat.rss',
-    'scipost': 'https://scipost.org/rss/submissions/',
-    'small': 'https://onlinelibrary.wiley.com/feed/16136829/most-recent',
-    'adv-mater': 'https://onlinelibrary.wiley.com/feed/15214095/most-recent',
-    'adv-sci': 'https://onlinelibrary.wiley.com/feed/21983844/most-recent',
-    'adv-func-mater': 'https://onlinelibrary.wiley.com/feed/16163028/most-recent',
-    'adv-phys-res': 'https://onlinelibrary.wiley.com/feed/27511200/most-recent'
+# Compile each search term into a regular expression.  This allows adding new
+# topics by simply inserting additional key/value pairs in ``search_terms.json``.
+search_patterns = {
+    key: re.compile(pattern, re.IGNORECASE) for key, pattern in terms.items()
 }
 
+# Path to the file containing the list of feeds
+FEEDS_FILE = os.path.join(os.path.dirname(__file__), 'feeds.json')
+HTML_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), 'html_template.html')
+
+
+def load_feeds():
+    """Load feed URLs from FEEDS_FILE or exit on failure."""
+    if not os.path.exists(FEEDS_FILE):
+        logging.error(f"Feed list file '{FEEDS_FILE}' not found. Exiting.")
+        sys.exit(1)
+    try:
+        with open(FEEDS_FILE, 'r', encoding='utf-8') as f:
+            feeds_data = json.load(f)
+    except Exception as e:
+        logging.error(f"Could not read feed list: {e}. Exiting.")
+        sys.exit(1)
+    return feeds_data
+
+
+# Database of feed URLs loaded from the JSON file
+database = load_feeds()
+
 # List of feeds to process
-feeds = [
-    'cond-mat',
-    'nature',
-    'science',
-    'nat-mat',
-    'nat-nanotech',
-    'nat-phys',
-    'nat-chem',
-    'nat-ener',
-    'nat-catal',
-    'nat-chem-eng',
-    'nat-rev-phys',
-    'pnas',
-    'joule',
-    'prb',
-    'prl',
-    'prx',
-    'pr_res',
-    'nano-lett',
-    'acs-nano',
-    'acs-en-lett',
-    'en-env-sci',
-    'science-adv',
-    'sci-rep',
-    'nat-comm',
-    'comm-phys',
-    'comm-mater',
-    'scipost',
-    'small',
-    'adv-mater',
-    'adv-sci',
-    'adv-func-mater',
-    'adv-phys-res'
-]
+feeds = list(database.keys())
 
 def load_seen_entries(tracking_file):
     """Load the set of seen entry IDs from the tracking file."""
@@ -142,10 +149,24 @@ def load_seen_entries(tracking_file):
         seen_entries = {}
     return seen_entries
 
-def save_seen_entries(seen_entries, tracking_file):
-    """Save the set of seen entry IDs to the tracking file."""
-    with open(ASSETS_DIR + tracking_file, 'wb') as f:
-        pickle.dump(seen_entries, f)
+def save_seen_entries(entries, feed_name, search_type):
+    """Persist seen entries for a feed/search type to the database."""
+    cutoff = (datetime.datetime.now() - TIME_DELTA).isoformat()
+    cursor.execute(
+        "DELETE FROM seen_entries WHERE feed_name=? AND search_type=? AND timestamp < ?",
+        (feed_name, search_type, cutoff),
+    )
+    for entry_id, ts in entries.items():
+        cursor.execute(
+            "INSERT OR REPLACE INTO seen_entries (feed_name, search_type, entry_id, timestamp) VALUES (?, ?, ?, ?)",
+            (feed_name, search_type, entry_id, ts.isoformat()),
+        )
+    conn.commit()
+
+def clear_database():
+    """Remove all entries from the SQLite database."""
+    cursor.execute("DELETE FROM seen_entries")
+    conn.commit()
 
 def matches_search_terms(entry, search_pattern):
     """Check if the entry matches the given search pattern."""
@@ -218,134 +239,112 @@ def process_text(text):
     return text
 
 def generate_html(all_entries_per_feed, html_file_path, search_description):
-    """Generate or append HTML content for the list of entries, including MathJax support."""
-    # Check if the HTML file exists
+    """Generate or append HTML content using a simple template."""
     file_exists = os.path.exists(html_file_path)
 
-    # if the file doesn't exist
     if not file_exists:
-        # Create the initial HTML structure
-        with open(html_file_path, 'w', encoding='utf-8') as f:
-            html_content = []
-            html_content.append('<!DOCTYPE html>')
-            html_content.append('<html>')
-            html_content.append('<head>')
-            html_content.append('<meta charset="UTF-8">')
-            html_content.append(f'<title>{html.escape(search_description)}</title>')
-            # Include MathJax configuration
-            html_content.append('''
-            <script type="text/javascript">
-              MathJax = {
-                tex: {
-                  inlineMath: [['$', '$'], ['\\(', '\\)']],
-                  displayMath: [['$$', '$$'], ['\\[', '\\]']],
-                  processEscapes: true
-                }
-              };
-            </script>
-            ''')
-            # Include MathJax
-            html_content.append('''
-            <script type="text/javascript" id="MathJax-script" async
-              src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
-            </script>
-            ''')
-            # Add basic styling (optional)
-            html_content.append('''
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                .entry { margin-bottom: 20px; }
-                h2 { color: #2E8B57; }
-                h3 { color: #4682B4; }
-                hr { border: 0; border-top: 1px solid #ccc; }
-                .no-entries { font-style: italic; color: #555; }
-            </style>
-            ''')
-            html_content.append('</head>')
-            html_content.append('<body>')
-            html_content.append(f'<h1>{html.escape(search_description)}</h1>')
-            html_content.append(f'<h1>New papers on {datetime.date.today()}</h1>')
-            html_content.append('<hr>')
-            html_content.append('</body>')
-            html_content.append('</html>')
-            f.write('\n'.join(html_content))
+        class PercentTemplate(Template):
+            delimiter = '%'
 
-    # Read the existing HTML content if the file exists
+        with open(HTML_TEMPLATE_PATH, 'r', encoding='utf-8') as tmpl:
+            template = PercentTemplate(tmpl.read())
+        rendered = template.substitute(
+            title=html.escape(search_description),
+            date=datetime.date.today(),
+            content="",
+        )
+        with open(html_file_path, 'w', encoding='utf-8') as f:
+            f.write(rendered)
+
     with open(html_file_path, 'r', encoding='utf-8') as f:
         html_content = f.read()
 
-    # Find the position before the closing </body> tag
     insert_position = html_content.rfind('</body>')
-    
     if insert_position == -1:
-        # If </body> not found, append at the end
         insert_position = len(html_content)
 
-    # Prepare new entries to insert
     new_entries_html = []
 
-    # If no new entries, add a message indicating no matches
+    FEED_HEADER = Template('<h2>Feed: $title</h2>')
+    ENTRY_TEMPLATE = Template(
+        '<div class="entry">\n'
+        '  <h3><a href="$link">$title</a></h3>\n'
+        '  <p><strong>Authors:</strong> $authors</p>\n'
+        '  <p><em>Published: $published</em></p>\n'
+        '  <p>$summary</p>\n'
+        '</div>\n<hr>'
+    )
+
     if not any(all_entries_per_feed.values()):
-        new_entries_html.append('<p class="no-entries"> </p>') # append a blank message if there are no new entries
-        # new_entries_html.append('<hr>') # adds a horizontal line
+        new_entries_html.append('<p class="no-entries"> </p>')
     else:
-        # new_entries_html.append(f'<h1>New papers on {datetime.date.today()}</h1>')
         for feed_name in feeds:
             entries = all_entries_per_feed.get(feed_name, [])
             if not entries:
-                continue  # Skip feeds with no new entries
+                continue
 
-            # Add a header for the feed
             feed_title = entries[0].get('feed_title', feed_name) if entries else feed_name
-            new_entries_html.append(f'<h2>Feed: {html.escape(feed_title)}</h2>')
+            new_entries_html.append(FEED_HEADER.substitute(title=html.escape(feed_title)))
 
             for entry in entries:
-                title = entry.get('title', 'No title')
+                title = process_text(entry.get('title', 'No title'))
                 link = entry.get('link', '#')
                 published = entry.get('published', entry.get('updated', 'No published date'))
-                summary = entry.get('summary', entry.get('description', 'No summary'))
-                feed_title = entry.get('feed_title', 'Unknown Feed')
+                summary = process_text(entry.get('summary', entry.get('description', 'No summary')))
 
-                # Process the title, author(s), and summary to handle LaTeX
-                title = process_text(title)
-
-                # Handle authors
                 authors = entry.get('authors', [])
                 if authors:
-                    # Combine author names
-                    author_names = ', '.join([author.get('name', '') for author in authors])
+                    author_names = ', '.join(author.get('name', '') for author in authors)
                 else:
                     author_names = entry.get('author', 'No author')
                 author_names = process_text(author_names)
 
-                summary = process_text(summary)
+                context = {
+                    'link': link,
+                    'title': title,
+                    'authors': author_names,
+                    'published': published,
+                    'summary': summary,
+                }
+                new_entries_html.append(ENTRY_TEMPLATE.substitute(context))
 
-                new_entries_html.append('<div class="entry">')
-                new_entries_html.append(f'<h3><a href="{link}">{title}</a></h3>')
-                new_entries_html.append(f'<p><strong>Authors:</strong> {author_names}</p>')
-                new_entries_html.append(f'<p><em>Published: {published}</em></p>')
-                new_entries_html.append(f'<p>{summary}</p>')
-                new_entries_html.append('</div>')
-                new_entries_html.append('<hr>')
+    updated_html = (
+        html_content[:insert_position]
+        + '\n'.join(new_entries_html)
+        + html_content[insert_position:]
+    )
 
-    # Insert the new entries before </body>
-    updated_html = html_content[:insert_position] + '\n'.join(new_entries_html) + html_content[insert_position:]
-
-    # Write back the updated HTML content
     with open(html_file_path, 'w', encoding='utf-8') as f:
         f.write(updated_html)
 
-def main():
-    # Initialize dictionaries to hold new entries for each search
-    all_new_entries_primary = {feed: [] for feed in feeds}
-    all_new_entries_rg = {feed: [] for feed in feeds}
-    all_new_entries_perovs = {feed: [] for feed in feeds}
-    
-    # Define output HTML file paths
-    primary_html_file = f'filtered_articles_{datetime.date.today()}.html'
-    rg_html_file = f'rg_filtered_articles.html'
-    rg_html_file_archive = f'rg_filtered_articles_{datetime.date.today()}.html'
-    perovs_html_file = f'perovs_filtered_articles_{datetime.date.today()}.html'
+def main(upload: bool = True):
+    today = datetime.date.today()
+
+    topics = list(search_patterns.keys())
+
+    # Dictionary holding new entries per topic and per feed
+    all_new_entries = {
+        topic: {feed: [] for feed in feeds} for topic in topics
+    }
+
+    # Pre-compute output file names for each topic
+    html_files = {}
+    archive_files = {}
+    stable_files = {}
+
+    for topic in topics:
+        if topic == 'primary':
+            archive_files[topic] = f'filtered_articles_{today}.html'
+            html_files[topic] = archive_files[topic]
+            stable_files[topic] = 'results_primary.html'
+        elif topic == 'rg':
+            html_files[topic] = 'rg_filtered_articles.html'
+            archive_files[topic] = f'rg_filtered_articles_{today}.html'
+            stable_files[topic] = html_files[topic]
+        else:
+            archive_files[topic] = f'{topic}_filtered_articles_{today}.html'
+            html_files[topic] = archive_files[topic]
+            stable_files[topic] = f'{topic}_filtered_articles.html'
 
     for feed_name in feeds:
         rss_feed_url = database.get(feed_name)
@@ -355,127 +354,138 @@ def main():
 
         logging.info(f"Processing feed '{feed_name}'")
 
-        # Each feed has its own tracking files
-        tracking_file_primary = f'{feed_name}_seen_entries_primary.pkl'
-        tracking_file_rg = f'{feed_name}_seen_entries_rg.pkl'
-        tracking_file_perovs = f'{feed_name}_seen_entries_perovs.pkl'
-
-        # Load previously seen entries for primary search
-        seen_entries_primary = load_seen_entries(tracking_file_primary)
-
-        # Load previously seen entries for RG search
-        seen_entries_rg = load_seen_entries(tracking_file_rg)
-
-        # Load previously seen entries for perovskite search
-        seen_entries_perovs = load_seen_entries(tracking_file_perovs)
-
         # Fetch and parse the RSS feed
         feed = feedparser.parse(rss_feed_url)
         feed_entries = feed.entries
 
         # Add feed title to each entry
-        feed_title = feed.feed.get('title', feed_name)
+        feed_title = feed.feed.get('title', feed_name) # type: ignore
         for entry in feed_entries:
             entry['feed_title'] = feed_title
 
-        # Get new entries that match the primary search terms
-        new_entries_primary = get_new_entries(feed_entries, seen_entries_primary, search_pattern_all)
-        all_new_entries_primary[feed_name].extend(new_entries_primary)
+        # Load seen entries for all topics once
+        seen_entries_per_topic = {
+            topic: load_seen_entries(feed_name, topic) for topic in topics
+        }
 
-        # Get new entries that match the RG search terms
-        new_entries_rg = get_new_entries(feed_entries, seen_entries_rg, search_pattern_rg)
-        all_new_entries_rg[feed_name].extend(new_entries_rg)
+        current_time = datetime.datetime.now()
 
-        # Get new entries that match the perovskite search terms
-        new_entries_perovs = get_new_entries(feed_entries, seen_entries_perovs, search_pattern_perovs)
-        all_new_entries_perovs[feed_name].extend(new_entries_perovs)
+        # Iterate over each entry a single time and test against all patterns
+        for entry in feed_entries:
+            entry_id = entry.get('id', entry.get('link'))
+            entry_published = entry.get('published_parsed') or entry.get('updated_parsed')
 
-        # Clean old entries from seen_entries_primary
-        clean_old_entries(seen_entries_primary)
+            if entry_published:
+                if isinstance(entry_published, time.struct_time):
+                    entry_datetime = datetime.datetime(*entry_published[:6])
+                else:
+                    entry_datetime = entry_published
+            else:
+                entry_datetime = current_time
 
-        # Clean old entries from seen_entries_rg
-        clean_old_entries(seen_entries_rg)
+            # Skip entries older than the TIME_DELTA window
+            if (current_time - entry_datetime) > TIME_DELTA: # type: ignore
+                continue
 
-        # Clean old entries from seen_entries_perosv
-        clean_old_entries(seen_entries_perovs)
+            for topic, pattern in search_patterns.items():
+                seen_entries = seen_entries_per_topic[topic]
 
-        # Save updated seen entries for primary search
-        # `get_new_entries` updates the seen_entries
-        save_seen_entries(seen_entries_primary, tracking_file_primary)
+                if (
+                    entry_id not in seen_entries
+                    and matches_search_terms(entry, pattern)
+                ):
+                    # Record new entry for this topic
+                    all_new_entries[topic][feed_name].append(entry)
+                    seen_entries[entry_id] = entry_datetime # type: ignore
 
-        # Save updated seen entries for RG search
-        save_seen_entries(seen_entries_rg, tracking_file_rg)
-
-        # Save updated seen entries for perovskite search
-        save_seen_entries(seen_entries_perovs, tracking_file_perovs)
-
-    # Generate and save primary HTML
-    generate_html(
-        all_new_entries_primary,
-        MAIN_DIR + primary_html_file,
-        search_description="Filtered Articles Matching Search Terms"
-    )
-    print(f"Generated/Updated HTML file: {primary_html_file}")
-    # copy the search terms to a new file to be uploaded
-    shutil.copy(MAIN_DIR + primary_html_file, MAIN_DIR + 'results_primary.html')
-    # move the archive to the archive directory
-    shutil.move(MAIN_DIR + primary_html_file, ARCHIVE_DIR + primary_html_file)
-
-    # Generate and save RG HTML (always update)
-    generate_html(
-        all_new_entries_rg,
-        MAIN_DIR + rg_html_file,
-        search_description="Articles related to rhombohedral graphite"
-    )
-    print(f"Generated/Updated HTML file: {rg_html_file}")
-
-    # Generate and save RG HTML as backup
-    generate_html(
-        all_new_entries_rg,
-        MAIN_DIR + rg_html_file_archive,
-        search_description="Articles related to rhombohedral graphite"
-    )
-    print(f"Generated/Updated HTML file: {rg_html_file_archive}")
-    # move the archive to the archive directory
-    shutil.move(MAIN_DIR + rg_html_file_archive, ARCHIVE_DIR + rg_html_file_archive)
-
-    # Generate and save perovskite HTML (always update)
-    generate_html(
-        all_new_entries_perovs,
-        MAIN_DIR + perovs_html_file,
-        search_description="Articles related to perovskites"
-    )
-    print(f"Generated/Updated HTML file: {perovs_html_file}")
-    # copy the to a new file to be uploaded
-    shutil.copy(MAIN_DIR + perovs_html_file, MAIN_DIR + 'perovs_filtered_articles.html')
-    # move to the archive directory
-    shutil.move(MAIN_DIR + perovs_html_file, ARCHIVE_DIR + perovs_html_file)
+        # After processing all entries, persist the databases per topic
+        for topic in topics:
+            clean_old_entries(seen_entries_per_topic[topic])
+            save_seen_entries(seen_entries_per_topic[topic], feed_name, topic)
 
 
-    ## write to FTP server using credentials from environment variables
-    try:
-        with ftplib.FTP(FTP_HOST) as session:
-            session.login(user=FTP_USER, passwd=FTP_PASS)
-            session.cwd('/public_html/cond-mat/')
-            with open('/uu/nemes/cond-mat/results_primary.html', 'rb') as f:
-                session.storbinary('STOR ' + 'results_primary.html', f)
-            with open('/uu/nemes/cond-mat/' + rg_html_file, 'rb') as f:
-                session.storbinary('STOR ' + rg_html_file, f)
-            with open('/uu/nemes/cond-mat/' + 'perovs_filtered_articles.html', 'rb') as f:
-                session.storbinary('STOR ' + 'perovs_filtered_articles.html', f)
-            # upload to archive
-            session.cwd('/public_html/wp-content/uploads/simple-file-list/')
-            with open('/uu/nemes/cond-mat/archive/' + primary_html_file, 'rb') as f:
-                session.storbinary('STOR ' + primary_html_file, f)
-            with open('/uu/nemes/cond-mat/archive/' + rg_html_file_archive, 'rb') as f:
-                session.storbinary('STOR ' + rg_html_file_archive, f)
-            with open('/uu/nemes/cond-mat/archive/' + perovs_html_file, 'rb') as f:
-                session.storbinary('STOR ' + perovs_html_file, f)
-    except ftplib.all_errors as e:
-        logging.error("FTP upload failed: %s", e)
-        sys.exit(1)
+
+    for topic in topics:
+        description = (
+            "Filtered Articles Matching Search Terms" if topic == "primary" else
+            f"Articles related to {topic}"
+        )
+
+        generate_html(
+            all_new_entries[topic],
+            os.path.join(MAIN_DIR, html_files[topic]),
+            search_description=description,
+        )
+        print(f"Generated/Updated HTML file: {html_files[topic]}")
+
+        if topic == "rg":
+            generate_html(
+                all_new_entries[topic],
+                os.path.join(MAIN_DIR, archive_files[topic]),
+                search_description=description,
+            )
+            shutil.move(
+                os.path.join(MAIN_DIR, archive_files[topic]),
+                os.path.join(ARCHIVE_DIR, archive_files[topic]),
+            )
+        else:
+            shutil.copy(
+                os.path.join(MAIN_DIR, html_files[topic]),
+                os.path.join(MAIN_DIR, stable_files[topic]),
+            )
+            shutil.move(
+                os.path.join(MAIN_DIR, html_files[topic]),
+                os.path.join(ARCHIVE_DIR, archive_files[topic]),
+            )
+    if upload:
+        if not FTP_USER or not FTP_PASS:
+            raise ValueError(
+                "FTP_USER and FTP_PASS must be set as environment variables for FTP upload"
+            )
+
+        ## write to FTP server using credentials from environment variables
+        try:
+            with ftplib.FTP(FTP_HOST) as session:
+                session.login(user=FTP_USER, passwd=FTP_PASS)
+                session.cwd('/public_html/cond-mat/')
+                for topic in topics:
+                    filename = stable_files[topic]
+                    with open(os.path.join(MAIN_DIR, filename), 'rb') as f:
+                        session.storbinary('STOR ' + filename, f)
+
+                # upload to archive
+                session.cwd('/public_html/wp-content/uploads/simple-file-list/')
+                for topic in topics:
+                    archive_name = archive_files[topic]
+                    with open(os.path.join(ARCHIVE_DIR, archive_name), 'rb') as f:
+                        session.storbinary('STOR ' + archive_name, f)
+        except ftplib.all_errors as e:
+            logging.error("FTP upload failed: %s", e)
+            sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Process RSS feeds")
+    parser.add_argument(
+        "--no-upload",
+        action="store_false",
+        dest="upload",
+        help="skip FTP upload",
+    )
+    parser.add_argument(
+        "--clear-db",
+        action="store_true",
+        dest="clear_db",
+        help="remove all entries in the SQLite database and exit",
+    )
+    args = parser.parse_args()
+
+    if args.clear_db:
+        clear_database()
+        print("All entries removed from the database.")
+        conn.close()
+        sys.exit(0)
+
+    main(upload=args.upload)
+    conn.close()
     

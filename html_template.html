@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>%{title}</title>
+<script type="text/javascript">
+  MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']],
+      processEscapes: true
+    }
+  };
+</script>
+<script type="text/javascript" id="MathJax-script" async
+  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+</script>
+<style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .entry { margin-bottom: 20px; }
+    h2 { color: #2E8B57; }
+    h3 { color: #4682B4; }
+    hr { border: 0; border-top: 1px solid #ccc; }
+    .no-entries { font-style: italic; color: #555; }
+</style>
+</head>
+<body>
+<h1>%{title}</h1>
+<h1>New papers on %{date}</h1>
+<hr>
+%{content}
+</body>
+</html>
