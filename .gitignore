@@ -8,5 +8,5 @@ archive/
 *.html
 !html_template.html
 
-assets/seen_entries.db
-testing.ipynbs
+assets/*.db
+*.ipynbs
