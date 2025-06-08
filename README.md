@@ -39,9 +39,12 @@ database and exit.
 
 ## LLM Summary
 
-When `OPENAI_API_KEY` is set, running `rssparser.py` will automatically
-generate an `llm_summary.html` file summarizing the most recent results.
-The summary is created using the OpenAI API and placed next to the parser
-scripts. If the key is missing or the `openai` package is unavailable the
-summary step is skipped.
+When `OPENAI_API_KEY` is set, running `rssparser.py` automatically
+creates an `llm_summary.html` file.  The script uses the OpenAI API to
+condense the latest `primary` results into a short (\<=400&nbsp;character)
+paragraph that highlights matches to the configured search terms.  The
+HTML then notes whether new `rg` papers were found and links to them if
+so, followed by a brief LLM summary of the entries for each search term
+defined in `search_terms.json`.  If the API key is missing or the
+`openai` package is unavailable the summary step is skipped.
 

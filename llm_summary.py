@@ -52,13 +52,16 @@ def call_llm(prompt: str, api_key: str) -> str:
     return resp.choices[0].message.content.strip()
 
 
-def summarize_entries(entries: List[Dict[str, str]], api_key: str) -> str:
+def summarize_entries(entries: List[Dict[str, str]], api_key: str, max_chars: int = 400) -> str:
     text = "\n".join(f"{e['title']}: {e.get('summary','')}" for e in entries)
     prompt = (
         "Summarize the following papers in under 400 characters, with emphasis "
         "on items most relevant to provided search terms:\n" + text
     )
-    return call_llm(prompt, api_key)
+    summary = call_llm(prompt, api_key)
+    if len(summary) > max_chars:
+        summary = summary[:max_chars].rsplit(' ', 1)[0] + '...'
+    return summary
 
 
 def generate_summary():
