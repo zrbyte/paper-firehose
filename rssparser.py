@@ -13,6 +13,11 @@ import json
 import sys
 import argparse
 
+try:
+    from llm_summary import generate_summary
+except Exception:
+    generate_summary = None
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 
@@ -424,6 +429,13 @@ def main(upload: bool = True):
         except ftplib.all_errors as e:
             logging.error("FTP upload failed: %s", e)
             sys.exit(1)
+
+    # Optionally create LLM summary
+    if generate_summary is not None:
+        try:
+            generate_summary()
+        except Exception as e:
+            logging.error("LLM summary generation failed: %s", e)
 
 
 if __name__ == "__main__":
