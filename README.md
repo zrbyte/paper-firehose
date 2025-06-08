@@ -38,11 +38,3 @@ The generated HTML files will be uploaded to the FTP server by default. Pass
 `--no-upload` when running the script to skip the FTP step, which can be useful
 for testing.  Pass `--clear-db` to remove all stored article IDs from the database and exit.
 
-## LLM Summary
-
-When `OPENAI_API_KEY` is set, running `rssparser.py` will automatically
-generate an `llm_summary.html` file summarizing the most recent results.
-The summary is created using the OpenAI API and placed next to the parser
-scripts. If the key is missing or the `openai` package is unavailable the
-summary step is skipped.
-

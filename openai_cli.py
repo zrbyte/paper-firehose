@@ -26,16 +26,16 @@ def main():
         "Content-Type": "application/json",
     }
 
-    # List available models
-    req = urllib.request.Request(
-        "https://api.openai.com/v1/models",
-        headers=headers,
-    )
-    with urllib.request.urlopen(req) as response:
-        models_data = json.load(response)
+    # # List available models
+    # req = urllib.request.Request(
+    #     "https://api.openai.com/v1/models",
+    #     headers=headers,
+    # )
+    # with urllib.request.urlopen(req) as response:
+    #     models_data = json.load(response)
 
-    for model in models_data.get("data", []):
-        print(model["id"])
+    # for model in models_data.get("data", []):
+    #     print(model["id"])
 
     # Chat completion
     data = json.dumps({
