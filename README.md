@@ -11,7 +11,8 @@ dependencies using:
 pip install -r requirements.txt
 ```
 
-For FTP upload to a website, you have to set this up for yourself.
+## Usage
+Current use case is FTP upload to a website, you can set this up for yourself. However, FTP upload is not needed, in this case use it with the `--no-upload` command line option.
 
 1. Set the following environment variables (for example in your crontab):
    - `FTP_HOST` – hostname of the FTP server
@@ -21,7 +22,7 @@ For FTP upload to a website, you have to set this up for yourself.
 2. Create a `feeds.json` file next to `rssparser.py` containing a JSON
    object mapping feed names to their RSS URLs. The script will exit with an
    error if this file is missing.
-3. Optionally place a `search_terms.json` file next to `rssparser.py` to
+3. Place a `search_terms.json` file next to `rssparser.py` to
    override the default search regular expressions. The file may define any
    number of topics as key/value pairs where the key is a name and the value is
    a regular expression.  The special topic `rg` is updated in-place each run,
@@ -32,8 +33,17 @@ For FTP upload to a website, you have to set this up for yourself.
    The parser will automatically generate an HTML summary for every topic it
    finds in this file.
 
+
 The generated HTML files will be uploaded to the FTP server by default. Pass
 `--no-upload` when running the script to skip the FTP step, which can be useful
-for testing.  Pass `--clear-db` to remove all stored article IDs from the
-database and exit.
+for testing.  Pass `--clear-db` to remove all stored article IDs from the database and exit.
 
+3. By default the parser only checks the arXiv `cond-mat` feed. To use a
+   custom list of sources, place a `feeds.json` file next to `rssparser.py`
+   containing a JSON object that maps feed names to their URLs.
+
+4. Run the parser:
+
+```bash
+python3 rssparser.py
+```
