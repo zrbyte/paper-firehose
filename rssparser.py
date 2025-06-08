@@ -22,6 +22,8 @@ TIME_DELTA = datetime.timedelta(days=182)  # Approximately 6 months
 MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(MAIN_DIR, 'assets')
 ARCHIVE_DIR = os.path.join(MAIN_DIR, 'archive')
+# Path to the daily summary produced by llmsummary.py
+SUMMARY_FILE = os.path.join(MAIN_DIR, 'summary.html')
 # MAIN_DIR = '/uu/nemes/cond-mat/'
 # ASSETS_DIR = '/uu/nemes/cond-mat/assets/'
 
@@ -464,4 +466,18 @@ if __name__ == "__main__":
 
     if not args.no_summary:
         llmsummary.main()
+        if args.upload:
+            if not FTP_USER or not FTP_PASS:
+                raise ValueError(
+                    "FTP_USER and FTP_PASS must be set as environment variables for FTP upload"
+                )
+            try:
+                with ftplib.FTP(FTP_HOST) as session:
+                    session.login(user=FTP_USER, passwd=FTP_PASS)
+                    session.cwd('/public_html/cond-mat/')
+                    with open(SUMMARY_FILE, 'rb') as f:
+                        session.storbinary('STOR ' + os.path.basename(SUMMARY_FILE), f)
+            except ftplib.all_errors as e:
+                logging.error("FTP upload failed: %s", e)
+                sys.exit(1)
     
