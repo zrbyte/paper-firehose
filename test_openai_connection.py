@@ -19,6 +19,12 @@ def load_api_key(path: str = "openaikulcs.env") -> str:
 def main() -> None:
     api_key = load_api_key()
     client = openai.OpenAI(api_key=api_key)
+    # Retrieve and print a list of available models
+    models = client.models.list()
+    print("Available models:")
+    for model in models.data:
+        print(model.id)
+
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": "Tell me a short joke."}],
