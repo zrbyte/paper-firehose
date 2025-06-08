@@ -12,6 +12,12 @@ import ftplib
 import json
 import sys
 import argparse
+from string import Template
+
+try:
+    from llm_summary import generate_summary
+except Exception:
+    generate_summary = None
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -38,6 +44,42 @@ cursor.execute(
 )
 conn.commit()
 
+# HTML template used when creating new files
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>$title</title>
+<script type="text/javascript">
+  MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']],
+      processEscapes: true
+    }
+  };
+</script>
+<script type="text/javascript" id="MathJax-script" async
+  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+</script>
+<style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .entry { margin-bottom: 20px; }
+    h2 { color: #2E8B57; }
+    h3 { color: #4682B4; }
+    hr { border: 0; border-top: 1px solid #ccc; }
+    .no-entries { font-style: italic; color: #555; }
+</style>
+</head>
+<body>
+<h1>$title</h1>
+<h1>New papers on $date</h1>
+<hr>
+$content
+</body>
+</html>
+"""
+
 # FTP credentials are provided via environment variables
 FTP_HOST = os.environ.get('FTP_HOST', 'nemeslab.com')
 FTP_USER = os.environ.get('FTP_USER')
@@ -45,6 +87,8 @@ FTP_PASS = os.environ.get('FTP_PASS')
 
 # Path to the file containing the regular expressions used for searching
 SEARCHTERMS_FILE = os.path.join(os.path.dirname(__file__), 'search_terms.json')
+# Path to the file containing the RSS feed URLs
+FEEDS_FILE = os.path.join(os.path.dirname(__file__), 'feeds.json')
 
 # Default search terms in case the external file is missing
 DEFAULT_SEARCHTERMS = {
@@ -101,15 +145,14 @@ database = load_feeds()
 # List of feeds to process
 feeds = list(database.keys())
 
-def load_seen_entries(feed_name, search_type):
-    """Load seen entries for a feed/search type from the database."""
-    cursor.execute(
-        "SELECT entry_id, timestamp FROM seen_entries WHERE feed_name=? AND search_type=?",
-        (feed_name, search_type),
-    )
-    rows = cursor.fetchall()
-    return {entry_id: datetime.datetime.fromisoformat(ts) for entry_id, ts in rows}
-
+def load_seen_entries(tracking_file):
+    """Load the set of seen entry IDs from the tracking file."""
+    if os.path.exists(ASSETS_DIR + tracking_file):
+        with open(ASSETS_DIR + tracking_file, 'rb') as f:
+            seen_entries = pickle.load(f)
+    else:
+        seen_entries = {}
+    return seen_entries
 
 def save_seen_entries(entries, feed_name, search_type):
     """Persist seen entries for a feed/search type to the database."""
@@ -424,6 +467,13 @@ def main(upload: bool = True):
         except ftplib.all_errors as e:
             logging.error("FTP upload failed: %s", e)
             sys.exit(1)
+
+    # Optionally create LLM summary
+    if generate_summary is not None:
+        try:
+            generate_summary()
+        except Exception as e:
+            logging.error("LLM summary generation failed: %s", e)
 
 
 if __name__ == "__main__":
