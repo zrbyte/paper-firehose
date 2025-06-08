@@ -26,7 +26,7 @@ def main() -> None:
         print(model.id)
 
     response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model="gpt-4.1-nano",
         messages=[{"role": "user", "content": "Tell me a short joke."}],
         max_tokens=50,
     )
