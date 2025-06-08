@@ -9,5 +9,6 @@ archive/
 !html_template.html
 
 assets/*.db
-*.ipynbs
+*.ipynb
+*.env
 assets/seen_entries.db
