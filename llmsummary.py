@@ -58,15 +58,33 @@ def chat_completion(prompt, max_tokens=200):
     return result['choices'][0]['message']['content']
 
 
-def summarize_titles(titles, prompt_prefix, char_limit=1000):
+def summarize_titles(titles, prompt_prefix, char_limit=1000, search_context=None):
     if not titles:
         return 'No new papers.'
     joined = '; '.join(t for t, _ in titles)
+    context = f"Search terms: {search_context}\n" if search_context else ''
     prompt = (
-        f"{prompt_prefix}\nTitles: {joined}\n"
+        f"{prompt_prefix}\n"
+        f"{context}"
+        f"Titles: {joined}\n"
         f"Provide a concise summary under {char_limit} characters."
     )
-    return chat_completion(prompt, max_tokens=500)
+    return chat_completion(prompt, max_tokens=600)
+
+
+def summarize_primary(titles, search_terms, char_limit=600):
+    """Summarize primary titles with links and search terms."""
+    if not titles:
+        return 'No new papers.'
+    titles_links = '; '.join(f"{t} ({link})" for t, link in titles)
+    prompt = (
+        f"Search terms:\n{json.dumps(search_terms, indent=2)}\n"
+        "Summarize the following papers with emphasis on those best matching the primary search terms. "
+        "Place the 5 best matching the primary search terms into a list of links at the end of the summary.\n"
+        f"Titles and links: {titles_links}\n"
+        f"Provide a concise summary under {char_limit} characters."
+    )
+    return chat_completion(prompt, max_tokens=1000)
 
 
 def generate_html(primary_summary, rg_info, topic_summaries, output_path):
@@ -101,9 +119,9 @@ def main():
             stable_files[t] = f'{t}_filtered_articles.html'
 
     primary_titles = extract_titles(os.path.join(MAIN_DIR, stable_files['primary']))
-    primary_summary = summarize_titles(
+    primary_summary = summarize_primary(
         primary_titles,
-        "Summarize the following papers with emphasis on those best matching the primary search terms.",
+        terms,
         char_limit=400,
     )
 
@@ -122,6 +140,7 @@ def main():
             titles,
             f"Summary of today's {t} papers:",
             char_limit=400,
+            search_context=terms.get(t)
         )
 
     generate_html(
