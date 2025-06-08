@@ -1,4 +1,12 @@
+*.code-workspace
+
 __pycache__/
 *.pyc
-*.pkl
 *.backup*
+
+archive/
+*.html
+!html_template.html
+
+assets/*.db
+*.ipynbs
