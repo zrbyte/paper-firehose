@@ -12,6 +12,7 @@ import ftplib
 import json
 import sys
 import argparse
+import llmsummary
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -444,6 +445,12 @@ if __name__ == "__main__":
         dest="clear_db",
         help="remove all entries in the SQLite database and exit",
     )
+    parser.add_argument(
+        "--no-summary",
+        action="store_true",
+        dest="no_summary",
+        help="skip running the LLM summary step",
+    )
     args = parser.parse_args()
 
     if args.clear_db:
@@ -454,4 +461,7 @@ if __name__ == "__main__":
 
     main(upload=args.upload)
     conn.close()
+
+    if not args.no_summary:
+        llmsummary.main()
     
