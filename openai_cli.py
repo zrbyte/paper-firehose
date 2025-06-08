@@ -4,11 +4,19 @@ import urllib.request
 
 
 def load_api_key(path="openaikulcs.env"):
-    """Read the OpenAI API key from a file."""
+    """Return the OpenAI API key from the environment or a file."""
+    env_key = os.getenv("OPENAI_API_KEY")
+    if env_key:
+        return env_key
+
     if not os.path.isabs(path):
         path = os.path.join(os.path.dirname(__file__), path)
+
     with open(path, "r", encoding="utf-8") as f:
-        return f.read().strip()
+        key = f.read().strip()
+        if "=" in key:
+            key = key.split("=", 1)[-1].strip()
+        return key
 
 
 def main():
