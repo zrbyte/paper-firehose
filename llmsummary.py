@@ -58,7 +58,7 @@ def chat_completion(prompt, max_tokens=200):
     return result['choices'][0]['message']['content']
 
 
-def summarize_titles(titles, prompt_prefix, char_limit=2000, search_context=None):
+def summarize_titles(titles, prompt_prefix, char_limit=3000, search_context=None):
     if not titles:
         return 'No new papers.'
     joined = '; '.join(t for t, _ in titles)
@@ -69,10 +69,10 @@ def summarize_titles(titles, prompt_prefix, char_limit=2000, search_context=None
         f"Titles: {joined}\n"
         f"Provide a concise summary under {char_limit} characters."
     )
-    return chat_completion(prompt, max_tokens=1000)
+    return chat_completion(prompt, max_tokens=2000)
 
 
-def summarize_primary(titles, search_terms, char_limit=3000):
+def summarize_primary(titles, search_terms, char_limit=4000):
     """Summarize primary titles with links and search terms."""
     if not titles:
         return 'No new papers.'
@@ -84,7 +84,7 @@ def summarize_primary(titles, search_terms, char_limit=3000):
         f"Titles and links: {titles_links}\n"
         f"Provide a concise summary under {char_limit} characters."
     )
-    return chat_completion(prompt, max_tokens=3000)
+    return chat_completion(prompt, max_tokens=4000)
 
 
 def generate_html(primary_summary, rg_info, topic_summaries, output_path):
@@ -143,7 +143,7 @@ def main():
     primary_summary = summarize_primary(
         primary_titles,
         terms,
-        char_limit=400,
+        char_limit=4000,
     )
 
     rg_titles = extract_titles(os.path.join(MAIN_DIR, stable_files['rg']))
@@ -160,7 +160,7 @@ def main():
         topic_summaries[t] = summarize_titles(
             titles,
             f"Summary of today's {t} papers:",
-            char_limit=400,
+            char_limit=2000,
             search_context=terms.get(t)
         )
 
