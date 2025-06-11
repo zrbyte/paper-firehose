@@ -1,0 +1,5 @@
+{
+  "primary": "Summarize the following papers with emphasis on those best matching the primary search terms. Place the 5 best matching the primary search terms into a list of links at the end of the summary.",
+  "rg": "Summary of today's rg papers:",
+  "perovskites": "Summary of today's perovskites papers:"
+}

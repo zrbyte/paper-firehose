@@ -22,7 +22,10 @@ def load_api_key(path="openaikulcs.env"):
         return key
 
 MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
+# Both the search term patterns and the LLM prompt snippets are stored next to
+# this script so they can be edited without touching the code.
 SEARCHTERMS_FILE = os.path.join(MAIN_DIR, 'search_terms.json')
+LLM_PROMPTS_FILE = os.path.join(MAIN_DIR, 'llm_prompts.json')
 
 
 def read_search_terms():
@@ -30,6 +33,16 @@ def read_search_terms():
         with open(SEARCHTERMS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception:
+        return {}
+
+
+def read_llm_prompts():
+    """Return a mapping of topic names to prompt snippets."""
+    try:
+        with open(LLM_PROMPTS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        # Fall back to an empty mapping if the file is missing or invalid
         return {}
 
 
@@ -83,7 +96,7 @@ def chat_completion(prompt, max_tokens=200):
     return result['choices'][0]['message']['content']
 
 
-def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=None):
+def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=None, all_terms=None):
     if not entries:
         return 'No new papers.'
     def to_text(item):
@@ -96,16 +109,19 @@ def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=No
 
     joined = '; '.join(to_text(e) for e in entries)
     context = f"Search terms: {search_context}\n" if search_context else ''
+    # Append the entire search term mapping so the model can see the patterns
+    terms_text = f"\nSearch terms:\n{json.dumps(all_terms, indent=2)}" if all_terms else ''
     prompt = (
         f"{prompt_prefix}\n"
         f"{context}"
         f"Titles: {joined}\n"
         f"Provide a concise summary under {char_limit} characters."
+        f"{terms_text}"
     )
     return chat_completion(prompt, max_tokens=2000)
 
 
-def summarize_primary(entries, search_terms, char_limit=4000):
+def summarize_primary(entries, search_terms, prompt_prefix, char_limit=4000):
     """Summarize primary entries with titles, links and summaries."""
     if not entries:
         return 'No new papers.'
@@ -119,11 +135,11 @@ def summarize_primary(entries, search_terms, char_limit=4000):
 
     titles_links = '; '.join(to_text(e) for e in entries)
     prompt = (
-        f"Search terms:\n{json.dumps(search_terms, indent=2)}\n"
-        "Summarize the following papers with emphasis on those best matching the primary search terms. "
-        "Place the 5 best matching the primary search terms into a list of links at the end of the summary.\n"
+        f"{prompt_prefix}\n"
         f"Titles and links: {titles_links}\n"
         f"Provide a concise summary under {char_limit} characters."
+        # Include all search terms so the model is aware of every topic
+        f"\nSearch terms:\n{json.dumps(search_terms, indent=2)}"
     )
     return chat_completion(prompt, max_tokens=4000)
 
@@ -194,6 +210,7 @@ def generate_html(primary_summary, rg_info, topic_summaries, output_path):
 
 def main(entries_per_topic=None):
     terms = read_search_terms()
+    prompts = read_llm_prompts()
     topics = list(terms.keys())
 
     stable_files = {
@@ -217,17 +234,27 @@ def main(entries_per_topic=None):
         primary_entries = extract_entry_details(flatten('primary'))
         rg_entries = extract_entry_details(flatten('rg'))
 
+    # Use a custom prompt if provided for the primary topic
+    primary_prompt = prompts.get(
+        'primary',
+        'Summarize the following papers with emphasis on those best matching the primary search terms. '
+        'Place the 5 best matching the primary search terms into a list of links at the end of the summary.'
+    )
     primary_summary = summarize_primary(
         primary_entries,
         terms,
+        primary_prompt,
         char_limit=4000,
     )
 
+    # Prompt snippet for the rhombohedral graphene topic
+    rg_prompt = prompts.get('rg', "Summary of today's rg papers:")
     rg_info = summarize_entries(
         rg_entries,
-        "Summary of today's rg papers:",
+        rg_prompt,
         char_limit=2000,
         search_context=terms.get('rg'),
+        all_terms=terms,
     )
 
     topic_summaries = {}
@@ -238,11 +265,14 @@ def main(entries_per_topic=None):
             entries = extract_titles(os.path.join(MAIN_DIR, stable_files[t]))
         else:
             entries = extract_entry_details(flatten(t))
+        # Fall back to a generic instruction if no prompt is defined for the topic
+        topic_prompt = prompts.get(t, f"Summary of today's {t} papers:")
         topic_summaries[t] = summarize_entries(
             entries,
-            f"Summary of today's {t} papers:",
+            topic_prompt,
             char_limit=2000,
-            search_context=terms.get(t)
+            search_context=terms.get(t),
+            all_terms=terms,
         )
 
     generate_html(

@@ -41,6 +41,7 @@ for testing.  Pass `--clear-db` to remove all stored article IDs from the databa
 By default the script runs `llmsummary.py` at the end to create a daily summary.
 The parser now passes the collected feed entries directly to `llmsummary.py` rather than
 having it parse the generated HTML files. Each entry includes its title and summary so the
-language model receives more context. Use the `--no-summary` option if you want to skip
-this step.
+  language model receives more context. Use the `--no-summary` option if you want to skip
+  this step. Custom LLM instructions can be placed in an `llm_prompts.json` file
+  next to `llmsummary.py` where the keys correspond to topic names.
 
