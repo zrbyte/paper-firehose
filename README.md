@@ -34,6 +34,9 @@ Current use case is FTP upload to a website, you can set this up for yourself. H
    The parser will automatically generate an HTML summary for every topic it
    finds in this file.
 
+### OpenAI API key
+
+`llmsummary.py` expects an OpenAI API key either provided via the `OPENAI_API_KEY` environment variable or stored in a file named `openaikulcs.env` next to the script. Without this key the summary step will fail. See `load_api_key` in `llmsummary.py` for details.
 
 The generated HTML files will be uploaded to the FTP server by default. Pass
 `--no-upload` when running the script to skip the FTP step, which can be useful
