@@ -39,6 +39,7 @@ The generated HTML files will be uploaded to the FTP server by default. Pass
 for testing.  Pass `--clear-db` to remove all stored article IDs from the database and exit.
 By default the script runs `llmsummary.py` at the end to create a daily summary.
 The parser now passes the collected feed entries directly to `llmsummary.py` rather than
-having it parse the generated HTML files.  Use the `--no-summary` option if you want to skip
+having it parse the generated HTML files. Each entry includes its title and summary so the
+language model receives more context. Use the `--no-summary` option if you want to skip
 this step.
 

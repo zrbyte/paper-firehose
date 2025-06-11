@@ -50,14 +50,15 @@ def extract_titles(file_path):
     return entries
 
 
-def extract_titles_from_entries(entries):
-    """Return list of (title, link) tuples from a list of RSS entries."""
-    titles = []
+def extract_entry_details(entries):
+    """Return list of (title, summary, link) tuples from RSS entries."""
+    details = []
     for entry in entries:
         title = html.unescape(entry.get('title', '')).strip()
+        summary = html.unescape(entry.get('summary', '')).strip()
         link = entry.get('link')
-        titles.append((title, link))
-    return titles
+        details.append((title, summary, link))
+    return details
 
 
 def chat_completion(prompt, max_tokens=200):
@@ -82,10 +83,18 @@ def chat_completion(prompt, max_tokens=200):
     return result['choices'][0]['message']['content']
 
 
-def summarize_titles(titles, prompt_prefix, char_limit=3000, search_context=None):
-    if not titles:
+def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=None):
+    if not entries:
         return 'No new papers.'
-    joined = '; '.join(t for t, _ in titles)
+    def to_text(item):
+        if len(item) == 3:
+            t, s, _ = item
+            return f"{t} - {s}"
+        else:
+            t, _ = item
+            return t
+
+    joined = '; '.join(to_text(e) for e in entries)
     context = f"Search terms: {search_context}\n" if search_context else ''
     prompt = (
         f"{prompt_prefix}\n"
@@ -96,11 +105,19 @@ def summarize_titles(titles, prompt_prefix, char_limit=3000, search_context=None
     return chat_completion(prompt, max_tokens=2000)
 
 
-def summarize_primary(titles, search_terms, char_limit=4000):
-    """Summarize primary titles with links and search terms."""
-    if not titles:
+def summarize_primary(entries, search_terms, char_limit=4000):
+    """Summarize primary entries with titles, links and summaries."""
+    if not entries:
         return 'No new papers.'
-    titles_links = '; '.join(f"{t} ({link})" for t, link in titles)
+    def to_text(item):
+        if len(item) == 3:
+            t, s, link = item
+            return f"{t} ({link}) - {s}"
+        else:
+            t, link = item
+            return f"{t} ({link})"
+
+    titles_links = '; '.join(to_text(e) for e in entries)
     prompt = (
         f"Search terms:\n{json.dumps(search_terms, indent=2)}\n"
         "Summarize the following papers with emphasis on those best matching the primary search terms. "
@@ -164,8 +181,8 @@ def main(entries_per_topic=None):
             stable_files[t] = f'{t}_filtered_articles.html'
 
     if entries_per_topic is None:
-        primary_titles = extract_titles(os.path.join(MAIN_DIR, stable_files['primary']))
-        rg_titles = extract_titles(os.path.join(MAIN_DIR, stable_files['rg']))
+        primary_entries = extract_titles(os.path.join(MAIN_DIR, stable_files['primary']))
+        rg_entries = extract_titles(os.path.join(MAIN_DIR, stable_files['rg']))
     else:
         def flatten(topic):
             entries = []
@@ -173,17 +190,17 @@ def main(entries_per_topic=None):
                 entries.extend(feed_entries)
             return entries
 
-        primary_titles = extract_titles_from_entries(flatten('primary'))
-        rg_titles = extract_titles_from_entries(flatten('rg'))
+        primary_entries = extract_entry_details(flatten('primary'))
+        rg_entries = extract_entry_details(flatten('rg'))
 
     primary_summary = summarize_primary(
-        primary_titles,
+        primary_entries,
         terms,
         char_limit=4000,
     )
 
-    if rg_titles:
-        rg_info = f"There are {len(rg_titles)} new RG papers. See {stable_files['rg']}"
+    if rg_entries:
+        rg_info = f"There are {len(rg_entries)} new RG papers. See {stable_files['rg']}"
     else:
         rg_info = "No new RG papers today."
 
@@ -192,11 +209,11 @@ def main(entries_per_topic=None):
         if t in ('primary', 'rg'):
             continue
         if entries_per_topic is None:
-            titles = extract_titles(os.path.join(MAIN_DIR, stable_files[t]))
+            entries = extract_titles(os.path.join(MAIN_DIR, stable_files[t]))
         else:
-            titles = extract_titles_from_entries(flatten(t))
-        topic_summaries[t] = summarize_titles(
-            titles,
+            entries = extract_entry_details(flatten(t))
+        topic_summaries[t] = summarize_entries(
+            entries,
             f"Summary of today's {t} papers:",
             char_limit=2000,
             search_context=terms.get(t)
