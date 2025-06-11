@@ -128,6 +128,30 @@ def summarize_primary(entries, search_terms, char_limit=4000):
     return chat_completion(prompt, max_tokens=4000)
 
 
+def markdown_to_html(text: str) -> str:
+    """Convert a small subset of Markdown to HTML using only the standard library."""
+    patterns = re.finditer(
+        r"\[([^\]]+)\]\((https?://[^)]+)\)|\*\*([^*]+)\*\*|\*([^*]+)\*",
+        text,
+    )
+    pos = 0
+    parts = []
+    for m in patterns:
+        parts.append(html.escape(text[pos : m.start()]))
+        if m.group(1):
+            title = html.escape(m.group(1))
+            url = html.escape(m.group(2), quote=True)
+            parts.append(f'<a href="{url}">{title}</a>')
+        elif m.group(3):
+            parts.append(f'<strong>{html.escape(m.group(3))}</strong>')
+        elif m.group(4):
+            parts.append(f'<em>{html.escape(m.group(4))}</em>')
+        pos = m.end()
+    parts.append(html.escape(text[pos:]))
+    html_text = "".join(parts).replace("\n", "<br>")
+    return f"<p>{html_text}</p>"
+
+
 def generate_html(primary_summary, rg_info, topic_summaries, output_path):
     today = datetime.date.today()
     def extract_links(text: str):
@@ -152,11 +176,11 @@ def generate_html(primary_summary, rg_info, topic_summaries, output_path):
         return "<p>" + "<br>".join(parts) + "</p>"
 
     sections = [
-        f"<h2>Primary</h2><p>{html.escape(primary_text)}</p>" + format_links(primary_links),
-        f"<h2>RG</h2><p>{html.escape(rg_info)}</p>",
+        f"<h2>Primary</h2>" + markdown_to_html(primary_text) + format_links(primary_links),
+        f"<h2>RG</h2>" + markdown_to_html(rg_info),
     ]
     for topic, summ in topic_summaries.items():
-        sections.append(f"<h2>{html.escape(topic)}</h2><p>{html.escape(summ)}</p>")
+        sections.append(f"<h2>{html.escape(topic)}</h2>" + markdown_to_html(summ))
 
     content = '\n'.join(sections)
     out_html = (
