@@ -5,7 +5,21 @@ import html
 import datetime
 import urllib.request
 
-from openai_cli import load_api_key
+
+def load_api_key(path="openaikulcs.env"):
+    """Return the OpenAI API key from the environment or a file."""
+    env_key = os.getenv("OPENAI_API_KEY")
+    if env_key:
+        return env_key
+
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.dirname(__file__), path)
+
+    with open(path, "r", encoding="utf-8") as f:
+        key = f.read().strip()
+        if "=" in key:
+            key = key.split("=", 1)[-1].strip()
+        return key
 
 MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
 SEARCHTERMS_FILE = os.path.join(MAIN_DIR, 'search_terms.json')
