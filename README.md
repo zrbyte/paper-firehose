@@ -45,3 +45,6 @@ having it parse the generated HTML files. Each entry includes its title and summ
   this step. Custom LLM instructions can be placed in an `llm_prompts.json` file
   next to `llmsummary.py` where the keys correspond to topic names.
 
+Summaries now include numbered citation links like `[1](URL)` directly after each
+paper reference, making it easy to jump to the manuscript from the text.
+

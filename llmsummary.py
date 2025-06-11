@@ -239,7 +239,7 @@ def main(entries_per_topic=None):
     primary_prompt = prompts.get(
         'primary',
         'Summarize the following papers with emphasis on those best matching the primary search terms. '
-        'Place the 5 best matching the primary search terms into a list of links at the end of the summary.'
+        'When referencing a paper, append a numbered citation such as [1](URL) directly after the relevant text.'
     )
     primary_summary = summarize_primary(
         primary_entries,
@@ -250,7 +250,10 @@ def main(entries_per_topic=None):
 
     # Prompt snippet for the rhombohedral graphene topic
     # in case of no prompt, use a generic one in the second argument of the get() method
-    rg_prompt = prompts.get('rg', "Summary of today's rg papers:")
+    rg_prompt = prompts.get(
+        'rg',
+        "Summary of today's rg papers with numbered citation links after each mention:"
+    )
     rg_info = summarize_entries(
         rg_entries,
         rg_prompt,
@@ -268,7 +271,10 @@ def main(entries_per_topic=None):
         else:
             entries = extract_entry_details(flatten(t))
         # Fall back to a generic instruction if no prompt is defined for the topic
-        topic_prompt = prompts.get(t, f"Summary of today's {t} papers:")
+        topic_prompt = prompts.get(
+            t,
+            f"Summary of today's {t} papers with numbered citation links after each mention:"
+        )
         topic_summaries[t] = summarize_entries(
             entries,
             topic_prompt,
