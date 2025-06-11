@@ -4,6 +4,8 @@ import json
 import html
 import datetime
 import urllib.request
+import logging
+from urllib.error import HTTPError, URLError
 
 
 def load_api_key(path="openaikulcs.env"):
@@ -91,9 +93,13 @@ def chat_completion(prompt, max_tokens=200):
         headers=headers,
         data=payload,
     )
-    with urllib.request.urlopen(req) as resp:
-        result = json.load(resp)
-    return result['choices'][0]['message']['content']
+    try:
+        with urllib.request.urlopen(req) as resp:
+            result = json.load(resp)
+        return result['choices'][0]['message']['content']
+    except (HTTPError, URLError) as e:
+        logging.error("API request failed: %s", e)
+        return "API request failed"
 
 
 def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=None, all_terms=None):
@@ -118,7 +124,8 @@ def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=No
         f"Provide a concise summary under {char_limit} characters."
         f"{terms_text}"
     )
-    return chat_completion(prompt, max_tokens=2000)
+    result = chat_completion(prompt, max_tokens=2000)
+    return result
 
 
 def summarize_primary(entries, search_terms, prompt_prefix, char_limit=4000):
@@ -141,7 +148,8 @@ def summarize_primary(entries, search_terms, prompt_prefix, char_limit=4000):
         # Include all search terms so the model is aware of every topic
         f"\nSearch terms:\n{json.dumps(search_terms, indent=2)}"
     )
-    return chat_completion(prompt, max_tokens=4000)
+    result = chat_completion(prompt, max_tokens=4000)
+    return result
 
 
 def markdown_to_html(text: str) -> str:
