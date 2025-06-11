@@ -432,6 +432,8 @@ def main(upload: bool = True):
             logging.error("FTP upload failed: %s", e)
             sys.exit(1)
 
+    return all_new_entries
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process RSS feeds")
@@ -461,11 +463,11 @@ if __name__ == "__main__":
         conn.close()
         sys.exit(0)
 
-    main(upload=args.upload)
+    new_entries = main(upload=args.upload)
     conn.close()
 
     if not args.no_summary:
-        llmsummary.main()
+        llmsummary.main(new_entries)
         if args.upload:
             if not FTP_USER or not FTP_PASS:
                 raise ValueError(
