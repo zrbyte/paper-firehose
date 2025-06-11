@@ -359,6 +359,7 @@ def main(upload: bool = True):
             for topic, pattern in search_patterns.items():
                 seen_entries = seen_entries_per_topic[topic]
 
+                # add entry to all_new_entries if it is new and matches the search term
                 if (
                     entry_id not in seen_entries
                     and matches_search_terms(entry, pattern)
@@ -371,7 +372,6 @@ def main(upload: bool = True):
         for topic in topics:
             clean_old_entries(seen_entries_per_topic[topic])
             save_seen_entries(seen_entries_per_topic[topic], feed_name, topic)
-
 
 
     for topic in topics:
