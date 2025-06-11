@@ -199,10 +199,12 @@ def main(entries_per_topic=None):
         char_limit=4000,
     )
 
-    if rg_entries:
-        rg_info = f"There are {len(rg_entries)} new RG papers. See {stable_files['rg']}"
-    else:
-        rg_info = "No new RG papers today."
+    rg_info = summarize_entries(
+        rg_entries,
+        "Summary of today's rg papers:",
+        char_limit=2000,
+        search_context=terms.get('rg'),
+    )
 
     topic_summaries = {}
     for t in topics:
