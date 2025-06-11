@@ -235,6 +235,7 @@ def main(entries_per_topic=None):
         rg_entries = extract_entry_details(flatten('rg'))
 
     # Use a custom prompt if provided for the primary topic
+    # in case of no prompt, use a generic one in the second argument of the get() method
     primary_prompt = prompts.get(
         'primary',
         'Summarize the following papers with emphasis on those best matching the primary search terms. '
@@ -248,6 +249,7 @@ def main(entries_per_topic=None):
     )
 
     # Prompt snippet for the rhombohedral graphene topic
+    # in case of no prompt, use a generic one in the second argument of the get() method
     rg_prompt = prompts.get('rg', "Summary of today's rg papers:")
     rg_info = summarize_entries(
         rg_entries,
