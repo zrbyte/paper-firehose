@@ -180,16 +180,16 @@ def main(entries_per_topic=None):
         if t not in stable_files:
             stable_files[t] = f'{t}_filtered_articles.html'
 
+    def flatten(topic):
+        entries = []
+        for feed_entries in entries_per_topic.get(topic, {}).values(): # type: ignore
+            entries.extend(feed_entries)
+        return entries
+
     if entries_per_topic is None:
         primary_entries = extract_titles(os.path.join(MAIN_DIR, stable_files['primary']))
         rg_entries = extract_titles(os.path.join(MAIN_DIR, stable_files['rg']))
     else:
-        def flatten(topic):
-            entries = []
-            for feed_entries in entries_per_topic.get(topic, {}).values():
-                entries.extend(feed_entries)
-            return entries
-
         primary_entries = extract_entry_details(flatten('primary'))
         rg_entries = extract_entry_details(flatten('rg'))
 
