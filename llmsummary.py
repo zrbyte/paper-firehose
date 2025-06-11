@@ -50,6 +50,16 @@ def extract_titles(file_path):
     return entries
 
 
+def extract_titles_from_entries(entries):
+    """Return list of (title, link) tuples from a list of RSS entries."""
+    titles = []
+    for entry in entries:
+        title = html.unescape(entry.get('title', '')).strip()
+        link = entry.get('link')
+        titles.append((title, link))
+    return titles
+
+
 def chat_completion(prompt, max_tokens=200):
     api_key = load_api_key()
     headers = {
@@ -141,7 +151,7 @@ def generate_html(primary_summary, rg_info, topic_summaries, output_path):
         f.write(out_html)
 
 
-def main():
+def main(entries_per_topic=None):
     terms = read_search_terms()
     topics = list(terms.keys())
 
@@ -153,14 +163,25 @@ def main():
         if t not in stable_files:
             stable_files[t] = f'{t}_filtered_articles.html'
 
-    primary_titles = extract_titles(os.path.join(MAIN_DIR, stable_files['primary']))
+    if entries_per_topic is None:
+        primary_titles = extract_titles(os.path.join(MAIN_DIR, stable_files['primary']))
+        rg_titles = extract_titles(os.path.join(MAIN_DIR, stable_files['rg']))
+    else:
+        def flatten(topic):
+            entries = []
+            for feed_entries in entries_per_topic.get(topic, {}).values():
+                entries.extend(feed_entries)
+            return entries
+
+        primary_titles = extract_titles_from_entries(flatten('primary'))
+        rg_titles = extract_titles_from_entries(flatten('rg'))
+
     primary_summary = summarize_primary(
         primary_titles,
         terms,
         char_limit=4000,
     )
 
-    rg_titles = extract_titles(os.path.join(MAIN_DIR, stable_files['rg']))
     if rg_titles:
         rg_info = f"There are {len(rg_titles)} new RG papers. See {stable_files['rg']}"
     else:
@@ -170,7 +191,10 @@ def main():
     for t in topics:
         if t in ('primary', 'rg'):
             continue
-        titles = extract_titles(os.path.join(MAIN_DIR, stable_files[t]))
+        if entries_per_topic is None:
+            titles = extract_titles(os.path.join(MAIN_DIR, stable_files[t]))
+        else:
+            titles = extract_titles_from_entries(flatten(t))
         topic_summaries[t] = summarize_titles(
             titles,
             f"Summary of today's {t} papers:",
