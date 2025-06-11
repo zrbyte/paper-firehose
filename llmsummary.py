@@ -170,29 +170,8 @@ def markdown_to_html(text: str) -> str:
 
 def generate_html(primary_summary, rg_info, topic_summaries, output_path):
     today = datetime.date.today()
-    def extract_links(text: str):
-        """Return text without Markdown links and list of (title, url) tuples."""
-        link_pat = re.compile(r"\[([^\]]+)\]\((https?://[^\)]+)\)")
-        match = re.search(r"Top\s*\d+.*?:", text, re.IGNORECASE)
-        if match:
-            main = text[: match.start()].strip()
-            link_text = text[match.end() :]
-        else:
-            main = text
-            link_text = ""
-        links = link_pat.findall(link_text)
-        return main, links
-
-    primary_text, primary_links = extract_links(primary_summary)
-
-    def format_links(links):
-        if not links:
-            return ""
-        parts = [f'<a href="{url}">{html.escape(title)}</a>' for title, url in links]
-        return "<p>" + "<br>".join(parts) + "</p>"
-
     sections = [
-        f"<h2>Primary</h2>" + markdown_to_html(primary_text) + format_links(primary_links),
+        f"<h2>Primary</h2>" + markdown_to_html(primary_summary),
         f"<h2>RG</h2>" + markdown_to_html(rg_info),
     ]
     for topic, summ in topic_summaries.items():
