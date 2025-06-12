@@ -125,6 +125,7 @@ def summarize_entries(
 
     entry_prompt = read_entry_prompt()
     bullet_summaries = []
+    link_map = {}
 
     for start in range(0, len(entries), batch_size):
         batch = entries[start : start + batch_size]
@@ -149,6 +150,7 @@ def summarize_entries(
         for i, line in enumerate(lines):
             idx = start + i + 1
             link = batch[i][2] if len(batch[i]) == 3 else batch[i][1]
+            link_map[idx] = link
             summary_text = re.sub(r"^[\d\-*.()]+\s*", "", line)
             bullet_summaries.append(f"{summary_text} [{idx}]({link})")
 
@@ -163,7 +165,16 @@ def summarize_entries(
         f"{terms_text}"
     )
     result = chat_completion(prompt, max_tokens=2000)
-    return result
+
+    def linkify(text: str) -> str:
+        def repl(m):
+            idx = int(m.group(1))
+            url = link_map.get(idx)
+            return f"[{idx}]({url})" if url else m.group(0)
+
+        return re.sub(r"\[(\d+)\]", repl, text)
+
+    return linkify(result)
 
 
 def summarize_primary(entries, search_terms, prompt_prefix, char_limit=4000):
