@@ -113,7 +113,7 @@ def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=No
             t, link = item
             return f"{t} ({link})"
 
-    joined = '; '.join(f"[{i+1}] {to_text(e)}" for i, e in enumerate(entries))
+    joined = '; '.join(f"{i+1}) {to_text(e)}" for i, e in enumerate(entries))
     context = f"Search terms: {search_context}\n" if search_context else ''
     # Append the entire search term mapping so the model can see the patterns
     terms_text = f"\nSearch terms:\n{json.dumps(all_terms, indent=2)}" if all_terms else ''
@@ -121,7 +121,7 @@ def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=No
         f"{prompt_prefix}\n"
         f"{context}"
         f"Titles: {joined}\n"
-        "Use the bracketed numbers when referencing papers.\n"
+        "Use these numbers when referencing papers.\n"
         f"Provide a concise summary under {char_limit} characters."
         f"{terms_text}"
     )
@@ -141,11 +141,11 @@ def summarize_primary(entries, search_terms, prompt_prefix, char_limit=4000):
             t, link = item
             return f"{t} ({link})"
 
-    titles_links = '; '.join(f"[{i+1}] {to_text(e)}" for i, e in enumerate(entries))
+    titles_links = '; '.join(f"{i+1}) {to_text(e)}" for i, e in enumerate(entries))
     prompt = (
         f"{prompt_prefix}\n"
         f"Titles and links: {titles_links}\n"
-        "Use the bracketed numbers when referencing papers.\n"
+        "Use these numbers when referencing papers.\n"
         f"Provide a concise summary under {char_limit} characters."
         # Include all search terms so the model is aware of every topic
         f"\nSearch terms:\n{json.dumps(search_terms['primary'], indent=2)}"
