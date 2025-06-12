@@ -111,23 +111,46 @@ def chat_completion(prompt, max_tokens=200):
         logging.error("API request failed: %s", e)
         return "API request failed"
 
-
-def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=None, all_terms=None):
-    """Summarize entries by first generating individual summaries."""
+def summarize_entries(
+    entries,
+    prompt_prefix,
+    char_limit=3000,
+    search_context=None,
+    all_terms=None,
+    batch_size=5,
+):
+    """Summarize entries by batching multiple items per API call."""
     if not entries:
-        return 'No new papers.'
+        return "No new papers."
 
     entry_prompt = read_entry_prompt()
     bullet_summaries = []
-    for idx, item in enumerate(entries, 1):
-        if len(item) == 3:
-            title, summary, link = item
-        else:
-            title, link = item
-            summary = ''
-        prompt = f"{entry_prompt}\nTitle: {title}\nSummary: {summary}"
-        single_summary = chat_completion(prompt, max_tokens=600)
-        bullet_summaries.append(f"{single_summary} [{idx}]({link})")
+
+    for start in range(0, len(entries), batch_size):
+        batch = entries[start : start + batch_size]
+        numbered = []
+        for offset, item in enumerate(batch, start=start + 1):
+            if len(item) == 3:
+                title, summary, _ = item
+            else:
+                title, _ = item
+                summary = ""
+            numbered.append(f"{offset}. Title: {title}\nSummary: {summary}")
+
+        prompt = (
+            f"{entry_prompt} Summarize each entry below individually. "
+            "Return one bullet per entry in the same order:\n\n"
+            + "\n\n".join(numbered)
+        )
+
+        response = chat_completion(prompt, max_tokens=800)
+        lines = [l.strip() for l in response.splitlines() if l.strip()]
+
+        for i, line in enumerate(lines):
+            idx = start + i + 1
+            link = batch[i][2] if len(batch[i]) == 3 else batch[i][1]
+            summary_text = re.sub(r"^[\d\-*.()]+\s*", "", line)
+            bullet_summaries.append(f"{summary_text} [{idx}]({link})")
 
     joined = '; '.join(bullet_summaries)
     context = f"Search terms: {search_context}\n" if search_context else ''

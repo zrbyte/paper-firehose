@@ -47,8 +47,8 @@ having it parse the generated HTML files. Each entry includes its title and summ
   language model receives more context. Use the `--no-summary` option if you want to skip
   this step. Custom LLM instructions can be placed in an `llm_prompts.json` file
   next to `llmsummary.py` where the keys correspond to topic names.
-  The short prompt used for summarizing each individual entry is stored in
-  `entry_summary.txt` and can be adjusted as well.
+  The short prompt used for summarizing each individual entry is stored in `entry_summary.txt` and can be adjusted as well. To reduce API overhead,
+  entries are processed in small batches while still generating a separate summary for each paper.
 
 Summaries now include numbered citation links like `[1](URL)` directly after each
 paper reference, making it easy to jump to the manuscript from the text.
