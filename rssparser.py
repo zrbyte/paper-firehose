@@ -137,6 +137,15 @@ def clear_database():
     cursor.execute("DELETE FROM seen_entries")
     conn.commit()
 
+def purge_database(days: int):
+    """Remove entries older than the specified number of days from the database."""
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat()
+    cursor.execute(
+        "DELETE FROM seen_entries WHERE timestamp < ?",
+        (cutoff,),
+    )
+    conn.commit()
+
 def matches_search_terms(entry, search_pattern):
     """Check if the entry matches the given search pattern."""
     fields_to_search = []
@@ -422,6 +431,13 @@ if __name__ == "__main__":
         help="remove all entries in the SQLite database and exit",
     )
     parser.add_argument(
+        "--purge-days",
+        type=int,
+        metavar="DAYS",
+        dest="purge_days",
+        help="remove database entries older than DAYS days and exit",
+    )
+    parser.add_argument(
         "--no-summary",
         action="store_true",
         dest="no_summary",
@@ -432,6 +448,12 @@ if __name__ == "__main__":
     if args.clear_db:
         clear_database()
         print("All entries removed from the database.")
+        conn.close()
+        sys.exit(0)
+
+    if args.purge_days is not None:
+        purge_database(args.purge_days)
+        print(f"Entries older than {args.purge_days} days removed from the database.")
         conn.close()
         sys.exit(0)
 
