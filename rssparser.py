@@ -12,6 +12,7 @@ import ftplib
 import json
 import sys
 import argparse
+import llmsummary
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +22,8 @@ TIME_DELTA = datetime.timedelta(days=182)  # Approximately 6 months
 MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(MAIN_DIR, 'assets')
 ARCHIVE_DIR = os.path.join(MAIN_DIR, 'archive')
+# Path to the daily summary produced by llmsummary.py
+SUMMARY_FILE = os.path.join(MAIN_DIR, 'summary.html')
 # MAIN_DIR = '/uu/nemes/cond-mat/'
 # ASSETS_DIR = '/uu/nemes/cond-mat/assets/'
 
@@ -149,34 +152,6 @@ def matches_search_terms(entry, search_pattern):
             return True
     return False
 
-def get_new_entries(feed_entries, seen_entries, search_pattern):
-    """Return a list of new entries not present in seen_entries and matching the search pattern."""
-    new_entries = []
-    current_time = datetime.datetime.now()
-    for entry in feed_entries:
-        entry_id = entry.get('id', entry.get('link'))
-        entry_published = entry.get('published_parsed') or entry.get('updated_parsed')
-
-        if entry_published:
-            if isinstance(entry_published, time.struct_time):
-                entry_datetime = datetime.datetime(*entry_published[:6])
-            else:
-                # In some cases, entry_published might already be a datetime object
-                entry_datetime = entry_published
-        else:
-            entry_datetime = current_time  # If no publication date, assume current time
-
-        # Skip entries older than 6 months
-        if (current_time - entry_datetime) > TIME_DELTA:
-            continue
-
-        # Check if entry is new and matches search terms
-        if entry_id not in seen_entries and matches_search_terms(entry, search_pattern):
-            new_entries.append(entry)
-            # Add to seen entries with timestamp
-            seen_entries[entry_id] = entry_datetime
-
-    return new_entries
 
 def clean_old_entries(seen_entries):
     """Remove entries older than 6 months from seen_entries."""
@@ -356,6 +331,7 @@ def main(upload: bool = True):
             for topic, pattern in search_patterns.items():
                 seen_entries = seen_entries_per_topic[topic]
 
+                # add entry to all_new_entries if it is new and matches the search term
                 if (
                     entry_id not in seen_entries
                     and matches_search_terms(entry, pattern)
@@ -368,7 +344,6 @@ def main(upload: bool = True):
         for topic in topics:
             clean_old_entries(seen_entries_per_topic[topic])
             save_seen_entries(seen_entries_per_topic[topic], feed_name, topic)
-
 
 
     for topic in topics:
@@ -429,6 +404,8 @@ def main(upload: bool = True):
             logging.error("FTP upload failed: %s", e)
             sys.exit(1)
 
+    return all_new_entries
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process RSS feeds")
@@ -444,6 +421,12 @@ if __name__ == "__main__":
         dest="clear_db",
         help="remove all entries in the SQLite database and exit",
     )
+    parser.add_argument(
+        "--no-summary",
+        action="store_true",
+        dest="no_summary",
+        help="skip running the LLM summary step",
+    )
     args = parser.parse_args()
 
     if args.clear_db:
@@ -452,6 +435,23 @@ if __name__ == "__main__":
         conn.close()
         sys.exit(0)
 
-    main(upload=args.upload)
+    new_entries = main(upload=args.upload)
     conn.close()
+
+    if not args.no_summary:
+        llmsummary.main(new_entries)
+        if args.upload:
+            if not FTP_USER or not FTP_PASS:
+                raise ValueError(
+                    "FTP_USER and FTP_PASS must be set as environment variables for FTP upload"
+                )
+            try:
+                with ftplib.FTP(FTP_HOST) as session:
+                    session.login(user=FTP_USER, passwd=FTP_PASS)
+                    session.cwd('/public_html/cond-mat/')
+                    with open(SUMMARY_FILE, 'rb') as f:
+                        session.storbinary('STOR ' + os.path.basename(SUMMARY_FILE), f)
+            except ftplib.all_errors as e:
+                logging.error("FTP upload failed: %s", e)
+                sys.exit(1)
     
