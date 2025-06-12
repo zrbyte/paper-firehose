@@ -46,7 +46,11 @@ The parser now passes the collected feed entries directly to `llmsummary.py` rat
 having it parse the generated HTML files. Each entry includes its title and summary so the
   language model receives more context. Use the `--no-summary` option if you want to skip
   this step. Custom LLM instructions can be placed in an `llm_prompts.json` file
-  next to `llmsummary.py` where the keys correspond to topic names.
+next to `llmsummary.py` where the keys correspond to topic names.
+
+The `rg` topic and any additional topics now pass each paper's link to the
+language model, enabling summaries with numbered citation links like
+`[1](URL)`.
 
 Summaries now include numbered citation links like `[1](URL)` directly after each
 paper reference, making it easy to jump to the manuscript from the text.
