@@ -107,11 +107,11 @@ def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=No
         return 'No new papers.'
     def to_text(item):
         if len(item) == 3:
-            t, s, _ = item
-            return f"{t} - {s}"
+            t, s, link = item
+            return f"{t} ({link}) - {s}"
         else:
-            t, _ = item
-            return t
+            t, link = item
+            return f"{t} ({link})"
 
     joined = '; '.join(f"[{i+1}] {to_text(e)}" for i, e in enumerate(entries))
     context = f"Search terms: {search_context}\n" if search_context else ''
