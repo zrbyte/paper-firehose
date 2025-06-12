@@ -28,6 +28,7 @@ MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
 # this script so they can be edited without touching the code.
 SEARCHTERMS_FILE = os.path.join(MAIN_DIR, 'search_terms.json')
 LLM_PROMPTS_FILE = os.path.join(MAIN_DIR, 'llm_prompts.json')
+ENTRY_PROMPT_FILE = os.path.join(MAIN_DIR, 'entry_summary.txt')
 
 
 def read_search_terms():
@@ -46,6 +47,15 @@ def read_llm_prompts():
     except Exception:
         # Fall back to an empty mapping if the file is missing or invalid
         return {}
+
+
+def read_entry_prompt():
+    """Return the prompt text used for summarizing a single entry."""
+    try:
+        with open(ENTRY_PROMPT_FILE, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception:
+        return "Summarize the following entry in one or two sentences."
 
 
 def extract_titles(file_path):
@@ -102,25 +112,54 @@ def chat_completion(prompt, max_tokens=200):
         return "API request failed"
 
 
-def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=None, all_terms=None):
+def summarize_entries(
+    entries,
+    prompt_prefix,
+    char_limit=3000,
+    search_context=None,
+    all_terms=None,
+    batch_size=5,
+):
+    """Summarize entries by batching multiple items per API call."""
     if not entries:
-        return 'No new papers.'
-    def to_text(item):
-        if len(item) == 3:
-            t, s, _ = item
-            return f"{t} - {s}"
-        else:
-            t, _ = item
-            return t
+        return "No new papers."
 
-    joined = '; '.join(to_text(e) for e in entries)
+    entry_prompt = read_entry_prompt()
+    bullet_summaries = []
+
+    for start in range(0, len(entries), batch_size):
+        batch = entries[start : start + batch_size]
+        numbered = []
+        for offset, item in enumerate(batch, start=start + 1):
+            if len(item) == 3:
+                title, summary, _ = item
+            else:
+                title, _ = item
+                summary = ""
+            numbered.append(f"{offset}. Title: {title}\nSummary: {summary}")
+
+        prompt = (
+            f"{entry_prompt} Summarize each entry below individually. "
+            "Return one bullet per entry in the same order:\n\n"
+            + "\n\n".join(numbered)
+        )
+
+        response = chat_completion(prompt, max_tokens=800)
+        lines = [l.strip() for l in response.splitlines() if l.strip()]
+
+        for i, line in enumerate(lines):
+            idx = start + i + 1
+            link = batch[i][2] if len(batch[i]) == 3 else batch[i][1]
+            summary_text = re.sub(r"^[\d\-*.()]+\s*", "", line)
+            bullet_summaries.append(f"{summary_text} [{idx}]({link})")
+
+    joined = '; '.join(bullet_summaries)
     context = f"Search terms: {search_context}\n" if search_context else ''
-    # Append the entire search term mapping so the model can see the patterns
     terms_text = f"\nSearch terms:\n{json.dumps(all_terms, indent=2)}" if all_terms else ''
     prompt = (
         f"{prompt_prefix}\n"
         f"{context}"
-        f"Titles: {joined}\n"
+        f"Entry summaries: {joined}\n"
         f"Provide a concise summary under {char_limit} characters."
         f"{terms_text}"
     )
@@ -129,27 +168,14 @@ def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=No
 
 
 def summarize_primary(entries, search_terms, prompt_prefix, char_limit=4000):
-    """Summarize primary entries with titles, links and summaries."""
-    if not entries:
-        return 'No new papers.'
-    def to_text(item):
-        if len(item) == 3:
-            t, s, link = item
-            return f"{t} ({link}) - {s}"
-        else:
-            t, link = item
-            return f"{t} ({link})"
-
-    titles_links = '; '.join(to_text(e) for e in entries)
-    prompt = (
-        f"{prompt_prefix}\n"
-        f"Titles and links: {titles_links}\n"
-        f"Provide a concise summary under {char_limit} characters."
-        # Include all search terms so the model is aware of every topic
-        f"\nSearch terms:\n{json.dumps(search_terms['primary'], indent=2)}"
+    """Summarize primary entries using individual entry summaries."""
+    return summarize_entries(
+        entries,
+        prompt_prefix,
+        char_limit=char_limit,
+        search_context=search_terms.get('primary'),
+        all_terms=search_terms,
     )
-    result = chat_completion(prompt, max_tokens=4000)
-    return result
 
 
 def markdown_to_html(text: str) -> str:
