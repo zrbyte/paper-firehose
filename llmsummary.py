@@ -157,28 +157,59 @@ def summarize_primary(entries, search_terms, prompt_prefix, char_limit=4000):
 def markdown_to_html(text: str) -> str:
     """Convert a small subset of Markdown to HTML using only the standard library.
 
-    The parser supports links with optional whitespace such as ``[1] (url)``.
+    This parser handles links with nested parentheses such as ``[1](url(a)b)`` and
+    removes stray closing parentheses that occasionally appear after citation
+    links in the language model output.
     """
-    patterns = re.finditer(
-        r"\[([^\]]+)\]\s*\(\s*(https?://[^)]+)\s*\)|\*\*([^*]+)\*\*|\*([^*]+)\*",
-        text,
-    )
+
+    result = []
     pos = 0
-    parts = []
-    for m in patterns:
-        parts.append(html.escape(text[pos : m.start()]))
-        if m.group(1):
-            title = html.escape(m.group(1))
-            url = html.escape(m.group(2), quote=True)
-            parts.append(f'<a href="{url}">{title}</a>')
-        elif m.group(3):
-            parts.append(f'<strong>{html.escape(m.group(3))}</strong>')
-        elif m.group(4):
-            parts.append(f'<em>{html.escape(m.group(4))}</em>')
-        pos = m.end()
-    parts.append(html.escape(text[pos:]))
-    html_text = "".join(parts).replace("\n", "<br>")
-    return f"<p>{html_text}</p>"
+    while pos < len(text):
+        start = text.find('[', pos)
+        if start == -1:
+            result.append(html.escape(text[pos:]))
+            break
+        end = text.find(']', start)
+        if end == -1:
+            result.append(html.escape(text[pos:]))
+            break
+        result.append(html.escape(text[pos:start]))
+        link_text = text[start + 1 : end]
+
+        p = end + 1
+        while p < len(text) and text[p].isspace():
+            p += 1
+        if p < len(text) and text[p] == '(':  # possible link
+            p += 1
+            depth = 1
+            i = p
+            while i < len(text) and depth > 0:
+                if text[i] == '(':
+                    depth += 1
+                elif text[i] == ')':
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            if depth == 0:
+                url = text[p:i]
+                result.append(
+                    f'<a href="{html.escape(url, quote=True)}">'
+                    f'{html.escape(link_text)}</a>'
+                )
+                pos = i + 1
+                continue
+
+        # not a valid link, treat literally
+        result.append(html.escape(text[start:end + 1]))
+        pos = end + 1
+
+    html_text = ''.join(result)
+    html_text = re.sub(r'\*\*(.+?)\*\*', lambda m: f'<strong>{html.escape(m.group(1))}</strong>', html_text)
+    html_text = re.sub(r'\*(.+?)\*', lambda m: f'<em>{html.escape(m.group(1))}</em>', html_text)
+    html_text = re.sub(r'(</a>)\)', r'\1', html_text)  # remove stray parenthesis
+    html_text = html_text.replace('\n', '<br>')
+    return f'<p>{html_text}</p>'
 
 
 def generate_html(primary_summary, rg_info, topic_summaries, output_path):
