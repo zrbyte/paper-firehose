@@ -181,8 +181,8 @@ def markdown_to_html(text: str) -> str:
 def generate_html(primary_summary, rg_info, topic_summaries, output_path):
     today = datetime.date.today()
     sections = [
-        f"<h2>Primary</h2>" + markdown_to_html(primary_summary),
-        f"<h2>RG</h2>" + markdown_to_html(rg_info),
+        "<h2>Primary</h2>" + markdown_to_html(primary_summary),
+        "<h2>RG</h2>" + markdown_to_html(rg_info),
     ]
     for topic, summ in topic_summaries.items():
         sections.append(f"<h2>{html.escape(topic)}</h2>" + markdown_to_html(summ))
