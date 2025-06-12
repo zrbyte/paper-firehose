@@ -111,7 +111,6 @@ def chat_completion(prompt, max_tokens=200):
         logging.error("API request failed: %s", e)
         return "API request failed"
 
-
 def summarize_entries(
     entries,
     prompt_prefix,
@@ -240,6 +239,8 @@ def main(entries_per_topic=None):
             entries.extend(feed_entries)
         return entries
 
+    # If no entries provided as input to main(),
+    # read the stable HTML files from the main directory.
     if entries_per_topic is None:
         primary_entries = extract_titles(os.path.join(MAIN_DIR, stable_files['primary']))
         rg_entries = extract_titles(os.path.join(MAIN_DIR, stable_files['rg']))
