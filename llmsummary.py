@@ -145,7 +145,7 @@ def summarize_primary(entries, search_terms, prompt_prefix, char_limit=4000):
     prompt = (
         f"{prompt_prefix}\n"
         f"Titles and links: {titles_links}\n"
-        "Use these numbers when referencing papers.\n"
+        "Number referenced papers sequentially starting from 1.\n"
         f"Provide a concise summary under {char_limit} characters."
         # Include all search terms so the model is aware of every topic
         f"\nSearch terms:\n{json.dumps(search_terms['primary'], indent=2)}"
