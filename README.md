@@ -52,6 +52,7 @@ The `rg` topic and any additional topics now pass each paper's link to the
 language model, enabling summaries with numbered citation links like
 `[1](URL)`.
 
-Summaries now list each entry's main point on its own line and finish with the
-matching citation link, so you might see `[1](URL)` at the end of every line.
+Summaries now list each entry's main point as a bullet numbered `1)`, `2)`,
+etc. and append the matching citation link at the end, so you might see
+`[1](URL)` at the end of every bullet.
 
