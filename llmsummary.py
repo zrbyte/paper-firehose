@@ -139,7 +139,7 @@ def summarize_primary(entries, search_terms, prompt_prefix, char_limit=4000):
         f"Titles and links: {titles_links}\n"
         f"Provide a concise summary under {char_limit} characters."
         # Include all search terms so the model is aware of every topic
-        f"\nSearch terms:\n{json.dumps(search_terms, indent=2)}"
+        f"\nSearch terms:\n{json.dumps(search_terms['primary'], indent=2)}"
     )
     return chat_completion(prompt, max_tokens=4000)
 
