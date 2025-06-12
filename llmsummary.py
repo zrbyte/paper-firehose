@@ -155,9 +155,12 @@ def summarize_primary(entries, search_terms, prompt_prefix, char_limit=4000):
 
 
 def markdown_to_html(text: str) -> str:
-    """Convert a small subset of Markdown to HTML using only the standard library."""
+    """Convert a small subset of Markdown to HTML using only the standard library.
+
+    The parser supports links with optional whitespace such as ``[1] (url)``.
+    """
     patterns = re.finditer(
-        r"\[([^\]]+)\]\((https?://[^)]+)\)|\*\*([^*]+)\*\*|\*([^*]+)\*",
+        r"\[([^\]]+)\]\s*\(\s*(https?://[^)]+)\s*\)|\*\*([^*]+)\*\*|\*([^*]+)\*",
         text,
     )
     pos = 0
