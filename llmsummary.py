@@ -231,7 +231,7 @@ def main(entries_per_topic=None):
     primary_prompt = prompts.get(
         'primary',
         'Summarize the following papers with emphasis on those best matching the primary search terms. '
-        'When referencing a paper, append a numbered citation such as [1](URL) directly after the relevant text.'
+        'Write one line per entry and end it with the numbered citation link, e.g. [1](URL).'
     )
     primary_summary = summarize_primary(
         primary_entries,
@@ -244,7 +244,7 @@ def main(entries_per_topic=None):
     # in case of no prompt, use a generic one in the second argument of the get() method
     rg_prompt = prompts.get(
         'rg',
-        "Summary of today's rg papers with numbered citation links after each mention:"
+        "Write one line per entry summarizing today's rg papers and finish each line with the numbered citation link, for example [1](URL)."
     )
     rg_info = summarize_entries(
         rg_entries,
@@ -265,7 +265,7 @@ def main(entries_per_topic=None):
         # Fall back to a generic instruction if no prompt is defined for the topic
         topic_prompt = prompts.get(
             t,
-            f"Summary of today's {t} papers with numbered citation links after each mention:"
+            f"Write one line per entry summarizing today's {t} papers and finish each line with the numbered citation link, e.g. [1](URL)."
         )
         topic_summaries[t] = summarize_entries(
             entries,

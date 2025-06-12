@@ -52,6 +52,6 @@ The `rg` topic and any additional topics now pass each paper's link to the
 language model, enabling summaries with numbered citation links like
 `[1](URL)`.
 
-Summaries now include numbered citation links like `[1](URL)` directly after each
-paper reference, making it easy to jump to the manuscript from the text.
+Summaries now list each entry's main point on its own line and finish with the
+matching citation link, so you might see `[1](URL)` at the end of every line.
 
