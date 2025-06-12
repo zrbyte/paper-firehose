@@ -152,34 +152,6 @@ def matches_search_terms(entry, search_pattern):
             return True
     return False
 
-def get_new_entries(feed_entries, seen_entries, search_pattern):
-    """Return a list of new entries not present in seen_entries and matching the search pattern."""
-    new_entries = []
-    current_time = datetime.datetime.now()
-    for entry in feed_entries:
-        entry_id = entry.get('id', entry.get('link'))
-        entry_published = entry.get('published_parsed') or entry.get('updated_parsed')
-
-        if entry_published:
-            if isinstance(entry_published, time.struct_time):
-                entry_datetime = datetime.datetime(*entry_published[:6])
-            else:
-                # In some cases, entry_published might already be a datetime object
-                entry_datetime = entry_published
-        else:
-            entry_datetime = current_time  # If no publication date, assume current time
-
-        # Skip entries older than 6 months
-        if (current_time - entry_datetime) > TIME_DELTA:
-            continue
-
-        # Check if entry is new and matches search terms
-        if entry_id not in seen_entries and matches_search_terms(entry, search_pattern):
-            new_entries.append(entry)
-            # Add to seen entries with timestamp
-            seen_entries[entry_id] = entry_datetime
-
-    return new_entries
 
 def clean_old_entries(seen_entries):
     """Remove entries older than 6 months from seen_entries."""
