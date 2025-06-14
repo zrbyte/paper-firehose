@@ -26,7 +26,7 @@ Current use case is FTP upload to a website, you can set this up for yourself. H
   number of topics as key/value pairs where the key is a name and the value is
   a regular expression.  The special topic `rg` is updated in-place each run,
   while all other topics (including `primary` and `perovskites`) generate daily
-  HTML files which are archived automatically.
+  HTML files which are archived automatically. The search terms and the behavior of the `rg` (rhombohedral graphite) topic is tailored to the needs of our research group, but adding new topics is easy, by appending the `search_terms.json` file. Future development may make this behavior more general, or maybe it won't :) 
    Summaries for `rg` only include the new entries discovered on a given day.
 4. To add your own topics, edit `search_terms.json` and add a new key/value
    pair with the topic name as the key and a regular expression as the value.
