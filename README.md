@@ -56,6 +56,18 @@ Summaries now list each entry's main point as a bullet numbered `1)`, `2)`,
 etc. and append the matching citation link at the end, so you might see
 `[1](URL)` at the end of every bullet.
 
+## GitHub Actions and Pages
+
+The repository includes a workflow (`.github/workflows/pages.yml`) that runs the
+parser on a daily schedule and publishes the generated HTML files to GitHub
+Pages.  Set an `OPENAI_API_KEY` secret in your repository so the summarization
+step can contact the API.  If you do not wish to use the language model, add
+`--no-summary` to the workflow command.
+
+Enable GitHub Pages in the repository settings and choose **GitHub Actions** as
+the source.  After the first successful run your pages will be available at the
+URL shown in the workflow output.
+
 ## Misc
 - Seen article IDs are tracked in an SQLite database stored under `assets/seen_entries.db`.
 - Focus of future development, see wiki.
