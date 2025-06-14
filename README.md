@@ -1,10 +1,9 @@
-# cond-mat, paper parser
+# cond-mat, paper RSS parser
 
-This project fetches articles from various scientific feeds, filters them by
-regular expressions, and uploads HTML summaries via FTP. Seen article IDs are
-tracked in an SQLite database stored under `assets/seen_entries.db`.
+The project fetches articles from various journal feeds, filters them using
+regular expressions, and uploads HTML summaries via FTP.
 
-The scripts are developed with **Python&nbsp;3.11**. Install the required
+The scripts are developed with **Python 3.11**. Install the required
 dependencies using:
 
 ```bash
@@ -56,4 +55,8 @@ language model, enabling summaries with numbered citation links like
 Summaries now list each entry's main point as a bullet numbered `1)`, `2)`,
 etc. and append the matching citation link at the end, so you might see
 `[1](URL)` at the end of every bullet.
+
+#### Misc
+- Seen article IDs are tracked in an SQLite database stored under `assets/seen_entries.db`.
+- Focus of future development, see wiki.
 
