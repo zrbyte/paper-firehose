@@ -67,6 +67,7 @@ step can contact the API.  If you do not wish to use the language model, add
 Enable GitHub Pages in the repository settings and choose **GitHub Actions** as
 the source.  After the first successful run your pages will be available at the
 URL shown in the workflow output.
+Current URL to the [summary](https://zrbyte.github.io/paper-firehose/summary.html) and the [primary](zrbyte.github.io/paper-firehose/results_primary.html) search results.
 
 ## Misc
 - Seen article IDs are tracked in an SQLite database stored under `assets/seen_entries.db`.
