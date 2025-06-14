@@ -56,7 +56,7 @@ Summaries now list each entry's main point as a bullet numbered `1)`, `2)`,
 etc. and append the matching citation link at the end, so you might see
 `[1](URL)` at the end of every bullet.
 
-#### Misc
+## Misc
 - Seen article IDs are tracked in an SQLite database stored under `assets/seen_entries.db`.
 - Focus of future development, see wiki.
 
