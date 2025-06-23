@@ -13,6 +13,7 @@ import json
 import sys
 import argparse
 import hashlib
+import urllib.parse
 import llmsummary
 
 # Setup logging
@@ -176,8 +177,12 @@ def clean_old_entries(seen_entries):
 
 def compute_entry_id(entry):
     """Return a stable SHA-1 based ID for a feed entry."""
-    candidate = entry.get("link") or entry.get("id")
+    candidate = entry.get("id") or entry.get("link")
     if candidate:
+        parsed = urllib.parse.urlparse(candidate)
+        candidate = urllib.parse.urlunparse(
+            parsed._replace(query="", fragment="")
+        )
         return hashlib.sha1(candidate.encode("utf-8")).hexdigest()
 
     parts = [
