@@ -12,6 +12,8 @@ import ftplib
 import json
 import sys
 import argparse
+import hashlib
+import urllib.parse
 import llmsummary
 
 # Setup logging
@@ -35,15 +37,58 @@ os.makedirs(ARCHIVE_DIR, exist_ok=True)
 DB_PATH = os.path.join(ASSETS_DIR, 'seen_entries.db')
 conn = sqlite3.connect(DB_PATH)
 cursor = conn.cursor()
-cursor.execute(
-    """CREATE TABLE IF NOT EXISTS seen_entries (
-        feed_name TEXT,
-        search_type TEXT,
-        entry_id TEXT PRIMARY KEY,
-        timestamp TEXT
-    )"""
-)
-conn.commit()
+
+
+def ensure_database_schema():
+    """Create or migrate the seen_entries table as needed."""
+    cursor.execute("PRAGMA table_info(seen_entries)")
+    info = cursor.fetchall()
+    if not info:
+        cursor.execute(
+            """CREATE TABLE seen_entries (
+                feed_name TEXT,
+                search_type TEXT,
+                entry_id TEXT,
+                timestamp TEXT,
+                title TEXT,
+                PRIMARY KEY (feed_name, search_type, entry_id)
+            )"""
+        )
+        conn.commit()
+        return
+
+    columns = [row[1] for row in info]
+    pk_columns = [row[1] for row in info if row[5] > 0]
+    needs_migration = False
+    if "title" not in columns:
+        needs_migration = True
+    if pk_columns != ["feed_name", "search_type", "entry_id"]:
+        needs_migration = True
+
+    if needs_migration:
+        cursor.execute(
+            "SELECT feed_name, search_type, entry_id, timestamp, COALESCE(title, '') FROM seen_entries"
+        )
+        rows = cursor.fetchall()
+        cursor.execute("DROP TABLE seen_entries")
+        cursor.execute(
+            """CREATE TABLE seen_entries (
+                feed_name TEXT,
+                search_type TEXT,
+                entry_id TEXT,
+                timestamp TEXT,
+                title TEXT,
+                PRIMARY KEY (feed_name, search_type, entry_id)
+            )"""
+        )
+        cursor.executemany(
+            "INSERT OR REPLACE INTO seen_entries (feed_name, search_type, entry_id, timestamp, title) VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+
+
+ensure_database_schema()
 
 # FTP credentials are provided via environment variables
 FTP_HOST = os.environ.get('FTP_HOST', 'nemeslab.com')
@@ -111,11 +156,14 @@ feeds = list(database.keys())
 def load_seen_entries(feed_name, search_type):
     """Load seen entries for a feed/search type from the database."""
     cursor.execute(
-        "SELECT entry_id, timestamp FROM seen_entries WHERE feed_name=? AND search_type=?",
+        "SELECT entry_id, timestamp, title FROM seen_entries WHERE feed_name=? AND search_type=?",
         (feed_name, search_type),
     )
     rows = cursor.fetchall()
-    return {entry_id: datetime.datetime.fromisoformat(ts) for entry_id, ts in rows}
+    return {
+        entry_id: (datetime.datetime.fromisoformat(ts), title or "")
+        for entry_id, ts, title in rows
+    }
 
 
 def save_seen_entries(entries, feed_name, search_type):
@@ -125,10 +173,11 @@ def save_seen_entries(entries, feed_name, search_type):
         "DELETE FROM seen_entries WHERE feed_name=? AND search_type=? AND timestamp < ?",
         (feed_name, search_type, cutoff),
     )
-    for entry_id, ts in entries.items():
+    for entry_id, value in entries.items():
+        ts, title = value
         cursor.execute(
-            "INSERT OR REPLACE INTO seen_entries (feed_name, search_type, entry_id, timestamp) VALUES (?, ?, ?, ?)",
-            (feed_name, search_type, entry_id, ts.isoformat()),
+            "INSERT OR REPLACE INTO seen_entries (feed_name, search_type, entry_id, timestamp, title) VALUES (?, ?, ?, ?, ?)",
+            (feed_name, search_type, entry_id, ts.isoformat(), title),
         )
     conn.commit()
 
@@ -166,11 +215,29 @@ def clean_old_entries(seen_entries):
     """Remove entries older than 6 months from seen_entries."""
     current_time = datetime.datetime.now()
     keys_to_delete = []
-    for entry_id, entry_datetime in seen_entries.items():
+    for entry_id, (entry_datetime, _title) in seen_entries.items():
         if (current_time - entry_datetime) > TIME_DELTA:
             keys_to_delete.append(entry_id)
     for key in keys_to_delete:
         del seen_entries[key]
+
+
+def compute_entry_id(entry):
+    """Return a stable SHA-1 based ID for a feed entry."""
+    candidate = entry.get("id") or entry.get("link")
+    if candidate:
+        parsed = urllib.parse.urlparse(candidate)
+        candidate = urllib.parse.urlunparse(
+            parsed._replace(query="", fragment="")
+        )
+        return hashlib.sha1(candidate.encode("utf-8")).hexdigest()
+
+    parts = [
+        entry.get("title", ""),
+        entry.get("published", entry.get("updated", "")),
+    ]
+    concat = "||".join(parts)
+    return hashlib.sha1(concat.encode("utf-8")).hexdigest()
 
 def process_text(text):
     """Process text to escape HTML characters and handle LaTeX code."""
@@ -317,12 +384,19 @@ def main(upload: bool = True):
         seen_entries_per_topic = {
             topic: load_seen_entries(feed_name, topic) for topic in topics
         }
+        seen_titles_per_topic = {
+            topic: {
+                details[1] for details in seen_entries_per_topic[topic].values()
+            }
+            for topic in topics
+        }
 
         current_time = datetime.datetime.now()
 
         # Iterate over each entry a single time and test against all patterns
         for entry in feed_entries:
-            entry_id = entry.get('id', entry.get('link'))
+            entry_id = compute_entry_id(entry)
+            entry_title = entry.get("title", "").strip()
             entry_published = entry.get('published_parsed') or entry.get('updated_parsed')
 
             if entry_published:
@@ -339,19 +413,26 @@ def main(upload: bool = True):
 
             for topic, pattern in search_patterns.items():
                 seen_entries = seen_entries_per_topic[topic]
+                seen_titles = seen_titles_per_topic[topic]
 
                 # add entry to all_new_entries if it is new and matches the search term
                 if (
-                    entry_id not in seen_entries
+                    entry_title not in seen_titles
                     and matches_search_terms(entry, pattern)
                 ):
                     # Record new entry for this topic
                     all_new_entries[topic][feed_name].append(entry)
-                    seen_entries[entry_id] = entry_datetime # type: ignore
+                    seen_entries[entry_id] = (
+                        entry_datetime, entry_title
+                    )
+                    seen_titles.add(entry_title)
 
         # After processing all entries, persist the databases per topic
         for topic in topics:
             clean_old_entries(seen_entries_per_topic[topic])
+            seen_titles_per_topic[topic] = {
+                details[1] for details in seen_entries_per_topic[topic].values()
+            }
             save_seen_entries(seen_entries_per_topic[topic], feed_name, topic)
 
 
