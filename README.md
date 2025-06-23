@@ -71,6 +71,8 @@ Current URL to the [summary](https://zrbyte.github.io/paper-firehose/summary.htm
 
 ## Misc
 - Seen article IDs are tracked in an SQLite database stored under `assets/seen_entries.db`.
-  Each ID is created with a SHA-1 hash of the entry metadata so unstable RSS identifiers do not lead to duplicates.
+  Each ID is created with a SHA-1 hash. The entry link is hashed when available,
+  falling back to a mix of title and publication date so unstable RSS
+  identifiers do not lead to duplicates.
 - Focus of future development, see wiki.
 

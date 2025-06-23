@@ -175,9 +175,12 @@ def clean_old_entries(seen_entries):
 
 
 def compute_entry_id(entry):
-    """Return a stable hash-based ID for a feed entry."""
+    """Return a stable SHA-1 based ID for a feed entry."""
+    candidate = entry.get("link") or entry.get("id")
+    if candidate:
+        return hashlib.sha1(candidate.encode("utf-8")).hexdigest()
+
     parts = [
-        entry.get("id", ""),
         entry.get("title", ""),
         entry.get("published", entry.get("updated", "")),
     ]
