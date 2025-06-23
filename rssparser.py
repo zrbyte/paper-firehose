@@ -42,10 +42,16 @@ cursor.execute(
         feed_name TEXT,
         search_type TEXT,
         entry_id TEXT PRIMARY KEY,
-        timestamp TEXT
+        timestamp TEXT,
+        title TEXT
     )"""
 )
 conn.commit()
+cursor.execute("PRAGMA table_info(seen_entries)")
+columns = [row[1] for row in cursor.fetchall()]
+if "title" not in columns:
+    cursor.execute("ALTER TABLE seen_entries ADD COLUMN title TEXT")
+    conn.commit()
 
 # FTP credentials are provided via environment variables
 FTP_HOST = os.environ.get('FTP_HOST', 'nemeslab.com')
@@ -113,11 +119,14 @@ feeds = list(database.keys())
 def load_seen_entries(feed_name, search_type):
     """Load seen entries for a feed/search type from the database."""
     cursor.execute(
-        "SELECT entry_id, timestamp FROM seen_entries WHERE feed_name=? AND search_type=?",
+        "SELECT entry_id, timestamp, title FROM seen_entries WHERE feed_name=? AND search_type=?",
         (feed_name, search_type),
     )
     rows = cursor.fetchall()
-    return {entry_id: datetime.datetime.fromisoformat(ts) for entry_id, ts in rows}
+    return {
+        entry_id: (datetime.datetime.fromisoformat(ts), title or "")
+        for entry_id, ts, title in rows
+    }
 
 
 def save_seen_entries(entries, feed_name, search_type):
@@ -127,10 +136,11 @@ def save_seen_entries(entries, feed_name, search_type):
         "DELETE FROM seen_entries WHERE feed_name=? AND search_type=? AND timestamp < ?",
         (feed_name, search_type, cutoff),
     )
-    for entry_id, ts in entries.items():
+    for entry_id, value in entries.items():
+        ts, title = value
         cursor.execute(
-            "INSERT OR REPLACE INTO seen_entries (feed_name, search_type, entry_id, timestamp) VALUES (?, ?, ?, ?)",
-            (feed_name, search_type, entry_id, ts.isoformat()),
+            "INSERT OR REPLACE INTO seen_entries (feed_name, search_type, entry_id, timestamp, title) VALUES (?, ?, ?, ?, ?)",
+            (feed_name, search_type, entry_id, ts.isoformat(), title),
         )
     conn.commit()
 
@@ -168,7 +178,7 @@ def clean_old_entries(seen_entries):
     """Remove entries older than 6 months from seen_entries."""
     current_time = datetime.datetime.now()
     keys_to_delete = []
-    for entry_id, entry_datetime in seen_entries.items():
+    for entry_id, (entry_datetime, _title) in seen_entries.items():
         if (current_time - entry_datetime) > TIME_DELTA:
             keys_to_delete.append(entry_id)
     for key in keys_to_delete:
@@ -367,7 +377,9 @@ def main(upload: bool = True):
                 ):
                     # Record new entry for this topic
                     all_new_entries[topic][feed_name].append(entry)
-                    seen_entries[entry_id] = entry_datetime # type: ignore
+                    seen_entries[entry_id] = (
+                        entry_datetime, entry.get("title", "")
+                    )
 
         # After processing all entries, persist the databases per topic
         for topic in topics:
