@@ -37,21 +37,58 @@ os.makedirs(ARCHIVE_DIR, exist_ok=True)
 DB_PATH = os.path.join(ASSETS_DIR, 'seen_entries.db')
 conn = sqlite3.connect(DB_PATH)
 cursor = conn.cursor()
-cursor.execute(
-    """CREATE TABLE IF NOT EXISTS seen_entries (
-        feed_name TEXT,
-        search_type TEXT,
-        entry_id TEXT PRIMARY KEY,
-        timestamp TEXT,
-        title TEXT
-    )"""
-)
-conn.commit()
-cursor.execute("PRAGMA table_info(seen_entries)")
-columns = [row[1] for row in cursor.fetchall()]
-if "title" not in columns:
-    cursor.execute("ALTER TABLE seen_entries ADD COLUMN title TEXT")
-    conn.commit()
+
+
+def ensure_database_schema():
+    """Create or migrate the seen_entries table as needed."""
+    cursor.execute("PRAGMA table_info(seen_entries)")
+    info = cursor.fetchall()
+    if not info:
+        cursor.execute(
+            """CREATE TABLE seen_entries (
+                feed_name TEXT,
+                search_type TEXT,
+                entry_id TEXT,
+                timestamp TEXT,
+                title TEXT,
+                PRIMARY KEY (feed_name, search_type, entry_id)
+            )"""
+        )
+        conn.commit()
+        return
+
+    columns = [row[1] for row in info]
+    pk_columns = [row[1] for row in info if row[5] > 0]
+    needs_migration = False
+    if "title" not in columns:
+        needs_migration = True
+    if pk_columns != ["feed_name", "search_type", "entry_id"]:
+        needs_migration = True
+
+    if needs_migration:
+        cursor.execute(
+            "SELECT feed_name, search_type, entry_id, timestamp, COALESCE(title, '') FROM seen_entries"
+        )
+        rows = cursor.fetchall()
+        cursor.execute("DROP TABLE seen_entries")
+        cursor.execute(
+            """CREATE TABLE seen_entries (
+                feed_name TEXT,
+                search_type TEXT,
+                entry_id TEXT,
+                timestamp TEXT,
+                title TEXT,
+                PRIMARY KEY (feed_name, search_type, entry_id)
+            )"""
+        )
+        cursor.executemany(
+            "INSERT OR REPLACE INTO seen_entries (feed_name, search_type, entry_id, timestamp, title) VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+
+
+ensure_database_schema()
 
 # FTP credentials are provided via environment variables
 FTP_HOST = os.environ.get('FTP_HOST', 'nemeslab.com')
