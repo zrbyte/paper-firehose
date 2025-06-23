@@ -230,7 +230,7 @@ def compute_entry_id(entry):
         candidate = urllib.parse.urlunparse(
             parsed._replace(query="", fragment="")
         )
-        return hashlib.sha1(candidate.encode("utf-8")).hexdigest()
+        return hashlib.sha1(candidate.encode("utf-8")).hexdigest() # type: ignore
 
     parts = [
         entry.get("title", ""),
@@ -396,7 +396,7 @@ def main(upload: bool = True):
         # Iterate over each entry a single time and test against all patterns
         for entry in feed_entries:
             entry_id = compute_entry_id(entry)
-            entry_title = entry.get("title", "").strip()
+            entry_title = entry.get("title", "").strip() # type: ignore
             entry_published = entry.get('published_parsed') or entry.get('updated_parsed')
 
             if entry_published:
@@ -422,7 +422,7 @@ def main(upload: bool = True):
                 ):
                     # Record new entry for this topic
                     all_new_entries[topic][feed_name].append(entry)
-                    seen_entries[entry_id] = (
+                    seen_entries[entry_id] = ( # type: ignore
                         entry_datetime, entry_title
                     )
                     seen_titles.add(entry_title)
