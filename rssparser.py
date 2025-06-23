@@ -12,6 +12,7 @@ import ftplib
 import json
 import sys
 import argparse
+import hashlib
 import llmsummary
 
 # Setup logging
@@ -172,6 +173,17 @@ def clean_old_entries(seen_entries):
     for key in keys_to_delete:
         del seen_entries[key]
 
+
+def compute_entry_id(entry):
+    """Return a stable hash-based ID for a feed entry."""
+    parts = [
+        entry.get("id", ""),
+        entry.get("title", ""),
+        entry.get("published", entry.get("updated", "")),
+    ]
+    concat = "||".join(parts)
+    return hashlib.sha1(concat.encode("utf-8")).hexdigest()
+
 def process_text(text):
     """Process text to escape HTML characters and handle LaTeX code."""
     if not text:
@@ -322,7 +334,7 @@ def main(upload: bool = True):
 
         # Iterate over each entry a single time and test against all patterns
         for entry in feed_entries:
-            entry_id = entry.get('id', entry.get('link'))
+            entry_id = compute_entry_id(entry)
             entry_published = entry.get('published_parsed') or entry.get('updated_parsed')
 
             if entry_published:
