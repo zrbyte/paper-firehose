@@ -74,6 +74,7 @@ Current URL to the [summary](https://zrbyte.github.io/paper-firehose/summary.htm
   Each ID is created with a SHA-1 hash. The entry `id` is preferred and the URL
   is cleaned of query parameters before hashing. If neither field exists, a mix
   of title and publication date is used so unstable RSS identifiers do not lead
-  to duplicates.
+  to duplicates. Duplicate detection, however, relies on the title itself, so
+  an article with the same title will be skipped even if its link changes.
 - Focus of future development, see wiki.
 

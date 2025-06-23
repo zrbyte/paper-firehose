@@ -347,12 +347,19 @@ def main(upload: bool = True):
         seen_entries_per_topic = {
             topic: load_seen_entries(feed_name, topic) for topic in topics
         }
+        seen_titles_per_topic = {
+            topic: {
+                details[1] for details in seen_entries_per_topic[topic].values()
+            }
+            for topic in topics
+        }
 
         current_time = datetime.datetime.now()
 
         # Iterate over each entry a single time and test against all patterns
         for entry in feed_entries:
             entry_id = compute_entry_id(entry)
+            entry_title = entry.get("title", "").strip()
             entry_published = entry.get('published_parsed') or entry.get('updated_parsed')
 
             if entry_published:
@@ -369,21 +376,26 @@ def main(upload: bool = True):
 
             for topic, pattern in search_patterns.items():
                 seen_entries = seen_entries_per_topic[topic]
+                seen_titles = seen_titles_per_topic[topic]
 
                 # add entry to all_new_entries if it is new and matches the search term
                 if (
-                    entry_id not in seen_entries
+                    entry_title not in seen_titles
                     and matches_search_terms(entry, pattern)
                 ):
                     # Record new entry for this topic
                     all_new_entries[topic][feed_name].append(entry)
                     seen_entries[entry_id] = (
-                        entry_datetime, entry.get("title", "")
+                        entry_datetime, entry_title
                     )
+                    seen_titles.add(entry_title)
 
         # After processing all entries, persist the databases per topic
         for topic in topics:
             clean_old_entries(seen_entries_per_topic[topic])
+            seen_titles_per_topic[topic] = {
+                details[1] for details in seen_entries_per_topic[topic].values()
+            }
             save_seen_entries(seen_entries_per_topic[topic], feed_name, topic)
 
 
