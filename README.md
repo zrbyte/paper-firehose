@@ -1,81 +1,76 @@
 # cond-mat, paper RSS parser
 
-The project fetches articles from various journal feeds, filters them using
-regular expressions, and uploads HTML summaries via FTP.
+The project fetches articles from various journal feeds, filters them using regular expressions, summarizes them using an OpenAI language model, and uploads HTML summaries via FTP.
 
-The scripts are developed with **Python 3.11**. Install the required
-dependencies using:
+## Installation
+
+Developed with **Python 3.11**. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
+## Setup
+
+### Configuration Files
+
+- **feeds.json**: Required. Map feed names to RSS URLs. Must be placed next to `rssparser.py`.
+- **search_terms.json**: Optional. Defines topics as key/value pairs, where keys are topic names and values are regular expressions.
+  - The special topic `rg` (rhombohedral graphite) is updated daily.
+  - The search terms and the behavior of the `rg` topic is tailored to the needs of our research group, but adding new topics is easy, by appending the `search_terms.json` file. Future development may make this behavior more general, or maybe it won't :)
+  - Other topics (e.g., `primary`, `perovskites`) generate daily HTML summaries that are automatically archived.
+- **llm_prompts.json**: Optional. Custom instructions for language model summaries. Place next to `llmsummary.py`, keys correspond to topic names.
+
+### Environment Variables
+
+Set these variables (e.g., in your crontab):
+
+- `FTP_HOST`: FTP server hostname
+- `FTP_USER`: FTP username
+- `FTP_PASS`: FTP password
+- `OPENAI_API_KEY`: OpenAI API key for summarization (optional; see below)
+
+Alternatively, store your OpenAI API key in a file named `openaikulcs.env` next to `llmsummary.py`.
+
 ## Usage
-Current use case is FTP upload to a website, you can set this up for yourself. However, FTP upload is not needed, in this case use it with the `--no-upload` command line option.
 
-1. Set the following environment variables (for example in your crontab):
-   - `FTP_HOST` – hostname of the FTP server
-   - `FTP_USER` – FTP username
-   - `FTP_PASS` – FTP password
+Run the parser:
 
-2. Create a `feeds.json` file next to `rssparser.py` containing a JSON
-   object mapping feed names to their RSS URLs. The script will exit with an
-   error if this file is missing.
-3. Place a `search_terms.json` file next to `rssparser.py` to
-   override the default search regular expressions. The file may define any
-  number of topics as key/value pairs where the key is a name and the value is
-  a regular expression.  The special topic `rg` is updated in-place each run,
-  while all other topics (including `primary` and `perovskites`) generate daily
-  HTML files which are archived automatically. The search terms and the behavior of the `rg` (rhombohedral graphite) topic is tailored to the needs of our research group, but adding new topics is easy, by appending the `search_terms.json` file. Future development may make this behavior more general, or maybe it won't :) 
-   Summaries for `rg` only include the new entries discovered on a given day.
-4. To add your own topics, edit `search_terms.json` and add a new key/value
-   pair with the topic name as the key and a regular expression as the value.
-   The parser will automatically generate an HTML summary for every topic it
-   finds in this file.
+```bash
+python rssparser.py [options]
+```
 
-### OpenAI API key
+### Command-Line Options
 
-`llmsummary.py` expects an OpenAI API key either provided via the `OPENAI_API_KEY` environment variable or stored in a file named `openaikulcs.env` next to the script. Without this key the summary step will fail. See `load_api_key` in `llmsummary.py` for details. Use the `--no-summary` option if you want to skip
-  this step.
+- `--no-upload`: Skip FTP upload (useful for testing)
+- `--no-summary`: Skip summarization step
+- `--clear-db`: Clear stored article IDs and exit
+- `--purge-days X`: Remove database entries older than `X` days and exit
 
-The generated HTML files will be uploaded to the FTP server by default. Pass
-`--no-upload` when running the script to skip the FTP step, which can be useful
-for testing.  Pass `--clear-db` to remove all stored article IDs from the database and exit.
-Use `--purge-days X` to remove entries older than `X` days from the database and exit.
-By default the script runs `llmsummary.py` at the end to create a daily summary.
-The parser now passes the collected feed entries directly to `llmsummary.py` rather than
-having it parse the generated HTML files. Each entry includes its title and summary so the
-  language model receives more context. Custom LLM instructions can be placed in an `llm_prompts.json` file
-next to `llmsummary.py` where the keys correspond to topic names.
-
-The `rg` topic and any additional topics now pass each paper's link to the
-language model, enabling summaries with numbered citation links like
-`[1](URL)`.
-
-Summaries now list each entry's main point as a bullet numbered `1)`, `2)`,
-etc. and append the matching citation link at the end, so you might see
-`[1](URL)` at the end of every bullet.
+By default, the script summarizes articles with `llmsummary.py`. Each entry includes a title, summary, and a link. Summaries list each entry’s main points numbered (`1)`, `2)`, etc., with citation links like `[1](URL)`.
 
 ## GitHub Actions and Pages
 
-The repository includes a workflow (`.github/workflows/pages.yml`) that runs the
-parser on a daily schedule and publishes the generated HTML files to GitHub
-Pages.  Set an `OPENAI_API_KEY` secret in your repository so the summarization
-step can contact the API.  If you do not wish to use the language model, add
-`--no-summary` to the workflow command.
+A GitHub Actions workflow (`.github/workflows/pages.yml`) runs the parser daily and publishes results to GitHub Pages:
 
-Enable GitHub Pages in the repository settings and choose **GitHub Actions** as
-the source.  After the first successful run your pages will be available at the
-URL shown in the workflow output.
-Current URL to the [summary](https://zrbyte.github.io/paper-firehose/summary.html) and the [primary](https://zrbyte.github.io/paper-firehose/results_primary.html) search results.
+- Set the `OPENAI_API_KEY` repository secret for summarization.
+- Use `--no-summary` in the workflow to disable summarization if desired.
+- Enable GitHub Pages in repository settings with source set to **GitHub Actions**.
 
-## Misc
-- Seen article IDs and their titles are tracked in an SQLite database stored under `assets/seen_entries.db`.
-  Each row is unique for a given feed and topic, preventing cross-feed
-  collisions. IDs are created with a SHA‑1 hash: the entry `id` is preferred and
-  the URL is cleaned of query parameters before hashing. If neither field exists,
-  a mix of title and publication date is used so unstable RSS identifiers do not
-  lead to duplicates. Duplicate detection relies on the title itself, so an
-  article with the same title will be skipped even if its link changes.
-- Focus of future development, see wiki.
+Your summaries will be available at the URL provided in the workflow output.
 
+Current URLs:
+- [Summary](https://zrbyte.github.io/paper-firehose/summary.html)
+- [Primary Results](https://zrbyte.github.io/paper-firehose/results_primary.html)
+
+## Database Details
+
+Seen article IDs and titles are tracked in an SQLite database (`assets/seen_entries.db`):
+
+- Each database row is unique per feed and topic to prevent cross-feed collisions.
+- IDs are generated via SHA‑1 hash from entry `id`, URL (cleaned of query parameters), or a combination of title and publication date.
+- Duplicate detection uses article titles, skipping identical entries even if links change.
+
+## Future Development
+
+- Planned enhancements and more details available in the repository wiki.
