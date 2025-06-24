@@ -9,6 +9,7 @@ Developed with **Python 3.11**. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
+The only non standard python package that is needed is [feedparser](https://pypi.org/project/feedparser/).
 
 ## Setup
 
