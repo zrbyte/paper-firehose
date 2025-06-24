@@ -35,7 +35,8 @@ Current use case is FTP upload to a website, you can set this up for yourself. H
 
 ### OpenAI API key
 
-`llmsummary.py` expects an OpenAI API key either provided via the `OPENAI_API_KEY` environment variable or stored in a file named `openaikulcs.env` next to the script. Without this key the summary step will fail. See `load_api_key` in `llmsummary.py` for details.
+`llmsummary.py` expects an OpenAI API key either provided via the `OPENAI_API_KEY` environment variable or stored in a file named `openaikulcs.env` next to the script. Without this key the summary step will fail. See `load_api_key` in `llmsummary.py` for details. Use the `--no-summary` option if you want to skip
+  this step.
 
 The generated HTML files will be uploaded to the FTP server by default. Pass
 `--no-upload` when running the script to skip the FTP step, which can be useful
@@ -44,8 +45,7 @@ Use `--purge-days X` to remove entries older than `X` days from the database and
 By default the script runs `llmsummary.py` at the end to create a daily summary.
 The parser now passes the collected feed entries directly to `llmsummary.py` rather than
 having it parse the generated HTML files. Each entry includes its title and summary so the
-  language model receives more context. Use the `--no-summary` option if you want to skip
-  this step. Custom LLM instructions can be placed in an `llm_prompts.json` file
+  language model receives more context. Custom LLM instructions can be placed in an `llm_prompts.json` file
 next to `llmsummary.py` where the keys correspond to topic names.
 
 The `rg` topic and any additional topics now pass each paper's link to the
