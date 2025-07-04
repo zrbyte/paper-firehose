@@ -289,7 +289,7 @@ def generate_html(all_entries_per_feed, html_file_path, search_description):
         '  <p><strong>Authors:</strong> $authors</p>\n'
         '  <p><em>Published: $published</em></p>\n'
         '  <p>$summary</p>\n'
-        '</div>\n<hr>'
+        '</div>'
     )
 
     if not any(all_entries_per_feed.values()):

@@ -17,11 +17,27 @@
 </script>
 <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
-    .entry { margin-bottom: 20px; }
     h2 { color: #2E8B57; }
-    h3 { color: #4682B4; }
+    h3 { color: #4682B4; margin-top: 0; }
     hr { border: 0; border-top: 1px solid #ccc; }
     .no-entries { font-style: italic; color: #555; }
+
+    /* Panel style similar to Obsidian callouts */
+    .entry {
+      border-left: 4px solid #4682B4;
+      background-color: #f0f4ff;
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 4px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .entry a {
+      text-decoration: none;
+      color: #4682B4;
+    }
+    .entry a:hover {
+      text-decoration: underline;
+    }
 </style>
 </head>
 <body>
