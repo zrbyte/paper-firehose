@@ -38,6 +38,11 @@ DB_PATH = os.path.join(ASSETS_DIR, 'seen_entries.db')
 conn = sqlite3.connect(DB_PATH)
 cursor = conn.cursor()
 
+# Database storing metadata for matched entries
+MATCHED_DB_PATH = os.path.join(ASSETS_DIR, 'matched_entries_history.db')
+entries_conn = sqlite3.connect(MATCHED_DB_PATH)
+entries_cursor = entries_conn.cursor()
+
 
 def ensure_database_schema():
     """Create or migrate the seen_entries table as needed."""
@@ -88,7 +93,23 @@ def ensure_database_schema():
         conn.commit()
 
 
+def ensure_entries_schema():
+    """Create the matched_entries table if it does not exist."""
+    entries_cursor.execute(
+        """CREATE TABLE IF NOT EXISTS matched_entries (
+            feed_name TEXT,
+            search_type TEXT,
+            entry_id TEXT,
+            timestamp TEXT,
+            data TEXT,
+            PRIMARY KEY (feed_name, search_type, entry_id)
+        )"""
+    )
+    entries_conn.commit()
+
+
 ensure_database_schema()
+ensure_entries_schema()
 
 # FTP credentials are provided via environment variables
 FTP_HOST = os.environ.get('FTP_HOST', 'nemeslab.com')
@@ -186,6 +207,7 @@ def clear_database():
     cursor.execute("DELETE FROM seen_entries")
     conn.commit()
 
+
 def purge_database(days: int):
     """Remove entries older than the specified number of days from the database."""
     cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat()
@@ -194,6 +216,18 @@ def purge_database(days: int):
         (cutoff,),
     )
     conn.commit()
+
+
+
+def save_entry_metadata(entry, feed_name, search_type, entry_id, timestamp):
+    """Store metadata about a new entry in the entries database."""
+    data = json.dumps(entry, default=str)
+    entries_cursor.execute(
+        "INSERT OR IGNORE INTO matched_entries (feed_name, search_type, entry_id, timestamp, data)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (feed_name, search_type, entry_id, timestamp.isoformat(), data),
+    )
+    entries_conn.commit()
 
 def matches_search_terms(entry, search_pattern):
     """Check if the entry matches the given search pattern."""
@@ -422,6 +456,7 @@ def main(upload: bool = True):
                 ):
                     # Record new entry for this topic
                     all_new_entries[topic][feed_name].append(entry)
+                    save_entry_metadata(entry, feed_name, topic, entry_id, entry_datetime)
                     seen_entries[entry_id] = ( # type: ignore
                         entry_datetime, entry_title
                     )
@@ -530,16 +565,19 @@ if __name__ == "__main__":
         clear_database()
         print("All entries removed from the database.")
         conn.close()
+        entries_conn.close()
         sys.exit(0)
 
     if args.purge_days is not None:
         purge_database(args.purge_days)
         print(f"Entries older than {args.purge_days} days removed from the database.")
         conn.close()
+        entries_conn.close()
         sys.exit(0)
 
     new_entries = main(upload=args.upload)
     conn.close()
+    entries_conn.close()
 
     if not args.no_summary:
         llmsummary.main(new_entries)
