@@ -83,7 +83,7 @@ def chat_completion(prompt, max_tokens=200):
         'Content-Type': 'application/json',
     }
     payload = json.dumps({
-        'model': 'o3-mini', # used gpt-4.1-nano before gpt-4o-mini
+        'model': 'gpt-4o', # used gpt-4.1-nano before gpt-4o-mini
         'messages': [{'role': 'user', 'content': prompt}],
         'max_tokens': max_tokens,
     }).encode('utf-8')
