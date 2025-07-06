@@ -30,6 +30,7 @@ Set these variables (e.g., in your crontab):
 - `FTP_USER`: FTP username
 - `FTP_PASS`: FTP password
 - `OPENAI_API_KEY`: OpenAI API key for summarization (optional; see below)
+- `OPENAI_REQUEST_DELAY`: Delay in seconds before retrying after a 429 error (default: 1 second)
 
 Alternatively, store your OpenAI API key in a file named `openaikulcs.env` next to `llmsummary.py`.
 

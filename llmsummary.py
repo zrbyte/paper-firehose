@@ -4,6 +4,7 @@ import json
 import html
 import datetime
 import urllib.request
+import time
 import logging
 from urllib.error import HTTPError, URLError
 
@@ -28,6 +29,11 @@ MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
 # this script so they can be edited without touching the code.
 SEARCHTERMS_FILE = os.path.join(MAIN_DIR, 'search_terms.json')
 LLM_PROMPTS_FILE = os.path.join(MAIN_DIR, 'llm_prompts.json')
+
+try:
+    REQUEST_DELAY = float(os.getenv('OPENAI_REQUEST_DELAY', '1'))
+except ValueError:
+    REQUEST_DELAY = 1.0
 
 
 def read_search_terms():
@@ -93,13 +99,27 @@ def chat_completion(prompt, max_tokens=200):
         headers=headers,
         data=payload,
     )
-    try:
-        with urllib.request.urlopen(req) as resp:
-            result = json.load(resp)
-        return result['choices'][0]['message']['content']
-    except (HTTPError, URLError) as e:
-        logging.error("API request failed: %s", e)
-        return "API request failed"
+
+    attempts = 2 if REQUEST_DELAY > 0 else 1
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(req) as resp:
+                result = json.load(resp)
+            return result['choices'][0]['message']['content']
+        except HTTPError as e:
+            if e.code == 429 and REQUEST_DELAY > 0 and attempt == 0:
+                logging.warning(
+                    "Rate limit hit, retrying after %.1f seconds", REQUEST_DELAY
+                )
+                time.sleep(REQUEST_DELAY)
+                continue
+            logging.error("API request failed: %s", e)
+            return "API request failed"
+        except URLError as e:
+            logging.error("API request failed: %s", e)
+            return "API request failed"
+
+    return "API request failed"
 
 
 def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=None, all_terms=None):
