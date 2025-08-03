@@ -212,21 +212,23 @@ def markdown_to_html(text: str) -> str:
     return f'<p>{html_text}</p>'
 
 
-def generate_html(primary_summary, rg_info, topic_summaries, output_path):
+def generate_html(entries, output_path):
     today = datetime.date.today()
-    sections = [
-        "<h2>Primary</h2>" + markdown_to_html(primary_summary),
-        "<h2>RG</h2>" + markdown_to_html(rg_info),
-    ]
-    for topic, summ in topic_summaries.items():
-        sections.append(f"<h2>{html.escape(topic)}</h2>" + markdown_to_html(summ))
+    template_path = os.path.join(MAIN_DIR, 'llmsummary_template.html')
+    with open(template_path, 'r', encoding='utf-8') as f:
+        template = f.read()
+
+    sections = []
+    for title, text in entries:
+        sections.append(
+            "<div class=\"callout\">"
+            f"<div class=\"callout-title\">{html.escape(title)}</div>"
+            f"<div class=\"callout-content\">{markdown_to_html(text)}</div>"
+            "</div>"
+        )
 
     content = '\n'.join(sections)
-    out_html = (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        f"<title>Summary {today}</title></head><body>"
-        f"<h1>Summary for {today}</h1>" + content + "</body></html>"
-    )
+    out_html = template.replace('%{title}', f'Summary for {today}').replace('%{entries}', content)
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(out_html)
 
@@ -306,12 +308,11 @@ def main(entries_per_topic=None):
             all_terms=terms,
         )
 
-    generate_html(
-        primary_summary,
-        rg_info,
-        topic_summaries,
-        os.path.join(MAIN_DIR, 'summary.html'),
-    )
+    entries = [('Primary', primary_summary), ('RG', rg_info)]
+    for topic, summ in topic_summaries.items():
+        entries.append((topic, summ))
+
+    generate_html(entries, os.path.join(MAIN_DIR, 'summary.html'))
 
 
 if __name__ == '__main__':
