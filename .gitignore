@@ -11,3 +11,4 @@ archive/
 *.db
 *.ipynb
 *.env
+.DS_Store
