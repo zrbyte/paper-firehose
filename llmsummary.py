@@ -212,6 +212,19 @@ def markdown_to_html(text: str) -> str:
     return f'<p>{html_text}</p>'
 
 
+def render_callout_blocks(text: str) -> str:
+    """Return HTML with each non-empty line wrapped in a callout."""
+    blocks = []
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        blocks.append(
+            f"<div class=\"callout\"><div class=\"callout-content\">{markdown_to_html(line)}</div></div>"
+        )
+    return '\n'.join(blocks)
+
+
 def generate_html(entries, output_path):
     today = datetime.date.today()
     template_path = os.path.join(MAIN_DIR, 'llmsummary_template.html')
@@ -220,12 +233,8 @@ def generate_html(entries, output_path):
 
     sections = []
     for title, text in entries:
-        sections.append(
-            "<div class=\"callout\">"
-            f"<div class=\"callout-title\">{html.escape(title)}</div>"
-            f"<div class=\"callout-content\">{markdown_to_html(text)}</div>"
-            "</div>"
-        )
+        sections.append(f"<h2>{html.escape(title)}</h2>")
+        sections.append(render_callout_blocks(text))
 
     content = '\n'.join(sections)
     out_html = template.replace('%{title}', f'Summary for {today}').replace('%{entries}', content)
