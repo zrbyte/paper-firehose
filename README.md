@@ -48,17 +48,36 @@ python rssparser.py [options]
 - `--clear-db`: Clear stored article IDs and exit
 - `--purge-days X`: Remove database entries older than `X` days and exit
 
-By default, the script summarizes articles with `llmsummary.py`. Each entry includes a title, summary, and a link. Summaries list each entry’s main points numbered (`1)`, `2)`, etc., with citation links like `[1](URL)`.
+By default, the script generates a ranked, topic‑organized report with `llmsummary.py` into `summary.html` for the entries discovered in the current run.
+
+### Daily summary (topic-ranked report)
+
+- **What it produces**: `summary.html` with per‑topic sections (e.g., `primary`, `rg`, `perovskites`). Each section contains:
+  - **Overview**: 1–3 sentence high‑level takeaways (when using LLM ranking).
+  - **Top items**: The most important papers from this run, each showing title (linked), authors, journal (bold), a 4–5 sentence summary, and a **Score** badge.
+
+- **How “Score” is calculated**:
+  - **LLM ranking (default when `OPENAI_API_KEY` is available)**
+    - The model ranks entries per topic and assigns an `importance_score` on a 1–5 scale (higher is more important) considering topical relevance, novelty/impact, and experimental/theory significance.
+    - The page displays that `importance_score` in the badge.
+
+- **Configuration**:
+  - `SUMMARY_TOP_N` (env var): maximum number of items per topic (default `8`).
+  - `llm_prompts.json`: optional per‑topic guidance to steer ranking and phrasing.
+  - `search_terms.json`: topic regexes are provided as context to the model.
+  - API key: set `OPENAI_API_KEY` or place it in `openaikulcs.env` next to `llmsummary.py`.
+
+- **“This run”**: The summary only considers the entries returned by `rssparser.py` during the current invocation, not historical data.
 
 ## GitHub Actions and Pages
 
 A GitHub Actions workflow (`.github/workflows/pages.yml`) runs the parser daily and publishes results to GitHub Pages:
 
-- Set the `OPENAI_API_KEY` repository secret for summarization.
+- Set the `OPENAI_API_KEY` repository secret for summarization (optional; if omitted, the ranked lists will be empty and only section headers/overviews may appear).
 - Use `--no-summary` in the workflow to disable summarization if desired.
 - Enable GitHub Pages in repository settings with source set to **GitHub Actions**.
 
-Your summaries will be available at the URL provided in the workflow output.
+Your summaries will be available at the URL provided in the workflow output. The `summary.html` is the topic‑ranked report for that day’s run.
 
 Current URLs:
 - [Summary](https://zrbyte.github.io/paper-firehose/summary.html)

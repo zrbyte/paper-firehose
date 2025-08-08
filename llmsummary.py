@@ -4,33 +4,45 @@ import json
 import html
 import datetime
 import urllib.request
+import time
+import random
 import logging
+from typing import Any, Dict, List, Tuple
 from urllib.error import HTTPError, URLError
 
 
-def load_api_key(path="openaikulcs.env"):
-    """Return the OpenAI API key from the environment or a file."""
+MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
+SEARCHTERMS_FILE = os.path.join(MAIN_DIR, 'search_terms.json')
+LLM_PROMPTS_FILE = os.path.join(MAIN_DIR, 'llm_prompts.json')
+SUMMARY_HTML_PATH = os.path.join(MAIN_DIR, 'summary.html')
+
+# Configuration constants (no environment variables)
+OPENAI_MODEL = "gpt-4o"  # default model to use
+OPENAI_MAX_RETRIES = 5  # total attempts including the first
+OPENAI_BACKOFF_SECONDS = 1.0  # initial backoff before exponential growth
+OPENAI_SLEEP_BETWEEN_TOPICS = 0.0  # pause between topic calls
+SUMMARY_TOP_N_DEFAULT = 8  # max number of items per topic
+OPENAI_MODEL_FALLBACK = "gpt-4o-mini"  # fallback if primary model fails
+PROMPT_MAX_ITEMS_PER_TOPIC = 50  # cap entries included in the prompt to limit tokens
+
+
+def load_api_key(path: str = "openaikulcs.env") -> str | None:
     env_key = os.getenv("OPENAI_API_KEY")
     if env_key:
         return env_key
-
-    if not os.path.isabs(path):
-        path = os.path.join(os.path.dirname(__file__), path)
-
-    with open(path, "r", encoding="utf-8") as f:
-        key = f.read().strip()
-        if "=" in key:
-            key = key.split("=", 1)[-1].strip()
-        return key
-
-MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
-# Both the search term patterns and the LLM prompt snippets are stored next to
-# this script so they can be edited without touching the code.
-SEARCHTERMS_FILE = os.path.join(MAIN_DIR, 'search_terms.json')
-LLM_PROMPTS_FILE = os.path.join(MAIN_DIR, 'llm_prompts.json')
+    try:
+        if not os.path.isabs(path):
+            path = os.path.join(os.path.dirname(__file__), path)
+        with open(path, "r", encoding="utf-8") as f:
+            key = f.read().strip()
+            if "=" in key:
+                key = key.split("=", 1)[-1].strip()
+            return key
+    except Exception:
+        return None
 
 
-def read_search_terms():
+def read_search_terms() -> Dict[str, str]:
     try:
         with open(SEARCHTERMS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -38,280 +50,369 @@ def read_search_terms():
         return {}
 
 
-def read_llm_prompts():
-    """Return a mapping of topic names to prompt snippets."""
+def read_llm_prompts() -> Dict[str, str]:
     try:
         with open(LLM_PROMPTS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception:
-        # Fall back to an empty mapping if the file is missing or invalid
         return {}
 
 
-def extract_titles(file_path):
-    """Return list of (title, link) tuples from an HTML file."""
-    if not os.path.exists(file_path):
-        return []
-
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = f.read()
-
-    entries = []
-    pattern = re.compile(r'<h3><a href="(?P<link>[^"]+)">(?P<title>.*?)</a></h3>', re.DOTALL)
-    for match in pattern.finditer(data):
-        title = html.unescape(match.group('title')).strip()
-        link = match.group('link')
-        entries.append((title, link))
-    return entries
-
-
-def extract_entry_details(entries):
-    """Return list of (title, summary, link) tuples from RSS entries."""
-    details = []
-    for entry in entries:
-        title = html.unescape(entry.get('title', '')).strip()
-        summary = html.unescape(entry.get('summary', '')).strip()
-        link = entry.get('link')
-        details.append((title, summary, link))
-    return details
-
-
-def chat_completion(prompt, max_tokens=200):
+def chat_completion_raw(
+    prompt: str,
+    max_tokens: int = 2000,
+    model: str | None = None,
+    max_retries: int | None = None,
+    base_backoff_seconds: float | None = None,
+) -> str:
     api_key = load_api_key()
+    if not api_key:
+        logging.error("OPENAI_API_KEY not found. Cannot perform LLM ranking.")
+        return ""
+    model_to_use = model or OPENAI_MODEL
     headers = {
         'Authorization': f'Bearer {api_key}',
         'Content-Type': 'application/json',
     }
     payload = json.dumps({
-        'model': 'gpt-4o-mini', # used gpt-4.1-nano before gpt-4o-mini
+        'model': model_to_use,
         'messages': [{'role': 'user', 'content': prompt}],
         'max_tokens': max_tokens,
+        'temperature': 0.2,
     }).encode('utf-8')
 
-    req = urllib.request.Request(
-        'https://api.openai.com/v1/chat/completions',
-        headers=headers,
-        data=payload,
-    )
-    try:
-        with urllib.request.urlopen(req) as resp:
-            result = json.load(resp)
-        return result['choices'][0]['message']['content']
-    except (HTTPError, URLError) as e:
-        logging.error("API request failed: %s", e)
-        return "API request failed"
-
-
-def summarize_entries(entries, prompt_prefix, char_limit=3000, search_context=None, all_terms=None):
-    if not entries:
-        return 'No new papers.'
-    def to_text(item):
-        if len(item) == 3:
-            t, s, link = item
-            return f"{t} ({link}) - {s}"
-        else:
-            t, link = item
-            return f"{t} ({link})"
-
-    joined = '; '.join(f"{i+1}) {to_text(e)}" for i, e in enumerate(entries))
-    context = f"Search terms: {search_context}\n" if search_context else ''
-    # Append the entire search term mapping so the model can see the patterns
-    terms_text = f"\nSearch terms:\n{json.dumps(all_terms, indent=2)}" if all_terms else ''
-    prompt = (
-        f"{prompt_prefix}\n"
-        f"{context}"
-        f"Titles: {joined}\n"
-        "Use these numbers when referencing papers.\n"
-        f"Provide a concise summary under {char_limit} characters."
-        f"{terms_text}"
-    )
-    result = chat_completion(prompt, max_tokens=2000)
-    return result
-
-
-def summarize_primary(entries, search_terms, prompt_prefix, char_limit=4000):
-    """Summarize primary entries with titles, links and summaries."""
-    if not entries:
-        return 'No new papers.'
-    def to_text(item):
-        if len(item) == 3:
-            t, s, link = item
-            return f"{t} ({link}) - {s}"
-        else:
-            t, link = item
-            return f"{t} ({link})"
-
-    titles_links = '; '.join(f"{i+1}) {to_text(e)}" for i, e in enumerate(entries))
-    prompt = (
-        f"{prompt_prefix}\n"
-        f"Titles and links: {titles_links}\n"
-        "Number referenced papers sequentially starting from 1.\n"
-        f"Provide a concise summary under {char_limit} characters."
-        # Include all search terms so the model is aware of every topic
-        f"\nSearch terms:\n{json.dumps(search_terms['primary'], indent=2)}"
-    )
-    result = chat_completion(prompt, max_tokens=4000)
-    return result
-
-
-def markdown_to_html(text: str) -> str:
-    """Convert a small subset of Markdown to HTML using only the standard library.
-
-    This parser handles links with nested parentheses such as ``[1](url(a)b)`` and
-    removes stray closing parentheses that occasionally appear after citation
-    links in the language model output.
-    """
-
-    result = []
-    pos = 0
-    while pos < len(text):
-        start = text.find('[', pos)
-        if start == -1:
-            result.append(html.escape(text[pos:]))
-            break
-        end = text.find(']', start)
-        if end == -1:
-            result.append(html.escape(text[pos:]))
-            break
-        result.append(html.escape(text[pos:start]))
-        link_text = text[start + 1 : end]
-
-        p = end + 1
-        while p < len(text) and text[p].isspace():
-            p += 1
-        if p < len(text) and text[p] == '(':  # possible link
-            p += 1
-            depth = 1
-            i = p
-            while i < len(text) and depth > 0:
-                if text[i] == '(':
-                    depth += 1
-                elif text[i] == ')':
-                    depth -= 1
-                    if depth == 0:
-                        break
-                i += 1
-            if depth == 0:
-                url = text[p:i]
-                result.append(
-                    f'<a href="{html.escape(url, quote=True)}">'
-                    f'{html.escape(link_text)}</a>'
+    url = 'https://api.openai.com/v1/chat/completions'
+    max_retries = max_retries if max_retries is not None else OPENAI_MAX_RETRIES
+    base_backoff = base_backoff_seconds if base_backoff_seconds is not None else OPENAI_BACKOFF_SECONDS
+    backoff = base_backoff
+    for attempt in range(1, max_retries + 1):
+        req = urllib.request.Request(url, headers=headers, data=payload)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                result = json.load(resp)
+            return result['choices'][0]['message']['content']
+        except HTTPError as e:
+            status = getattr(e, 'code', None)
+            # Retry on rate limit and transient server errors
+            if status in (429, 500, 502, 503, 504):
+                retry_after = None
+                try:
+                    retry_after = e.headers.get('Retry-After')  # type: ignore[attr-defined]
+                except Exception:
+                    retry_after = None
+                if retry_after:
+                    try:
+                        delay = max(float(retry_after), backoff)
+                    except ValueError:
+                        delay = backoff
+                else:
+                    # Exponential backoff with jitter
+                    jitter = random.uniform(0, 0.25 * backoff)
+                    delay = backoff + jitter
+                logging.warning(
+                    "OpenAI HTTP %s on attempt %d/%d. Sleeping %.2fs before retry.",
+                    status, attempt, max_retries, delay,
                 )
-                pos = i + 1
+                time.sleep(delay)
+                backoff *= 2
                 continue
+            logging.error("API request failed (non-retryable %s): %s", status, e)
+            return ""
+        except URLError as e:
+            # Network issues; retry
+            jitter = random.uniform(0, 0.25 * backoff)
+            delay = backoff + jitter
+            logging.warning(
+                "Network error on attempt %d/%d. Sleeping %.2fs before retry: %s",
+                attempt, max_retries, delay, e,
+            )
+            time.sleep(delay)
+            backoff *= 2
+            continue
+        except (KeyError, IndexError, json.JSONDecodeError) as e:
+            logging.error("Malformed API response: %s", e)
+            return ""
+    logging.error("Exhausted retries calling OpenAI API.")
+    return ""
 
-        # not a valid link, treat literally
-        result.append(html.escape(text[start:end + 1]))
-        pos = end + 1
 
-    html_text = ''.join(result)
-    html_text = re.sub(r'\*\*(.+?)\*\*', lambda m: f'<strong>{html.escape(m.group(1))}</strong>', html_text)
-    html_text = re.sub(r'\*(.+?)\*', lambda m: f'<em>{html.escape(m.group(1))}</em>', html_text)
-    html_text = re.sub(r'(</a>)\)', r'\1', html_text)  # remove stray parenthesis
-    html_text = html_text.replace('\n', '<br>')
-    return f'<p>{html_text}</p>'
-
-
-def generate_html(primary_summary, rg_info, topic_summaries, output_path):
-    today = datetime.date.today()
-    sections = [
-        "<h2>Primary</h2>" + markdown_to_html(primary_summary),
-        "<h2>RG</h2>" + markdown_to_html(rg_info),
-    ]
-    for topic, summ in topic_summaries.items():
-        sections.append(f"<h2>{html.escape(topic)}</h2>" + markdown_to_html(summ))
-
-    content = '\n'.join(sections)
-    out_html = (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        f"<title>Summary {today}</title></head><body>"
-        f"<h1>Summary for {today}</h1>" + content + "</body></html>"
+def chat_completion_with_fallback(prompt: str, max_tokens: int = 2000) -> str:
+    """Try primary model first; if it fails/empty, try fallback model."""
+    primary_model = OPENAI_MODEL
+    fallback_model = OPENAI_MODEL_FALLBACK
+    out = chat_completion_raw(
+        prompt,
+        max_tokens=max_tokens,
+        model=primary_model,
+        max_retries=OPENAI_MAX_RETRIES,
+        base_backoff_seconds=OPENAI_BACKOFF_SECONDS,
     )
+    if out:
+        return out
+    if fallback_model and fallback_model != primary_model:
+        logging.warning("Primary model '%s' failed or returned empty. Falling back to '%s'.", primary_model, fallback_model)
+        return chat_completion_raw(
+            prompt,
+            max_tokens=max_tokens,
+            model=fallback_model,
+            max_retries=OPENAI_MAX_RETRIES,
+            base_backoff_seconds=OPENAI_BACKOFF_SECONDS,
+        )
+    return out
+
+
+def _sanitize_json_text(raw_text: str) -> str:
+    """Strip common non-JSON artifacts the model may emit.
+
+    - Remove ```json ... ``` or ``` ... ``` fences
+    - Remove // line comments and /* ... */ block comments
+    - Remove trailing commas before } or ]
+    """
+    if not raw_text:
+        return ""
+    s = raw_text
+    try:
+        s = re.sub(r"```(?:json)?\s*([\s\S]*?)\s*```", r"\1", s, flags=re.IGNORECASE)
+        s = re.sub(r"^\s*//.*?$", "", s, flags=re.MULTILINE)
+        s = re.sub(r"/\*[\s\S]*?\*/", "", s)
+        s = re.sub(r",\s*([}\]])", r"\1", s)
+    except Exception:
+        pass
+    return s.strip()
+
+
+def extract_json_block(text: str) -> dict | None:
+    if not text:
+        return None
+    # Try direct parse first after sanitizing
+    sanitized = _sanitize_json_text(text)
+    try:
+        return json.loads(sanitized)
+    except Exception:
+        pass
+    # Fallback: extract the largest JSON object
+    first = sanitized.find('{')
+    last = sanitized.rfind('}')
+    if first != -1 and last != -1 and last > first:
+        candidate = _sanitize_json_text(sanitized[first:last+1])
+        try:
+            return json.loads(candidate)
+        except Exception:
+            return None
+    return None
+
+
+def flatten_entries(entries_per_feed: Dict[str, List[dict]]) -> List[dict]:
+    flat: List[dict] = []
+    for _feed, entries in (entries_per_feed or {}).items():
+        flat.extend(entries)
+    return flat
+
+
+def to_compact_items(entries: List[dict]) -> List[Dict[str, Any]]:
+    compact: List[Dict[str, Any]] = []
+    for e in entries:
+        compact.append({
+            'title': str(e.get('title', '')).strip(),
+            'summary': str(e.get('summary', e.get('description', ''))).strip(),
+            'link': e.get('link', ''),
+            'authors': ', '.join([a.get('name', '') for a in e.get('authors', [])]) if e.get('authors') else str(e.get('author', '')),
+            'published': str(e.get('published', e.get('updated', ''))),
+            'feed_title': str(e.get('feed_title', '')),
+        })
+    return compact
+
+
+def build_ranking_prompt(
+    topic: str,
+    items: List[Dict[str, Any]],
+    search_terms: Dict[str, str],
+    custom_prompt: str | None,
+    top_n: int,
+) -> str:
+    # Limit the number of entries included in the prompt to control token usage
+    limited_items = items[:PROMPT_MAX_ITEMS_PER_TOPIC] if items else []
+    numbered = []
+    for idx, it in enumerate(limited_items, start=1):
+        title = it.get('title', '')
+        link = it.get('link', '')
+        summary = it.get('summary', '')
+        authors = it.get('authors', '')
+        feed_title = it.get('feed_title', '')
+        numbered.append(f"{idx}) title: {title}\n   link: {link}\n   authors: {authors}\n   feed: {feed_title}\n   summary: {summary}")
+    base_instruction = custom_prompt or (
+        "You are a domain expert. From the list of entries for the given topic, select the most important papers for today and write a concise multi-sentence summary for each."
+    )
+    terms_text = json.dumps(search_terms, indent=2)
+    payload = (
+        f"Topic: {topic}\n"
+        f"Search term regex for this topic (for context only):\n{terms_text}\n\n"
+        f"Entries (each has title, link, authors, feed, summary):\n" + "\n\n".join(numbered) + "\n\n"
+        "Task: Rank the entries by importance for an expert reader. Consider topical relevance, novelty, likely impact, experimental/theory significance, and match to the topic. "
+        f"Return ONLY a valid RFC 8259 JSON object with at most {top_n} items. No markdown, no code fences, no comments, no trailing commas.\n"
+        "JSON shape (values shown for type only):\n"
+        "{\n"
+        "  \"topic\": \"string\",\n"
+        "  \"overview\": \"string\",\n"
+        "  \"items\": [\n"
+        "    {\n"
+        "      \"rank\": 1,\n"
+        "      \"importance_score\": 5,\n"
+        "      \"title\": \"string\",\n"
+        "      \"link\": \"string\",\n"
+        "      \"summary\": \"string\"\n"
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "Rules:\n- Use only the provided entries.\n- link must be copied from the matching entry.\n- Keep overview to 2-3 sentences.\n- Each item's summary must be 4-5 sentences.\n- items must be ordered by descending importance_score, ties broken by better match to topic.\n"
+    )
+    return f"{base_instruction}\n\n{payload}"
+
+
+def rank_entries_with_llm(
+    topic: str,
+    items: List[Dict[str, Any]],
+    search_term_for_topic: str | None,
+    custom_prompt: str | None,
+    top_n: int,
+) -> Dict[str, Any]:
+    if not items:
+        return {"topic": topic, "overview": "", "items": []}
+    # Build a map from link -> original metadata (authors, feed_title)
+    link_to_meta: Dict[str, Dict[str, str]] = {}
+    for it in items:
+        link = str(it.get('link', '')).strip()
+        if not link:
+            continue
+        link_to_meta[link] = {
+            'authors': str(it.get('authors', '')).strip(),
+            'feed_title': str(it.get('feed_title', '')).strip(),
+        }
+    prompt = build_ranking_prompt(
+        topic=topic,
+        items=items,
+        search_terms={topic: search_term_for_topic or ""},
+        custom_prompt=custom_prompt,
+        top_n=top_n,
+    )
+    raw = chat_completion_with_fallback(prompt, max_tokens=2000)
+    data = extract_json_block(raw)
+    if not data or not isinstance(data, dict) or 'items' not in data:
+        logging.error("LLM ranking failed or returned invalid data for topic '%s'. No items will be listed.", topic)
+        return {"topic": topic, "overview": "", "items": []}
+    # Sanitize items and enrich with authors/journal
+    sanitized: List[Dict[str, Any]] = []
+    seen_links = set()
+    for i, it in enumerate(data.get('items', [])[:top_n]):
+        title = str(it.get('title', '')).strip()
+        link = str(it.get('link', '')).strip()
+        if not title or not link or link in seen_links:
+            continue
+        seen_links.add(link)
+        meta = link_to_meta.get(link, {})
+        sanitized.append({
+            'rank': int(it.get('rank', i + 1)),
+            'importance_score': int(it.get('importance_score', 3)),
+            'title': title,
+            'link': link,
+            'summary': str(it.get('summary', '') or it.get('one_sentence_summary', '')).strip(),
+            'authors': meta.get('authors', ''),
+            'feed_title': meta.get('feed_title', ''),
+        })
+    overview = str(data.get('overview', '')).strip()
+    return {'topic': topic, 'overview': overview, 'items': sanitized}
+
+
+def render_html(sections: List[Dict[str, Any]], generated_for: datetime.date, output_path: str) -> None:
+    style = (
+        "body{font-family:Arial,sans-serif;margin:24px;}"
+        "h1{margin-bottom:4px;} h2{color:#2E8B57;margin-top:28px;}"
+        ".topic{margin-bottom:28px;}"
+        ".item{margin:10px 0;padding:10px;border:1px solid #e5e5e5;border-radius:8px;}"
+        ".badge{display:inline-block;background:#1f6feb;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;margin-left:8px;}"
+        ".meta{color:#666;font-size:13px;margin-top:4px;}"
+    )
+    parts: List[str] = []
+    parts.append("<!DOCTYPE html>")
+    parts.append("<html><head><meta charset='utf-8'>")
+    parts.append(f"<title>Summary {generated_for}</title>")
+    parts.append(f"<style>{style}</style></head><body>")
+    parts.append(f"<h1>Most important papers</h1>")
+    parts.append(f"<div class='meta'>Processed on {html.escape(str(generated_for))}</div>")
+
+    for sec in sections:
+        topic = sec['topic']
+        overview = sec.get('overview') or ''
+        items: List[Dict[str, Any]] = sec.get('items', [])
+        parts.append(f"<div class='topic'>")
+        parts.append(f"<h2>{html.escape(topic)}</h2>")
+        if overview:
+            parts.append(f"<p>{html.escape(overview)}</p>")
+        if not items:
+            parts.append("<p class='meta'>No new papers in this run.</p>")
+        else:
+            for it in items:
+                title = html.escape(it.get('title', ''))
+                link = html.escape(it.get('link', ''), quote=True)
+                summary = html.escape(it.get('summary', ''))
+                score = int(it.get('importance_score', 0))
+                authors = html.escape(it.get('authors', '') or '')
+                journal = html.escape(it.get('feed_title', '') or '')
+                parts.append("<div class='item'>")
+                parts.append(f"<div><a href='{link}'><strong>{title}</strong></a><span class='badge'>Score {score}</span></div>")
+                if authors or journal:
+                    details = []
+                    if authors:
+                        details.append(f"Authors: {authors}")
+                    if journal:
+                        details.append(f"Journal: <strong>{journal}</strong>")
+                    parts.append(f"<div class='meta'>{' — '.join(details)}</div>")
+                if summary:
+                    parts.append(f"<div class='meta'>{summary}</div>")
+                parts.append("</div>")
+        parts.append("</div>")
+
+    parts.append("</body></html>")
     with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(out_html)
+        f.write("\n".join(parts))
 
 
-def main(entries_per_topic=None):
+def main(entries_per_topic: Dict[str, Dict[str, List[dict]]] | None = None, top_n: int | None = None) -> None:
+    # This script is intended to be called with the entries from the current run.
+    # If entries are not provided, create an empty summary page noting that no new
+    # papers were processed in this invocation.
+    top_n_effective = top_n or SUMMARY_TOP_N_DEFAULT
     terms = read_search_terms()
     prompts = read_llm_prompts()
-    topics = list(terms.keys())
 
-    stable_files = {
-        'primary': 'results_primary.html',
-        'rg': 'rg_filtered_articles.html',
-    }
-    for t in topics:
-        if t not in stable_files:
-            stable_files[t] = f'{t}_filtered_articles.html'
+    generated_for = datetime.date.today()
 
-    def flatten(topic):
-        entries = []
-        for feed_entries in entries_per_topic.get(topic, {}).values(): # type: ignore
-            entries.extend(feed_entries)
-        return entries
+    if not entries_per_topic:
+        logging.warning("No entries_per_topic passed to llmsummary.main; generating placeholder summary.")
+        sections: List[Dict[str, Any]] = []
+        for topic in (terms.keys() or []):
+            sections.append({'topic': topic, 'overview': '', 'items': []})
+        render_html(sections, generated_for, SUMMARY_HTML_PATH)
+        return
 
-    if entries_per_topic is None:
-        primary_entries = extract_titles(os.path.join(MAIN_DIR, stable_files['primary']))
-        rg_entries = extract_titles(os.path.join(MAIN_DIR, stable_files['rg']))
-    else:
-        primary_entries = extract_entry_details(flatten('primary'))
-        rg_entries = extract_entry_details(flatten('rg'))
-
-    # Use a custom prompt if provided for the primary topic
-    # in case of no prompt, use a generic one in the second argument of the get() method
-    primary_prompt = prompts.get(
-        'primary',
-        'Summarize the following papers with emphasis on those best matching the primary search terms. '
-        'Summarize each entry in a bullet point and append [n](URL) at the end.'
-    )
-    primary_summary = summarize_primary(
-        primary_entries,
-        terms,
-        primary_prompt,
-        char_limit=4000,
-    )
-
-    # Prompt snippet for the rhombohedral graphene topic
-    # in case of no prompt, use a generic one in the second argument of the get() method
-    rg_prompt = prompts.get(
-        'rg',
-        "Summarize today's rg papers in bullet points and append [n](URL) at the end of each line."
-    )
-    rg_info = summarize_entries(
-        rg_entries,
-        rg_prompt,
-        char_limit=2000,
-        search_context=terms.get('rg'),
-        all_terms=terms,
-    )
-
-    topic_summaries = {}
-    for t in topics:
-        if t in ('primary', 'rg'):
-            continue
-        if entries_per_topic is None:
-            entries = extract_titles(os.path.join(MAIN_DIR, stable_files[t]))
-        else:
-            entries = extract_entry_details(flatten(t))
-        # Fall back to a generic instruction if no prompt is defined for the topic
-        topic_prompt = prompts.get(
-            t,
-            f"Summarize today's {t} papers in bullet points and append [n](URL) at the end of each line."
+    sections: List[Dict[str, Any]] = []
+    sleep_between_topics = OPENAI_SLEEP_BETWEEN_TOPICS
+    for topic, per_feed in entries_per_topic.items():
+        flat = flatten_entries(per_feed)
+        compact = to_compact_items(flat)
+        custom_prompt = prompts.get(topic)
+        ranked = rank_entries_with_llm(
+            topic=topic,
+            items=compact,
+            search_term_for_topic=terms.get(topic),
+            custom_prompt=custom_prompt,
+            top_n=top_n_effective,
         )
-        topic_summaries[t] = summarize_entries(
-            entries,
-            topic_prompt,
-            char_limit=2000,
-            search_context=terms.get(t),
-            all_terms=terms,
-        )
+        sections.append(ranked)
+        if sleep_between_topics > 0:
+            time.sleep(sleep_between_topics)
 
-    generate_html(
-        primary_summary,
-        rg_info,
-        topic_summaries,
-        os.path.join(MAIN_DIR, 'summary.html'),
-    )
+    render_html(sections, generated_for, SUMMARY_HTML_PATH)
 
 
 if __name__ == '__main__':
