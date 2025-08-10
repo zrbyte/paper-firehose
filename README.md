@@ -62,7 +62,6 @@ By default, the script generates a ranked, topic‑organized report with `llmsum
     - The page displays that `importance_score` in the badge.
 
 - **Configuration**:
-  - `SUMMARY_TOP_N` (env var): maximum number of items per topic (default `8`).
   - `llm_prompts.json`: optional per‑topic guidance to steer ranking and phrasing.
   - `search_terms.json`: topic regexes are provided as context to the model.
   - API key: set `OPENAI_API_KEY` or place it in `openaikulcs.env` next to `llmsummary.py`.
