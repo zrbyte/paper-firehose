@@ -4,7 +4,7 @@ The project fetches articles from various journal feeds, filters them using regu
 
 ## Installation
 
-Developed with **Python 3.11**. Install dependencies:
+Developed with **Python 3.8**. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
