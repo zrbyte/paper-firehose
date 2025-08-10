@@ -19,7 +19,7 @@ LLM_PROMPTS_FILE = os.path.join(MAIN_DIR, 'llm_prompts.json')
 SUMMARY_HTML_PATH = os.path.join(MAIN_DIR, 'summary.html')
 
 # Configuration constants (no environment variables)
-OPENAI_MODEL = "gpt-4o"  # default model to use
+OPENAI_MODEL = "gpt-4o-mini"  # default model to use
 OPENAI_MAX_RETRIES = 5  # total attempts including the first
 OPENAI_BACKOFF_SECONDS = 1.0  # initial backoff before exponential growth
 OPENAI_SLEEP_BETWEEN_TOPICS = 0.0  # pause between topic calls
@@ -229,7 +229,8 @@ def build_ranking_prompt(
     topic: str,
     items: List[Dict[str, Any]],
     search_terms: Dict[str, str],
-    custom_prompt: str | None,
+    ranking_prompt: str,
+    topic_prompt: str | None,
     top_n: int,
 ) -> str:
     # Limit the number of entries included in the prompt to control token usage
@@ -242,13 +243,14 @@ def build_ranking_prompt(
         authors = it.get('authors', '')
         feed_title = it.get('feed_title', '')
         numbered.append(f"{idx}) title: {title}\n   link: {link}\n   authors: {authors}\n   feed: {feed_title}\n   summary: {summary}")
-    base_instruction = custom_prompt or (
+    base_instruction = ranking_prompt or (
         "You are a domain expert. From the list of entries for the given topic, select the most important papers for today and write a concise multi-sentence summary for each."
     )
     terms_text = json.dumps(search_terms, indent=2)
     payload = (
         f"Topic: {topic}\n"
-        f"Search term regex for this topic (for context only):\n{terms_text}\n\n"
+        + (f"Topic-specific guidance:\n{topic_prompt}\n\n" if topic_prompt else "")
+        + f"Search term regex for this topic (for context only):\n{terms_text}\n\n"
         f"Entries (each has title, link, authors, feed, summary):\n" + "\n\n".join(numbered) + "\n\n"
         "Task: Rank the entries by importance for an expert reader. Consider topical relevance, novelty, likely impact, experimental/theory significance, and match to the topic. "
         f"Return ONLY a valid RFC 8259 JSON object with at most {top_n} items. No markdown, no code fences, no comments, no trailing commas.\n"
@@ -275,7 +277,8 @@ def rank_entries_with_llm(
     topic: str,
     items: List[Dict[str, Any]],
     search_term_for_topic: str | None,
-    custom_prompt: str | None,
+    ranking_prompt: str,
+    topic_prompt: str | None,
     top_n: int,
 ) -> Dict[str, Any]:
     if not items:
@@ -294,7 +297,8 @@ def rank_entries_with_llm(
         topic=topic,
         items=items,
         search_terms={topic: search_term_for_topic or ""},
-        custom_prompt=custom_prompt,
+        ranking_prompt=ranking_prompt,
+        topic_prompt=topic_prompt,
         top_n=top_n,
     )
     raw = chat_completion_with_fallback(prompt, max_tokens=2000)
@@ -399,15 +403,17 @@ def main(entries_per_topic: Dict[str, Dict[str, List[dict]]] | None = None, top_
 
     sections: List[Dict[str, Any]] = []
     sleep_between_topics = OPENAI_SLEEP_BETWEEN_TOPICS
+    ranking_prompt = prompts.get('ranking_prompt', '').strip()
     for topic, per_feed in entries_per_topic.items():
         flat = flatten_entries(per_feed)
         compact = to_compact_items(flat)
-        custom_prompt = prompts.get(topic)
+        topic_prompt = prompts.get(topic)
         ranked = rank_entries_with_llm(
             topic=topic,
             items=compact,
             search_term_for_topic=terms.get(topic),
-            custom_prompt=custom_prompt,
+            ranking_prompt=ranking_prompt,
+            topic_prompt=topic_prompt,
             top_n=top_n_effective,
         )
         sections.append(ranked)
