@@ -19,13 +19,13 @@ LLM_PROMPTS_FILE = os.path.join(MAIN_DIR, 'llm_prompts.json')
 SUMMARY_HTML_PATH = os.path.join(MAIN_DIR, 'summary.html')
 
 # Configuration constants (no environment variables)
-OPENAI_MODEL = "gpt-4o-mini"  # default model to use
+OPENAI_MODEL = "gpt-5"  # default model to use
 OPENAI_MAX_RETRIES = 5  # total attempts including the first
 OPENAI_BACKOFF_SECONDS = 1.0  # initial backoff before exponential growth
 OPENAI_SLEEP_BETWEEN_TOPICS = 0.0  # pause between topic calls
-SUMMARY_TOP_N_DEFAULT = 8  # max number of items per topic
+SUMMARY_TOP_N_DEFAULT = 8  # max number of items returned per topic
+PROMPT_MAX_ITEMS_PER_TOPIC = 20  # cap entries included in the prompt to limit tokens
 OPENAI_MODEL_FALLBACK = "gpt-4o-mini"  # fallback if primary model fails
-PROMPT_MAX_ITEMS_PER_TOPIC = 50  # cap entries included in the prompt to limit tokens
 
 
 def load_api_key(path: str = "openaikulcs.env") -> str | None:
@@ -60,6 +60,94 @@ def read_llm_prompts() -> Dict[str, str]:
         return {}
 
 
+def _extract_text_from_openai_response(result: Dict[str, Any]) -> str:
+    """Extract assistant text from either Chat Completions or Responses API payloads.
+
+    Handles:
+    - Chat Completions: choices[0].message.content as str or list of parts
+    - Responses API: output_text shortcut, or output[*].content[*].text{value}
+    - Fallbacks: choices[0].text, top-level content/message.content
+    """
+    if not result:
+        return ""
+    # Responses API convenience field
+    try:
+        output_text = result.get('output_text')
+        if isinstance(output_text, str) and output_text.strip():
+            return output_text
+    except Exception:
+        pass
+
+    def _texts_from_parts(parts: Any) -> str:
+        if not isinstance(parts, list):
+            return ""
+        texts: List[str] = []
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            # Common shapes: {'type': 'text', 'text': '...'} or {'type': 'output_text', 'text': {'value': '...'}}
+            text_val = part.get('text')
+            if isinstance(text_val, str):
+                if text_val:
+                    texts.append(text_val)
+                    continue
+            if isinstance(text_val, dict):
+                val = text_val.get('value')
+                if isinstance(val, str) and val:
+                    texts.append(val)
+                    continue
+            # Some providers use 'value' directly
+            direct_val = part.get('value')
+            if isinstance(direct_val, str) and direct_val:
+                texts.append(direct_val)
+        return "\n".join([t for t in texts if t])
+    # Chat Completions style
+    try:
+        choices = result.get('choices')
+        if isinstance(choices, list) and choices:
+            message = choices[0].get('message') or {}
+            content = message.get('content')
+            if isinstance(content, str) and content:
+                return content
+            if isinstance(content, list):
+                joined = _texts_from_parts(content)
+                if joined:
+                    return joined
+            # some models return 'text' at the choice level
+            text = choices[0].get('text')
+            if isinstance(text, str) and text:
+                return text
+    except Exception:
+        pass
+    # Responses API style (2024+)
+    try:
+        output = result.get('output')
+        if isinstance(output, list) and output:
+            # Look for message items with content parts
+            for item in output:
+                if not isinstance(item, dict):
+                    continue
+                content_parts = item.get('content')
+                joined = _texts_from_parts(content_parts)
+                if joined:
+                    return joined
+    except Exception:
+        pass
+    # Some implementations may use a top-level 'content' or 'message'
+    try:
+        content = result.get('content')
+        if isinstance(content, str) and content:
+            return content
+        message = result.get('message')
+        if isinstance(message, dict):
+            content2 = message.get('content')
+            if isinstance(content2, str) and content2:
+                return content2
+    except Exception:
+        pass
+    return ""
+
+
 def chat_completion_raw(
     prompt: str,
     max_tokens: int = 2000,
@@ -76,65 +164,171 @@ def chat_completion_raw(
         'Authorization': f'Bearer {api_key}',
         'Content-Type': 'application/json',
     }
-    payload = json.dumps({
+    prefer_responses = str(model_to_use).lower().startswith('gpt-5')
+    chat_body: Dict[str, Any] = {
         'model': model_to_use,
         'messages': [{'role': 'user', 'content': prompt}],
-        'max_tokens': max_tokens,
         'temperature': 0.2,
-    }).encode('utf-8')
+        'response_format': {'type': 'json_object'},  # Enable JSON formatting
+    }
+    chat_payload = json.dumps(chat_body).encode('utf-8')
 
-    url = 'https://api.openai.com/v1/chat/completions'
+    url_chat = 'https://api.openai.com/v1/chat/completions'
+    url_resp = 'https://api.openai.com/v1/responses'
+    last_debug_blob: str = ''
     max_retries = max_retries if max_retries is not None else OPENAI_MAX_RETRIES
     base_backoff = base_backoff_seconds if base_backoff_seconds is not None else OPENAI_BACKOFF_SECONDS
     backoff = base_backoff
     for attempt in range(1, max_retries + 1):
-        req = urllib.request.Request(url, headers=headers, data=payload)
-        try:
-            with urllib.request.urlopen(req) as resp:
-                result = json.load(resp)
-            return result['choices'][0]['message']['content']
-        except HTTPError as e:
-            status = getattr(e, 'code', None)
-            # Retry on rate limit and transient server errors
-            if status in (429, 500, 502, 503, 504):
-                retry_after = None
+        # Optionally try Responses API first for next-gen models (e.g., gpt-5)
+        if prefer_responses:
+            try:
+                headers_resp = dict(headers)
+                headers_resp['OpenAI-Beta'] = 'assistants=v2'
+                resp_payload = json.dumps({
+                    'model': model_to_use,
+                    'input': [
+                        {
+                            'role': 'user',
+                            'content': [
+                                {'type': 'input_text', 'text': prompt}
+                            ],
+                        }
+                    ],
+                    'max_output_tokens': max(256, int(max_tokens)),
+                    'text': {'format': {'type': 'json_object'}},
+                }).encode('utf-8')
+                req_first = urllib.request.Request(url_resp, headers=headers_resp, data=resp_payload)
+                with urllib.request.urlopen(req_first) as resp_first:
+                    result_first = json.load(resp_first)
                 try:
-                    retry_after = e.headers.get('Retry-After')  # type: ignore[attr-defined]
+                    last_debug_blob = json.dumps(result_first)[:4000]
                 except Exception:
-                    retry_after = None
-                if retry_after:
+                    last_debug_blob = str(result_first)[:4000]
+                text_first = _extract_text_from_openai_response(result_first)
+                if text_first:
+                    return text_first
+            except HTTPError as he:
+                # Capture 4xx/5xx body for debugging
+                try:
+                    err_body = he.read().decode('utf-8', errors='ignore') if hasattr(he, 'read') else ''
+                except Exception:
+                    err_body = ''
+                if err_body:
                     try:
-                        delay = max(float(retry_after), backoff)
-                    except ValueError:
-                        delay = backoff
-                else:
-                    # Exponential backoff with jitter
-                    jitter = random.uniform(0, 0.25 * backoff)
-                    delay = backoff + jitter
-                logging.warning(
-                    "OpenAI HTTP %s on attempt %d/%d. Sleeping %.2fs before retry.",
-                    status, attempt, max_retries, delay,
-                )
-                time.sleep(delay)
-                backoff *= 2
-                continue
-            logging.error("API request failed (non-retryable %s): %s", status, e)
-            return ""
-        except URLError as e:
-            # Network issues; retry
-            jitter = random.uniform(0, 0.25 * backoff)
-            delay = backoff + jitter
-            logging.warning(
-                "Network error on attempt %d/%d. Sleeping %.2fs before retry: %s",
-                attempt, max_retries, delay, e,
-            )
-            time.sleep(delay)
-            backoff *= 2
-            continue
-        except (KeyError, IndexError, json.JSONDecodeError) as e:
-            logging.error("Malformed API response: %s", e)
-            return ""
-    logging.error("Exhausted retries calling OpenAI API.")
+                        assets_dir = os.path.join(MAIN_DIR, 'assets')
+                        os.makedirs(assets_dir, exist_ok=True)
+                        debug_path = os.path.join(assets_dir, 'llm_debug_latest.json')
+                        dbg_obj = {
+                            'endpoint': 'responses',
+                            'status': getattr(he, 'code', None),
+                            'payload': json.loads(resp_payload.decode('utf-8')) if resp_payload else {},
+                            'error': err_body[:3500],
+                        }
+                        with open(debug_path, 'w', encoding='utf-8') as dbg:
+                            json.dump(dbg_obj, dbg)
+                        logging.error("Responses-first HTTPError; wrote body to %s", debug_path)
+                    except Exception:
+                        logging.error("Responses-first HTTPError; could not write debug body")
+                # fall back to chat
+            except Exception:
+                # fall back to chat
+                pass
+
+        # Try Chat Completions only if model is not a next-gen Responses-only model
+        if not prefer_responses:
+            try:
+                req = urllib.request.Request(url_chat, headers=headers, data=chat_payload)
+                with urllib.request.urlopen(req) as resp:
+                    result = json.load(resp)
+                try:
+                    last_debug_blob = json.dumps(result)[:4000]
+                except Exception:
+                    last_debug_blob = str(result)[:4000]
+                text = _extract_text_from_openai_response(result)
+                if text:
+                    return text
+                # fallthrough to try responses API if empty
+            except HTTPError as e:
+                status = getattr(e, 'code', None)
+                # Retry on rate limit and transient server errors
+                if status in (429, 500, 502, 503, 504):
+                    retry_after = None
+                    try:
+                        retry_after = e.headers.get('Retry-After')  # type: ignore[attr-defined]
+                    except Exception:
+                        retry_after = None
+                    if retry_after:
+                        try:
+                            delay = max(float(retry_after), backoff)
+                        except ValueError:
+                            delay = backoff
+                    else:
+                        # Exponential backoff with jitter
+                        jitter = random.uniform(0, 0.25 * backoff)
+                        delay = backoff + jitter
+                    logging.warning(
+                        "OpenAI HTTP %s on attempt %d/%d. Sleeping %.2fs before retry.",
+                        status, attempt, max_retries, delay,
+                    )
+                    time.sleep(delay)
+                    backoff *= 2
+                    continue
+                # Try Responses API as fallback for 400/404 errors
+                try:
+                    err_body = e.read().decode('utf-8', errors='ignore') if hasattr(e, 'read') else ''
+                except Exception:
+                    err_body = ''
+                
+                if status in (400, 404):
+                    try:
+                        headers_resp = dict(headers)
+                        headers_resp['OpenAI-Beta'] = 'assistants=v2'
+                        resp_payload = json.dumps({
+                            'model': model_to_use,
+                            'input': [{'role': 'user', 'content': [{'type': 'input_text', 'text': prompt}]}],
+                            'max_output_tokens': max(256, int(max_tokens)),
+                            'text': {'format': {'type': 'json_object'}},
+                        }).encode('utf-8')
+                        req2 = urllib.request.Request(url_resp, headers=headers_resp, data=resp_payload)
+                        with urllib.request.urlopen(req2) as resp2:
+                            result2 = json.load(resp2)
+                        text2 = _extract_text_from_openai_response(result2)
+                        if text2:
+                            return text2
+                    except Exception as e2:
+                        logging.error("Responses API fallback failed: %s", e2)
+                # Persist error body for debugging before returning
+                if err_body:
+                    try:
+                        assets_dir = os.path.join(MAIN_DIR, 'assets')
+                        os.makedirs(assets_dir, exist_ok=True)
+                        debug_path = os.path.join(assets_dir, 'llm_debug_latest.json')
+                        dbg_obj = {
+                            'endpoint': 'chat.completions',
+                            'status': status,
+                            'payload': json.loads(chat_payload.decode('utf-8')) if chat_payload else {},
+                            'error': err_body[:3500],
+                        }
+                        with open(debug_path, 'w', encoding='utf-8') as dbg:
+                            json.dump(dbg_obj, dbg)
+                        logging.error("API request failed (non-retryable %s); wrote body to %s", status, debug_path)
+                    except Exception:
+                        logging.error("API request failed (non-retryable %s); could not write debug body", status)
+                logging.error("API request failed (non-retryable %s): %s", status, e)
+                return ""
+    if last_debug_blob:
+        try:
+            assets_dir = os.path.join(MAIN_DIR, 'assets')
+            os.makedirs(assets_dir, exist_ok=True)
+            debug_path = os.path.join(assets_dir, 'llm_debug_latest.json')
+            with open(debug_path, 'w', encoding='utf-8') as dbg:
+                dbg.write(last_debug_blob)
+            logging.error("Exhausted retries; wrote last LLM response to %s", debug_path)
+        except Exception:
+            logging.error("Exhausted retries; could not write LLM debug blob")
+    else:
+        logging.error("Exhausted retries calling OpenAI API.")
     return ""
 
 
@@ -142,15 +336,19 @@ def chat_completion_with_fallback(prompt: str, max_tokens: int = 2000) -> str:
     """Try primary model first; if it fails/empty, try fallback model."""
     primary_model = OPENAI_MODEL
     fallback_model = OPENAI_MODEL_FALLBACK
-    out = chat_completion_raw(
+    
+    # Try primary model
+    result = chat_completion_raw(
         prompt,
         max_tokens=max_tokens,
         model=primary_model,
         max_retries=OPENAI_MAX_RETRIES,
         base_backoff_seconds=OPENAI_BACKOFF_SECONDS,
     )
-    if out:
-        return out
+    if result:
+        return result
+    
+    # Try fallback model if different from primary
     if fallback_model and fallback_model != primary_model:
         logging.warning("Primary model '%s' failed or returned empty. Falling back to '%s'.", primary_model, fallback_model)
         return chat_completion_raw(
@@ -160,7 +358,8 @@ def chat_completion_with_fallback(prompt: str, max_tokens: int = 2000) -> str:
             max_retries=OPENAI_MAX_RETRIES,
             base_backoff_seconds=OPENAI_BACKOFF_SECONDS,
         )
-    return out
+    
+    return ""
 
 
 def _sanitize_json_text(raw_text: str) -> str:
@@ -234,7 +433,9 @@ def build_ranking_prompt(
     top_n: int,
 ) -> str:
     # Limit the number of entries included in the prompt to control token usage
-    limited_items = items[:PROMPT_MAX_ITEMS_PER_TOPIC] if items else []
+    # Use fewer items for perovskites to prevent JSON truncation
+    item_limit = 5 if topic == 'perovskites' else PROMPT_MAX_ITEMS_PER_TOPIC
+    limited_items = items[:item_limit] if items else []
     numbered = []
     for idx, it in enumerate(limited_items, start=1):
         title = it.get('title', '')
@@ -301,9 +502,24 @@ def rank_entries_with_llm(
         topic_prompt=topic_prompt,
         top_n=top_n,
     )
-    raw = chat_completion_with_fallback(prompt, max_tokens=2000)
+    # Increase output tokens for gpt-5 models that use reasoning tokens separately
+    raw = chat_completion_with_fallback(prompt, max_tokens=6000)
+    if not raw:
+        logging.error("LLM returned empty content for topic '%s'", topic)
+        return {"topic": topic, "overview": "", "items": []}
     data = extract_json_block(raw)
     if not data or not isinstance(data, dict) or 'items' not in data:
+        # Persist the raw (non-parseable) LLM output for debugging
+        try:
+            assets_dir = os.path.join(MAIN_DIR, 'assets')
+            os.makedirs(assets_dir, exist_ok=True)
+            safe_topic = re.sub(r"[^a-zA-Z0-9_-]+", "_", topic)
+            debug_path = os.path.join(assets_dir, f"llm_raw_{safe_topic}.json")
+            with open(debug_path, 'w', encoding='utf-8') as f:
+                f.write(raw)
+            logging.error("Wrote non-parseable LLM output for topic '%s' to %s", topic, debug_path)
+        except Exception:
+            pass
         logging.error("LLM ranking failed or returned invalid data for topic '%s'. No items will be listed.", topic)
         return {"topic": topic, "overview": "", "items": []}
     # Sanitize items and enrich with authors/journal
