@@ -4,19 +4,20 @@ PaperQA2 PDF Summarizer
 
 This script downloads a PDF from arXiv and uses PaperQA2 to generate a comprehensive summary.
 Usage: python paperqa_summarizer.py [arxiv_id_or_url]
+
+Compatible with Python 3.11+ and PaperQA 5.x
 """
 
 import os
 import sys
 import re
-import asyncio
-from pathlib import Path
-from urllib.parse import urlparse
+from typing import Optional, List, Dict
 import requests
-from paperqa import Docs
+import asyncio
+from paperqa import Settings, ask
 
 
-def load_api_key(path: str = "openaikulcs.env") -> str | None:
+def load_api_key(path: str = "openaikulcs.env") -> Optional[str]:
     """Load OpenAI API key from environment variable or file."""
     env_key = os.getenv("OPENAI_API_KEY")
     if env_key:
@@ -80,71 +81,21 @@ def download_arxiv_pdf(arxiv_id: str, output_dir: str = ".") -> str:
         raise Exception(f"Failed to download PDF: {e}")
 
 
-async def summarize_paper_async(pdf_path: str, custom_questions: list = None) -> dict:
-    """Use PaperQA2 to analyze the paper and answer questions."""
+async def summarize_paper_async(paper_dir: str, custom_questions: Optional[List[str]] = None) -> Dict[str, str]:
+    """Use PaperQA2 to analyze the paper and answer questions asynchronously."""
     
-    # Initialize PaperQA2 Docs object
-    docs = Docs()
+    # Configure PaperQA to use gpt-4o-mini for cost efficiency
+    print("Configuring PaperQA2 to use gpt-4o-mini for cost efficiency...")
     
-    print(f"Adding PDF to PaperQA2: {pdf_path}")
-    try:
-        # Add the PDF to the docs
-        await docs.aadd(pdf_path)
-    except Exception as e:
-        print(f"Error adding PDF: {e}")
-        # Try synchronous version as fallback
-        docs.add(pdf_path)
+    # Create settings with gpt-4o-mini and point to paper directory
+    settings = Settings(
+        llm="gpt-4o-mini",
+        summary_llm="gpt-4o-mini",
+        paper_directory=paper_dir,
+        index_recursively=True,
+    )
     
-    # Default questions for comprehensive analysis
-    default_questions = [
-        "What is the main research question or objective of this paper?",
-        "What are the key findings and results?", 
-        "What methods or techniques were used in this research?",
-        "What are the main conclusions and implications?",
-        "What are the limitations or areas for future work mentioned?"
-    ]
-    
-    questions = custom_questions if custom_questions else default_questions
-    
-    results = {}
-    
-    for question in questions:
-        print(f"Asking: {question}")
-        try:
-            answer = await docs.aquery(question)
-            # Extract answer text from response object
-            if hasattr(answer, 'answer'):
-                results[question] = answer.answer
-            elif hasattr(answer, 'text'):
-                results[question] = answer.text
-            else:
-                results[question] = str(answer)
-        except Exception as e:
-            try:
-                # Fallback to synchronous version
-                answer = docs.query(question)
-                if hasattr(answer, 'answer'):
-                    results[question] = answer.answer
-                elif hasattr(answer, 'text'):
-                    results[question] = answer.text
-                else:
-                    results[question] = str(answer)
-            except Exception as e2:
-                results[question] = f"Error generating answer: {e2}"
-        
-        print(f"✓ Answer received")
-    
-    return results
-
-
-def summarize_paper(pdf_path: str, custom_questions: list = None) -> dict:
-    """Use PaperQA2 to analyze the paper and answer questions synchronously."""
-    
-    # Initialize PaperQA2 Docs object
-    docs = Docs()
-    
-    print(f"Adding PDF to PaperQA2: {pdf_path}")
-    docs.add(pdf_path)
+    print(f"Analyzing papers in directory: {paper_dir}")
     
     # Default questions for comprehensive analysis
     default_questions = [
@@ -156,22 +107,16 @@ def summarize_paper(pdf_path: str, custom_questions: list = None) -> dict:
     ]
     
     questions = custom_questions if custom_questions else default_questions
-    
     results = {}
     
     for question in questions:
         print(f"Asking: {question}")
         try:
-            # Use async query but run in new event loop
-            answer = asyncio.run(docs.aquery(question))
-            # Extract answer text from response object
-            if hasattr(answer, 'answer'):
-                results[question] = answer.answer
-            elif hasattr(answer, 'text'):
-                results[question] = answer.text
-            else:
-                results[question] = str(answer)
-            print(f"✓ Answer received")
+            # Use the ask function with settings - it will automatically find and process papers in the directory
+            response = await ask(question, settings)
+            # Extract answer from the session
+            results[question] = response.session.answer
+            print("✓ Answer received")
         except Exception as e:
             results[question] = f"Error generating answer: {e}"
             print(f"✗ Error: {e}")
@@ -179,7 +124,12 @@ def summarize_paper(pdf_path: str, custom_questions: list = None) -> dict:
     return results
 
 
-def format_summary(results: dict, arxiv_id: str) -> str:
+def summarize_paper(paper_dir: str, custom_questions: Optional[List[str]] = None) -> Dict[str, str]:
+    """Synchronous wrapper for the async summarize function."""
+    return asyncio.run(summarize_paper_async(paper_dir, custom_questions))
+
+
+def format_summary(results: Dict[str, str], arxiv_id: str) -> str:
     """Format the analysis results into a readable summary."""
     
     summary = f"""
@@ -199,11 +149,10 @@ A: {answer}
 """
     
     summary += f"{'='*80}\n"
-    
     return summary
 
 
-def main():
+def main() -> None:
     """Main function to run the PaperQA summarizer."""
     
     # Default to the magic angle twisted bilayer graphene paper if no argument provided
@@ -242,7 +191,8 @@ def main():
         
         # Analyze paper with PaperQA2
         print("\nAnalyzing paper with PaperQA2...")
-        results = summarize_paper(pdf_path)
+        # Pass the directory containing the PDF, not the specific file path
+        results = summarize_paper(output_dir)
         
         # Format and display results
         summary = format_summary(results, arxiv_id)
