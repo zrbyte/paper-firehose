@@ -484,7 +484,7 @@ def rank_entries_with_llm(
 ) -> Dict[str, Any]:
     if not items:
         return {"topic": topic, "overview": "", "items": []}
-    # Build a map from link -> original metadata (authors, feed_title)
+    # Build a map from link -> original metadata (authors, feed_title, original_summary)
     link_to_meta: Dict[str, Dict[str, str]] = {}
     for it in items:
         link = str(it.get('link', '')).strip()
@@ -493,6 +493,7 @@ def rank_entries_with_llm(
         link_to_meta[link] = {
             'authors': str(it.get('authors', '')).strip(),
             'feed_title': str(it.get('feed_title', '')).strip(),
+            'original_summary': str(it.get('summary', '')).strip(),
         }
     prompt = build_ranking_prompt(
         topic=topic,
@@ -540,6 +541,7 @@ def rank_entries_with_llm(
             'summary': str(it.get('summary', '') or it.get('one_sentence_summary', '')).strip(),
             'authors': meta.get('authors', ''),
             'feed_title': meta.get('feed_title', ''),
+            'original_summary': meta.get('original_summary', ''),
         })
     overview = str(data.get('overview', '')).strip()
     return {'topic': topic, 'overview': overview, 'items': sanitized}
@@ -553,12 +555,32 @@ def render_html(sections: List[Dict[str, Any]], generated_for: datetime.date, ou
         ".item{margin:10px 0;padding:10px;border:1px solid #e5e5e5;border-radius:8px;}"
         ".badge{display:inline-block;background:#1f6feb;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;margin-left:8px;}"
         ".meta{color:#666;font-size:13px;margin-top:4px;}"
+        ".abstract-toggle{cursor:pointer;color:#4682B4;text-decoration:none;font-size:12px;margin-top:8px;display:inline-block;}"
+        ".abstract-toggle:hover{text-decoration:underline;}"
+        ".abstract-content{display:none;margin-top:8px;padding:8px;background:#f8f9fa;border-left:3px solid #4682B4;font-size:12px;color:#555;border-radius:3px;}"
+        ".abstract-content.show{display:block;}"
+        ".abstract-arrow{transition:transform 0.2s;display:inline-block;margin-right:4px;}"
+        ".abstract-arrow.rotated{transform:rotate(90deg);}"
     )
     parts: List[str] = []
     parts.append("<!DOCTYPE html>")
     parts.append("<html><head><meta charset='utf-8'>")
     parts.append(f"<title>Summary {generated_for}</title>")
-    parts.append(f"<style>{style}</style></head><body>")
+    parts.append(f"<style>{style}</style>")
+    parts.append("<script>")
+    parts.append("function toggleAbstract(id) {")
+    parts.append("  var content = document.getElementById('abstract-' + id);")
+    parts.append("  var arrow = document.getElementById('arrow-' + id);")
+    parts.append("  if (content.classList.contains('show')) {")
+    parts.append("    content.classList.remove('show');")
+    parts.append("    arrow.classList.remove('rotated');")
+    parts.append("  } else {")
+    parts.append("    content.classList.add('show');")
+    parts.append("    arrow.classList.add('rotated');")
+    parts.append("  }")
+    parts.append("}")
+    parts.append("</script>")
+    parts.append("</head><body>")
     parts.append(f"<h1>Most important papers</h1>")
     parts.append(f"<div class='meta'>Processed on {html.escape(str(generated_for))}</div>")
 
@@ -573,13 +595,18 @@ def render_html(sections: List[Dict[str, Any]], generated_for: datetime.date, ou
         if not items:
             parts.append("<p class='meta'>No new papers in this run.</p>")
         else:
-            for it in items:
+            for idx, it in enumerate(items):
                 title = html.escape(it.get('title', ''))
                 link = html.escape(it.get('link', ''), quote=True)
                 summary = html.escape(it.get('summary', ''))
+                original_abstract = html.escape(it.get('original_summary', ''))
                 score = int(it.get('importance_score', 0))
                 authors = html.escape(it.get('authors', '') or '')
                 journal = html.escape(it.get('feed_title', '') or '')
+                
+                # Create unique ID for this item
+                item_id = f"{topic}_{idx}"
+                
                 parts.append("<div class='item'>")
                 parts.append(f"<div><a href='{link}'><strong>{title}</strong></a><span class='badge'>Score {score}</span></div>")
                 if authors or journal:
@@ -591,6 +618,16 @@ def render_html(sections: List[Dict[str, Any]], generated_for: datetime.date, ou
                     parts.append(f"<div class='meta'>{' — '.join(details)}</div>")
                 if summary:
                     parts.append(f"<div class='meta'>{summary}</div>")
+                
+                # Add dropdown for original abstract if it exists
+                if original_abstract and original_abstract != summary:
+                    parts.append(f"<a class='abstract-toggle' onclick='toggleAbstract(\"{item_id}\")'>")
+                    parts.append(f"<span class='abstract-arrow' id='arrow-{item_id}'>▶</span>Show original abstract")
+                    parts.append("</a>")
+                    parts.append(f"<div class='abstract-content' id='abstract-{item_id}'>")
+                    parts.append(f"<strong>Original Abstract:</strong><br>{original_abstract}")
+                    parts.append("</div>")
+                
                 parts.append("</div>")
         parts.append("</div>")
 
