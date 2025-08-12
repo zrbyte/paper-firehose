@@ -1,0 +1,10 @@
+- Topics in which we're accumulating knowledge, like "RG" is separate from paper search and ranking. They should be kept separate. 
+	- Set topic type, to **accumulating**, where we're constantly appending to a html. For this implement sqlite database of entries, alongside the html file. All accumulating topics should go to an sqlite database: `accumulating_papers.db`.
+	- All **daily** topic result entries stemming from the regexp search still go to `matched_entries_history.db`.
+- Pipeline for filtering papers:
+	- Take RSS entries and filter title and abstract by regex.
+	- The entries from thies get passed to ranking. There should be a `ranking.py` which attaches a score to each entry. This ranking can be done by title + abstract. Use paper-qa? 
+		- Ranking gets done on all the entries irrespective of journal.
+	- Top 20%? of entries gets summarised by LMM, passed to `llmsummary.py`.
+	- For the top 5? arXiv entries the pdf is downloaded and the whole entry is summarised by paper-qa. Appears in a dropdown menu in the `summary.html`.
+		- The dictionary element of the entry gets another key, with the rank? Switch to sqlite?
