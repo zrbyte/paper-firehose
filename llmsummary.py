@@ -547,6 +547,41 @@ def rank_entries_with_llm(
     return {'topic': topic, 'overview': overview, 'items': sanitized}
 
 
+def escape_html_preserve_latex(text: str) -> str:
+    """Escape HTML while preserving LaTeX equations enclosed in $ symbols."""
+    if not text:
+        return ""
+    
+    # Store original text to work with
+    result = text
+    placeholder_map = {}
+    
+    # Handle display math $$...$$ first (to avoid conflicts with inline math)
+    display_pattern = r'\$\$([^$]+?)\$\$'
+    display_matches = list(re.finditer(display_pattern, result))
+    for i, match in enumerate(display_matches):
+        placeholder = f"__LATEX_DISPLAY_{i}__"
+        placeholder_map[placeholder] = match.group(0)
+        result = result.replace(match.group(0), placeholder, 1)
+    
+    # Handle inline math $...$ (non-greedy to avoid capturing across multiple equations)
+    inline_pattern = r'\$([^$]+?)\$'
+    inline_matches = list(re.finditer(inline_pattern, result))
+    for i, match in enumerate(inline_matches):
+        placeholder = f"__LATEX_INLINE_{i}__"
+        placeholder_map[placeholder] = match.group(0)
+        result = result.replace(match.group(0), placeholder, 1)
+    
+    # Escape HTML in the remaining text
+    escaped = html.escape(result)
+    
+    # Restore LaTeX equations
+    for placeholder, latex in placeholder_map.items():
+        escaped = escaped.replace(placeholder, latex)
+    
+    return escaped
+
+
 def render_html(sections: List[Dict[str, Any]], generated_for: datetime.date, output_path: str) -> None:
     style = (
         "body{font-family:Arial,sans-serif;margin:24px;}"
@@ -566,6 +601,21 @@ def render_html(sections: List[Dict[str, Any]], generated_for: datetime.date, ou
     parts.append("<!DOCTYPE html>")
     parts.append("<html><head><meta charset='utf-8'>")
     parts.append(f"<title>Summary {generated_for}</title>")
+    # Add MathJax for LaTeX equation rendering
+    parts.append("<script src='https://polyfill.io/v3/polyfill.min.js?features=es6'></script>")
+    parts.append("<script id='MathJax-script' async src='https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js'></script>")
+    parts.append("<script>")
+    parts.append("window.MathJax = {")
+    parts.append("  tex: {")
+    parts.append("    inlineMath: [['$', '$']],")
+    parts.append("    displayMath: [['$$', '$$']]")
+    parts.append("  },")
+    parts.append("  options: {")
+    parts.append("    processHtmlClass: 'tex2jax_process',")
+    parts.append("    processEscapes: true")
+    parts.append("  }")
+    parts.append("};")
+    parts.append("</script>")
     parts.append(f"<style>{style}</style>")
     parts.append("<script>")
     parts.append("function toggleAbstract(id) {")
@@ -596,7 +646,7 @@ def render_html(sections: List[Dict[str, Any]], generated_for: datetime.date, ou
             parts.append("<p class='meta'>No new papers in this run.</p>")
         else:
             for idx, it in enumerate(items):
-                title = html.escape(it.get('title', ''))
+                title = escape_html_preserve_latex(it.get('title', ''))
                 link = html.escape(it.get('link', ''), quote=True)
                 summary = html.escape(it.get('summary', ''))
                 original_abstract = html.escape(it.get('original_summary', ''))
@@ -607,7 +657,7 @@ def render_html(sections: List[Dict[str, Any]], generated_for: datetime.date, ou
                 # Create unique ID for this item
                 item_id = f"{topic}_{idx}"
                 
-                parts.append("<div class='item'>")
+                parts.append("<div class='item tex2jax_process'>")
                 parts.append(f"<div><a href='{link}'><strong>{title}</strong></a><span class='badge'>Score {score}</span></div>")
                 if authors or journal:
                     details = []
