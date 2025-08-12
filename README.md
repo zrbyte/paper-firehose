@@ -4,12 +4,14 @@ The project fetches articles from various journal feeds, filters them using regu
 
 ## Installation
 
-Developed with **Python 3.8**. Install dependencies:
+Developed with **Python 3.11** (requires Python 3.8+ for PaperQA compatibility). Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
-The only non standard python package that is needed is [feedparser](https://pypi.org/project/feedparser/).
+Key dependencies include:
+- [feedparser](https://pypi.org/project/feedparser/) for RSS parsing
+- [paper-qa](https://github.com/Future-House/paper-qa) for advanced paper analysis and ranking
 
 ## Setup
 
@@ -35,13 +37,15 @@ Alternatively, store your OpenAI API key in a file named `openaikulcs.env` next 
 
 ## Usage
 
-Run the parser:
+### RSS Parser
+
+Run the main parser:
 
 ```bash
 python rssparser.py [options]
 ```
 
-### Command-Line Options
+#### Command-Line Options
 
 - `--no-upload`: Skip FTP upload (useful for testing)
 - `--no-summary`: Skip summarization step
@@ -50,23 +54,37 @@ python rssparser.py [options]
 
 By default, the script generates a ranked, topic‑organized report with `llmsummary.py` into `summary.html` for the entries discovered in the current run.
 
+### PaperQA Summarizer
+
+Testing PaperQA summarizer:
+
+```bash
+python paperqa_summarizer.py [arxiv_id_or_url]
+```
+
+This tool:
+- Downloads PDFs from arXiv URLs or IDs (e.g., `2506.20738` or `https://arxiv.org/abs/2506.20738`)
+- Uses PaperQA's AI-powered analysis to answer comprehensive questions about the paper
+- Provides detailed summaries including research objectives, methods, findings, and implications
+- Requires OpenAI API key (loaded from `openaikulcs.env` or `OPENAI_API_KEY` environment variable)
+
 ### Daily summary (topic-ranked report)
 
 - **What it produces**: `summary.html` with per‑topic sections (e.g., `primary`, `rg`, `perovskites`). Each section contains:
   - **Overview**: 1–3 sentence high‑level takeaways (when using LLM ranking).
   - **Top items**: The most important papers from this run, each showing title (linked), authors, journal (bold), a 4–5 sentence summary, and a **Score** badge.
 
-- **How “Score” is calculated**:
+- **How "Score" is calculated**:
   - **LLM ranking (default when `OPENAI_API_KEY` is available)**
     - The model ranks entries per topic and assigns an `importance_score` on a 1–5 scale (higher is more important) considering topical relevance, novelty/impact, and experimental/theory significance.
     - The page displays that `importance_score` in the badge.
+  - **Future Enhancement**: Planning on implementing PaperQA-based ranking for more sophisticated analysis using two-stage evaluation (abstract screening + full PDF analysis for top candidates).
 
 - **Configuration**:
   - `llm_prompts.json`: optional per‑topic guidance to steer ranking and phrasing.
   - `search_terms.json`: topic regexes are provided as context to the model.
   - API key: set `OPENAI_API_KEY` or place it in `openaikulcs.env` next to `llmsummary.py`.
 
-- **“This run”**: The summary only considers the entries returned by `rssparser.py` during the current invocation, not historical data.
 
 ## GitHub Actions and Pages
 
@@ -96,4 +114,8 @@ The history database is never automatically purged, so it accumulates all matche
 
 ## Future Development
 
-- Planned enhancements and more details available in the repository wiki.
+- **Two-Stage PaperQA Ranking**: Integration of PaperQA into the main RSS workflow for more sophisticated paper ranking
+  - Stage 1: Fast abstract-based screening of all papers
+  - Stage 2: Deep PDF analysis of top candidates
+  - Enhanced relevance scoring based on full content analysis
+- Additional features and details available in the repository wiki
