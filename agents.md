@@ -5,7 +5,6 @@
 - Keep prompts and configuration separate from code. Use `llm_prompts.json` for LLM instructions and `search_terms.json` for regex topics.
 - Prefer minimal changes that preserve existing behavior unless the user explicitly requested a refactor.
 - When introducing new files or changing public interfaces (CLI flags, outputs, or file formats), update documentation accordingly.
-- Code should be compatible with Python 3.11, with 3.7 compatibility in branch: "ek-server-version".
 
 ## Major changes protocol
 
