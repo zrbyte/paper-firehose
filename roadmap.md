@@ -41,7 +41,7 @@ CREATE INDEX idx_topic_rank ON matched_entries(topic, rank_score DESC);
 CREATE INDEX idx_unranked ON matched_entries(topic) WHERE rank_score IS NULL;
 
 Migration Path
-Phase 1: Modify rssparser.py to write to the new schema while keeping current output
+Phase 1: Modify rssparser.py to write to the new schema while keeping current output. Add a main.py to act sa a cli interface.
 Phase 2: Create ranking.py that reads from DB and adds rank scores
 Phase 3: Modify llmsummary.py to read ranked entries from DB
 Phase 4: Remove dictionary passing between scripts
