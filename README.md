@@ -90,6 +90,14 @@ Seen article IDs and titles are tracked in an SQLite database (`assets/seen_entr
 - IDs are generated via SHA‑1 hash from entry `id`, URL (cleaned of query parameters), or a combination of title and publication date.
 - Duplicate detection uses article titles, skipping identical entries even if links change.
 
+You can inspect recent records directly from the command line:
+
+```bash
+python view_db.py --limit 20
+```
+
+This prints the latest rows from `assets/seen_entries.db` in a simple table.
+
 Metadata for all new matching entries is stored in a separate SQLite database (`assets/matched_entries_history.db`).
 Each row stores the feed name, topic, entry ID, timestamp and the full entry metadata as JSON for later queries.
 The history database is never automatically purged, so it accumulates all matched entries across runs.
