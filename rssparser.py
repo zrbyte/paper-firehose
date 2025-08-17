@@ -403,7 +403,7 @@ def main(upload: bool = True):
             logging.warning(f"No URL found for feed '{feed_name}'")
             continue
 
-        logging.info(f"Processing feed '{feed_name}'")
+        # logging.info(f"Processing feed '{feed_name}'")
 
         # Fetch and parse the RSS feed
         feed = feedparser.parse(rss_feed_url)
