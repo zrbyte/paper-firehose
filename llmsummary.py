@@ -431,7 +431,7 @@ def build_ranking_prompt(
     ranking_prompt: str,
     topic_prompt: str | None,
     top_n: int,
-) -> str:
+) -> Tuple[str, List[int]]:
     # Limit the number of entries included in the prompt to control token usage
     # Use fewer items for perovskites to prevent JSON truncation
     item_limit = 5 if topic == 'perovskites' else PROMPT_MAX_ITEMS_PER_TOPIC
@@ -448,6 +448,14 @@ def build_ranking_prompt(
         "You are a domain expert. From the list of entries for the given topic, select the most important papers for today and write a concise multi-sentence summary for each."
     )
     terms_text = json.dumps(search_terms, indent=2)
+    # Calculate max summary length for each entry to prevent hallucinations
+    max_summary_lengths = []
+    for it in limited_items:
+        title = it.get('title', '')
+        original_summary = it.get('summary', '')
+        max_length = len(title) + len(original_summary)
+        max_summary_lengths.append(max_length)
+    
     payload = (
         f"Topic: {topic}\n"
         + (f"Topic-specific guidance:\n{topic_prompt}\n\n" if topic_prompt else "")
@@ -469,9 +477,9 @@ def build_ranking_prompt(
         "    }\n"
         "  ]\n"
         "}\n"
-        "Rules:\n- Use only the provided entries.\n- link must be copied from the matching entry.\n- Keep overview to 2-3 sentences.\n- Each item's summary must be 4-5 sentences.\n- items must be ordered by descending importance_score, ties broken by better match to topic.\n"
+        "Rules:\n- Use only the provided entries.\n- link must be copied from the matching entry.\n- Keep overview to 2-3 sentences.\n- Each item's summary must be 4-5 sentences.\n- Each item's summary length must NOT exceed the combined length of its title and original summary to prevent hallucinations.\n- items must be ordered by descending importance_score, ties broken by better match to topic.\n"
     )
-    return f"{base_instruction}\n\n{payload}"
+    return f"{base_instruction}\n\n{payload}", max_summary_lengths
 
 
 def rank_entries_with_llm(
@@ -482,6 +490,12 @@ def rank_entries_with_llm(
     topic_prompt: str | None,
     top_n: int,
 ) -> Dict[str, Any]:
+    """
+    Rank entries using LLM and enforce summary length constraints to prevent hallucinations.
+    
+    Summary length is constrained to not exceed the combined length of the title and original summary.
+    This prevents the LLM from generating content beyond what's available in the source material.
+    """
     if not items:
         return {"topic": topic, "overview": "", "items": []}
     # Build a map from link -> original metadata (authors, feed_title, original_summary)
@@ -495,7 +509,7 @@ def rank_entries_with_llm(
             'feed_title': str(it.get('feed_title', '')).strip(),
             'original_summary': str(it.get('summary', '')).strip(),
         }
-    prompt = build_ranking_prompt(
+    prompt, max_summary_lengths = build_ranking_prompt(
         topic=topic,
         items=items,
         search_terms={topic: search_term_for_topic or ""},
@@ -533,12 +547,55 @@ def rank_entries_with_llm(
             continue
         seen_links.add(link)
         meta = link_to_meta.get(link, {})
+        
+        # Get the generated summary
+        generated_summary = str(it.get('summary', '') or it.get('one_sentence_summary', '')).strip()
+        
+        # Find the corresponding max length for this item
+        # We need to find the item in the original items list that matches this link
+        max_length = None
+        for j, original_item in enumerate(items):
+            if str(original_item.get('link', '')).strip() == link:
+                if j < len(max_summary_lengths):
+                    max_length = max_summary_lengths[j]
+                break
+        
+        # Truncate summary if it exceeds the limit
+        if max_length is not None and len(generated_summary) > max_length:
+            original_length = len(generated_summary)
+            # Try to truncate at a sentence boundary
+            sentences = generated_summary.split('. ')
+            truncated_summary = ""
+            for sentence in sentences:
+                if len(truncated_summary + sentence + '. ') <= max_length:
+                    truncated_summary += sentence + '. '
+                else:
+                    break
+            
+            # If we couldn't fit even one sentence, truncate at word boundary
+            if not truncated_summary:
+                words = generated_summary.split()
+                truncated_summary = ""
+                for word in words:
+                    if len(truncated_summary + word + ' ') <= max_length:
+                        truncated_summary += word + ' '
+                    else:
+                        break
+                truncated_summary = truncated_summary.strip()
+            
+            # If still too long, hard truncate
+            if len(truncated_summary) > max_length:
+                truncated_summary = generated_summary[:max_length-3] + "..."
+            
+            generated_summary = truncated_summary
+            logging.info(f"Truncated summary for '{title[:50]}...' from {original_length} to {len(generated_summary)} chars (max: {max_length})")
+        
         sanitized.append({
             'rank': int(it.get('rank', i + 1)),
             'importance_score': int(it.get('importance_score', 3)),
             'title': title,
             'link': link,
-            'summary': str(it.get('summary', '') or it.get('one_sentence_summary', '')).strip(),
+            'summary': generated_summary,
             'authors': meta.get('authors', ''),
             'feed_title': meta.get('feed_title', ''),
             'original_summary': meta.get('original_summary', ''),
