@@ -35,10 +35,6 @@ CREATE TABLE matched_entries (
     pdf_summary TEXT,
     
     UNIQUE(feed_name, topic, id)
-);
-
-CREATE INDEX idx_topic_rank ON matched_entries(topic, rank_score DESC);
-CREATE INDEX idx_unranked ON matched_entries(topic) WHERE rank_score IS NULL;
 
 Migration Path
 Phase 1: Modify rssparser.py to write to the new schema while keeping current output. Add a main.py to act sa a cli interface.
