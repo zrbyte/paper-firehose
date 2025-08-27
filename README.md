@@ -23,6 +23,7 @@ Key dependencies include:
   - The search terms and the behavior of the `rg` topic is tailored to the needs of our research group, but adding new topics is easy, by appending the `search_terms.json` file. Future development may make this behavior more general, or maybe it won't :)
   - Other topics (e.g., `primary`, `perovskites`) generate daily HTML summaries that are automatically archived.
 - **llm_prompts.json**: Optional. Custom instructions for language model summaries. Place next to `llmsummary.py`, keys correspond to topic names.
+- **priority_journals.json**: Optional. List of high-priority journals whose articles are always processed by LLM summary regardless of search term matches. Defaults to Nature, Science, and Nature family journals.
 
 ### Environment Variables
 
@@ -77,6 +78,7 @@ This tool:
 - **How "Score" is calculated**:
   - **LLM ranking (default when `OPENAI_API_KEY` is available)**
     - The model ranks entries per topic and assigns an `importance_score` on a 1–5 scale (higher is more important) considering topical relevance, novelty/impact, and experimental/theory significance.
+    - Articles from priority journals (Nature, Science, etc.) are always included and given preferential treatment in ranking.
     - The page displays that `importance_score` in the badge.
   - **Future Enhancement**: Planning on implementing PaperQA-based ranking for more sophisticated analysis using two-stage evaluation (abstract screening + full PDF analysis for top candidates).
 

@@ -74,11 +74,11 @@ if __name__ == "__main__":
         sys.exit(0)
 
     try:
-        new_entries = main(upload=args.upload)
+        result = main(upload=args.upload)
         feedfilter.close_connections()
 
         if not args.no_summary:
-            llmsummary.main(new_entries)
+            llmsummary.main(result)
             if args.upload:
                 if not FTP_USER or not FTP_PASS:
                     raise ValueError(

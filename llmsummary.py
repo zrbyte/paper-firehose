@@ -16,6 +16,7 @@ from urllib.error import HTTPError, URLError
 MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
 SEARCHTERMS_FILE = os.path.join(MAIN_DIR, 'search_terms.json')
 LLM_PROMPTS_FILE = os.path.join(MAIN_DIR, 'llm_prompts.json')
+PRIORITY_JOURNALS_FILE = os.path.join(MAIN_DIR, 'priority_journals.json')
 SUMMARY_HTML_PATH = os.path.join(MAIN_DIR, 'summary.html')
 
 # Configuration constants (no environment variables)
@@ -23,8 +24,8 @@ OPENAI_MODEL = "gpt-5"  # default model to use
 OPENAI_MAX_RETRIES = 5  # total attempts including the first
 OPENAI_BACKOFF_SECONDS = 1.0  # initial backoff before exponential growth
 OPENAI_SLEEP_BETWEEN_TOPICS = 0.0  # pause between topic calls
-SUMMARY_TOP_N_DEFAULT = 8  # max number of items returned per topic
-PROMPT_MAX_ITEMS_PER_TOPIC = 20  # cap entries included in the prompt to limit tokens
+SUMMARY_TOP_N_DEFAULT = 20  # max number of items returned per topic
+PROMPT_MAX_ITEMS_PER_TOPIC = 30  # cap entries included in the prompt to limit tokens
 OPENAI_MODEL_FALLBACK = "gpt-4o-mini"  # fallback if primary model fails
 
 
@@ -58,6 +59,15 @@ def read_llm_prompts() -> Dict[str, str]:
             return json.load(f)
     except Exception:
         return {}
+
+
+def read_priority_journals() -> List[str]:
+    try:
+        with open(PRIORITY_JOURNALS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('priority_journals', [])
+    except Exception:
+        return []
 
 
 def _extract_text_from_openai_response(result: Dict[str, Any]) -> str:
@@ -420,8 +430,36 @@ def to_compact_items(entries: List[dict]) -> List[Dict[str, Any]]:
             'authors': ', '.join([a.get('name', '') for a in e.get('authors', [])]) if e.get('authors') else str(e.get('author', '')),
             'published': str(e.get('published', e.get('updated', ''))),
             'feed_title': str(e.get('feed_title', '')),
+            'is_priority': e.get('is_priority', False),  # Preserve priority flag
         })
     return compact
+
+
+def merge_priority_entries(regular_entries: List[dict], priority_entries: List[dict], priority_journals: List[str]) -> List[Dict[str, Any]]:
+    """Merge priority journal entries with regular entries, ensuring priority entries are always included."""
+    merged = []
+    seen_links = set()
+    
+    # First, add all priority entries
+    for entry in priority_entries:
+        link = entry.get('link', '')
+        if link and link not in seen_links:
+            # Mark priority entries with a special flag
+            entry_copy = entry.copy()
+            entry_copy['is_priority'] = True
+            merged.append(entry_copy)
+            seen_links.add(link)
+    
+    # Then add regular entries that aren't duplicates
+    for entry in regular_entries:
+        link = entry.get('link', '')
+        if link and link not in seen_links:
+            entry_copy = entry.copy()
+            entry_copy['is_priority'] = False
+            merged.append(entry_copy)
+            seen_links.add(link)
+    
+    return merged
 
 
 def build_ranking_prompt(
@@ -431,11 +469,17 @@ def build_ranking_prompt(
     ranking_prompt: str,
     topic_prompt: str | None,
     top_n: int,
+    priority_journals: List[str] | None = None,
 ) -> Tuple[str, List[int]]:
-    # Limit the number of entries included in the prompt to control token usage
-    # Use fewer items for perovskites to prevent JSON truncation
+    # Separate priority and regular items
+    priority_items = [item for item in items if item.get('is_priority', False)]
+    regular_items = [item for item in items if not item.get('is_priority', False)]
+    
+    # Priority items are always included, regular items are limited
     item_limit = 5 if topic == 'perovskites' else PROMPT_MAX_ITEMS_PER_TOPIC
-    limited_items = items[:item_limit] if items else []
+    limited_regular_items = regular_items[:max(0, item_limit - len(priority_items))]
+    limited_items = priority_items + limited_regular_items
+    
     numbered = []
     for idx, it in enumerate(limited_items, start=1):
         title = it.get('title', '')
@@ -443,7 +487,9 @@ def build_ranking_prompt(
         summary = it.get('summary', '')
         authors = it.get('authors', '')
         feed_title = it.get('feed_title', '')
-        numbered.append(f"{idx}) title: {title}\n   link: {link}\n   authors: {authors}\n   feed: {feed_title}\n   summary: {summary}")
+        is_priority = it.get('is_priority', False)
+        priority_marker = " [PRIORITY JOURNAL]" if is_priority else ""
+        numbered.append(f"{idx}) title: {title}\n   link: {link}\n   authors: {authors}\n   feed: {feed_title}{priority_marker}\n   summary: {summary}")
     base_instruction = ranking_prompt or (
         "You are a domain expert. From the list of entries for the given topic, select the most important papers for today and write a concise multi-sentence summary for each."
     )
@@ -462,6 +508,7 @@ def build_ranking_prompt(
         + f"Search term regex for this topic (for context only):\n{terms_text}\n\n"
         f"Entries (each has title, link, authors, feed, summary):\n" + "\n\n".join(numbered) + "\n\n"
         "Task: Rank the entries by importance for an expert reader. Consider topical relevance, novelty, likely impact, experimental/theory significance, and match to the topic. "
+        "IMPORTANT: Entries marked with [PRIORITY JOURNAL] are from high-impact journals and should be strongly favored for inclusion unless they are completely irrelevant. "
         f"Return ONLY a valid RFC 8259 JSON object with at most {top_n} items. No markdown, no code fences, no comments, no trailing commas.\n"
         "JSON shape (values shown for type only):\n"
         "{\n"
@@ -489,6 +536,7 @@ def rank_entries_with_llm(
     ranking_prompt: str,
     topic_prompt: str | None,
     top_n: int,
+    priority_journals: List[str] | None = None,
 ) -> Dict[str, Any]:
     """
     Rank entries using LLM and enforce summary length constraints to prevent hallucinations.
@@ -516,6 +564,7 @@ def rank_entries_with_llm(
         ranking_prompt=ranking_prompt,
         topic_prompt=topic_prompt,
         top_n=top_n,
+        priority_journals=priority_journals,
     )
     # Increase output tokens for gpt-5 models that use reasoning tokens separately
     raw = chat_completion_with_fallback(prompt, max_tokens=6000)
@@ -743,15 +792,30 @@ def render_html(sections: List[Dict[str, Any]], generated_for: datetime.date, ou
         f.write("\n".join(parts))
 
 
-def main(entries_per_topic: Dict[str, Dict[str, List[dict]]] | None = None, top_n: int | None = None) -> None:
+def main(all_entries: Dict[str, Dict[str, Dict[str, List[dict]]]] | Dict[str, Dict[str, List[dict]]] | None = None, top_n: int | None = None) -> None:
     # This script is intended to be called with the entries from the current run.
     # If entries are not provided, create an empty summary page noting that no new
     # papers were processed in this invocation.
     top_n_effective = top_n or SUMMARY_TOP_N_DEFAULT
     terms = read_search_terms()
     prompts = read_llm_prompts()
+    priority_journals = read_priority_journals()
 
     generated_for = datetime.date.today()
+
+    # Handle both old format (Dict[str, Dict[str, List[dict]]]) and new format
+    # (Dict[str, Dict[str, Dict[str, List[dict]]]] with 'regular_entries' and 'priority_entries' keys)
+    if all_entries is None:
+        entries_per_topic = None
+        priority_entries_per_topic = None
+    elif 'regular_entries' in all_entries and 'priority_entries' in all_entries:
+        # New format with separate regular and priority entries
+        entries_per_topic = all_entries['regular_entries']  # type: ignore
+        priority_entries_per_topic = all_entries['priority_entries']  # type: ignore
+    else:
+        # Old format - treat all as regular entries
+        entries_per_topic = all_entries  # type: ignore
+        priority_entries_per_topic = None
 
     if not entries_per_topic:
         logging.warning("No entries_per_topic passed to llmsummary.main; generating placeholder summary.")
@@ -764,9 +828,20 @@ def main(entries_per_topic: Dict[str, Dict[str, List[dict]]] | None = None, top_
     sections: List[Dict[str, Any]] = []
     sleep_between_topics = OPENAI_SLEEP_BETWEEN_TOPICS
     ranking_prompt = prompts.get('ranking_prompt', '').strip()
+    
     for topic, per_feed in entries_per_topic.items():
-        flat = flatten_entries(per_feed)
-        compact = to_compact_items(flat)
+        # Get regular entries for this topic
+        regular_flat = flatten_entries(per_feed)
+        
+        # Get priority entries for this topic if available
+        priority_flat = []
+        if priority_entries_per_topic and topic in priority_entries_per_topic:
+            priority_flat = flatten_entries(priority_entries_per_topic[topic])
+        
+        # Merge priority and regular entries
+        all_flat = merge_priority_entries(regular_flat, priority_flat, priority_journals)
+        compact = to_compact_items(all_flat)
+        
         topic_prompt = prompts.get(topic)
         ranked = rank_entries_with_llm(
             topic=topic,
@@ -775,6 +850,7 @@ def main(entries_per_topic: Dict[str, Dict[str, List[dict]]] | None = None, top_
             ranking_prompt=ranking_prompt,
             topic_prompt=topic_prompt,
             top_n=top_n_effective,
+            priority_journals=priority_journals,
         )
         sections.append(ranked)
         if sleep_between_topics > 0:

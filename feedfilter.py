@@ -113,6 +113,9 @@ FTP_PASS = os.environ.get('FTP_PASS')
 # Path to the file containing the regular expressions used for searching
 SEARCHTERMS_FILE = os.path.join(os.path.dirname(__file__), 'search_terms.json')
 
+# Path to the file containing the priority journals list
+PRIORITY_JOURNALS_FILE = os.path.join(os.path.dirname(__file__), 'priority_journals.json')
+
 # Default search terms in case the external file is missing
 DEFAULT_SEARCHTERMS = {
     'primary': '(topolog[a-z]+)|(graphit[a-z]+)|(rhombohedr[a-z]+)|(graphe[a-z]+)|(ABC.+)|(chalcog[a-z]+)|(landau)|(weyl)|(dirac)|(STM)|(scan[a-z]+ tunne[a-z]+ micr[a-z]+)|(scan[a-z]+ tunne[a-z]+ spectr[a-z]+)|(scan[a-z]+ prob[a-z]+ micr[a-z]+)|(MoS.+\\d+|MoS\\d+)|(MoSe.+\\d+|MoSe\\d+)|(MoTe.+\\d+|MoTe\\d+)|(WS.+\\d+|WS\\d+)|(WSe.+\\d+|WSe\\d+)|(WTe.+\\d+|WTe\\d+)|(Bi\\d+Rh\\d+I\\d+|Bi.+\\d+.+Rh.+\\d+.+I.+\\d+.+)|(BiTeI)|(BiTeBr)|(BiTeCl)|(ZrTe5|ZrTe.+5)|(Pt2HgSe3|Pt.+2HgSe.+3)|(jacuting[a-z]+)|(flatband)|(flat.{1}band)',
@@ -134,8 +137,24 @@ def load_searchterms():
         terms.setdefault(key, val)
     return terms
 
+
+def load_priority_journals():
+    """Load priority journals from PRIORITY_JOURNALS_FILE or return empty list."""
+    try:
+        with open(PRIORITY_JOURNALS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            priority_journals = data.get('priority_journals', [])
+            logging.info(f"Loaded {len(priority_journals)} priority journals from {PRIORITY_JOURNALS_FILE}")
+            return priority_journals
+    except Exception as e:
+        logging.warning(f"Could not read priority journals file: {e}. Using empty list.")
+        return []
+
 # Load and compile the search terms
 terms = load_searchterms()
+
+# Load priority journals
+priority_journals = load_priority_journals()
 
 # Compile each search term into a regular expression.  This allows adding new
 # topics by simply inserting additional key/value pairs in ``search_terms.json``.
@@ -372,6 +391,11 @@ def process_feeds(upload: bool = True):
     all_new_entries = {
         topic: {feed: [] for feed in feeds} for topic in topics
     }
+    
+    # Dictionary holding new entries from priority journals (for llmsummary)
+    priority_journal_entries = {
+        topic: {feed: [] for feed in feeds} for topic in topics
+    }
 
     # Pre-compute output file names for each topic
     html_files = {}
@@ -440,22 +464,38 @@ def process_feeds(upload: bool = True):
             if (current_time - entry_datetime) > TIME_DELTA: # type: ignore
                 continue
 
+            # Check if this entry is from a priority journal
+            is_priority_journal = feed_name in priority_journals
+            
             for topic, pattern in search_patterns.items():
                 seen_entries = seen_entries_per_topic[topic]
                 seen_titles = seen_titles_per_topic[topic]
 
-                # add entry to all_new_entries if it is new and matches the search term
-                if (
-                    entry_title not in seen_titles
-                    and matches_search_terms(entry, pattern)
-                ):
-                    # Record new entry for this topic
+                # Check if entry matches search terms or is from a priority journal
+                matches_search = matches_search_terms(entry, pattern)
+                is_new_entry = entry_title not in seen_titles
+                
+                # Add to all_new_entries if it matches search terms
+                if is_new_entry and matches_search:
                     all_new_entries[topic][feed_name].append(entry)
                     save_entry_metadata(entry, feed_name, topic, entry_id, entry_datetime)
                     seen_entries[entry_id] = ( # type: ignore
                         entry_datetime, entry_title
                     )
                     seen_titles.add(entry_title)
+                
+                # Also add to priority_journal_entries if it's from a priority journal
+                # (regardless of search term match, but still must be new)
+                if is_new_entry and is_priority_journal:
+                    priority_journal_entries[topic][feed_name].append(entry)
+                    # Mark as seen for priority journal processing
+                    # Only save metadata once (if not already saved above)
+                    if not matches_search:
+                        save_entry_metadata(entry, feed_name, f"{topic}_priority", entry_id, entry_datetime)
+                        seen_entries[entry_id] = ( # type: ignore
+                            entry_datetime, entry_title
+                        )
+                        seen_titles.add(entry_title)
 
         # After processing all entries, persist the databases per topic
         for topic in topics:
@@ -525,7 +565,10 @@ def process_feeds(upload: bool = True):
             logging.error("FTP upload failed: %s", e)
             raise
 
-    return all_new_entries
+    return {
+        'regular_entries': all_new_entries,
+        'priority_entries': priority_journal_entries
+    }
 
 
 def close_connections():
