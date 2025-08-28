@@ -484,18 +484,10 @@ def process_feeds(upload: bool = True):
                     )
                     seen_titles.add(entry_title)
                 
-                # Also add to priority_journal_entries if it's from a priority journal
-                # (regardless of search term match, but still must be new)
-                if is_new_entry and is_priority_journal:
+                # Also add to priority_journal_entries for this topic only if it matches the topic
+                # This prevents priority entries from leaking into unrelated topics
+                if is_new_entry and is_priority_journal and matches_search:
                     priority_journal_entries[topic][feed_name].append(entry)
-                    # Mark as seen for priority journal processing
-                    # Only save metadata once (if not already saved above)
-                    if not matches_search:
-                        save_entry_metadata(entry, feed_name, f"{topic}_priority", entry_id, entry_datetime)
-                        seen_entries[entry_id] = ( # type: ignore
-                            entry_datetime, entry_title
-                        )
-                        seen_titles.add(entry_title)
 
         # After processing all entries, persist the databases per topic
         for topic in topics:
