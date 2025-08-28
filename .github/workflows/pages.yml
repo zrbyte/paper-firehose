@@ -1,16 +1,17 @@
 name: Build and Deploy
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger
   schedule:
     - cron: '0 4 * * *'  # 04:00 UTC daily
 
 permissions:
-  contents: write # for uploading DB for inspection to a data branch
+  contents: write # Required for uploading DB snapshots to data branch
   pages: write
   id-token: write
 
-# Avoid two runs messing up the sqlite DB by running in parallel
+# Prevent concurrent runs from corrupting the SQLite database
+# Only one workflow can run at a time, newer runs cancel older ones
 concurrency:
   group: pages-db
   cancel-in-progress: true
@@ -21,14 +22,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Cache the seen_entries.db to persist article tracking between runs
+      # This prevents re-processing the same articles on subsequent runs
       - name: Restore database cache
         uses: actions/cache@v3
         with:
           path: assets/seen_entries.db
-          key: seen-db-${{ github.run_id }}     # unique per run
+          key: seen-db-${{ github.run_id }}     # Unique cache key per run
           restore-keys: |
-            seen-db-                            # restore most recent
+            seen-db-                            # Fallback to most recent cache
 
+      # Create assets directory and initialize empty database if cache restore failed
       - name: Ensure assets dir & empty DB if missing
         run: |
           mkdir -p assets
@@ -40,70 +44,108 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - run: python rssparser.py --no-upload  # don't upload to EK server
+      # Run the main RSS parser to fetch, filter, and summarize articles
+      # --no-upload prevents FTP upload to external server (we only use GitHub Pages)
+      - run: python rssparser.py --no-upload
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      - name: Snapshot DB to data branch with retention (worktree)
+      # DATABASE SNAPSHOTTING STEP
+      # This step creates historical snapshots of both databases on a separate 'data' branch
+      # Purpose: Preserve database history for analysis, debugging, and recovery
+      - name: Snapshot DBs to data branch with retention (worktree)
         env:
-          KEEP_SNAPSHOTS: "30"
-          SNAP_DIR: "assets/db_history"
-          DB_SRC: "assets/matched_entries_history.db"
+          KEEP_SNAPSHOTS: "30"                    # Keep last 30 snapshots per database
+          SNAP_DIR: "assets/db_history"           # Directory for timestamped snapshots
+          DB_HISTORY: "assets/matched_entries_history.db"  # Articles that matched search terms
+          DB_SEEN: "assets/seen_entries.db"       # Articles already processed (prevents duplicates)
         run: |
-          set -euo pipefail
+          set -euo pipefail  # Exit on any error, undefined vars, pipe failures
+
+          # Configure git identity for the bot
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      
           git fetch origin
-          # Ensure data exists; create if missing
-          if ! git show-ref --verify --quiet refs/remotes/origin/data; then
-            # create an orphan data branch starting from current commit (or empty tree if you prefer)
+
+          # Create 'data' branch if it doesn't exist on remote
+          # This branch will store all database snapshots separately from main code
+          if ! git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
             git branch -f data HEAD
             git push -u origin data || true
           fi
-      
-          # Add a temporary worktree checked out at data
-          mkdir -p /tmp/data-wt
-          git worktree add -f /tmp/data-wt data
-      
-          pushd /tmp/data-wt
-            mkdir -p "$SNAP_DIR"
-            TS="$(date -u +%Y%m%dT%H%M%SZ)"
-            SNAP_PATH="$SNAP_DIR/matched_entries_history_${TS}.db"
-      
-            # Copy from the main workspace into the data worktree
-            cp "$GITHUB_WORKSPACE/$DB_SRC" "$SNAP_PATH"
-            cp "$GITHUB_WORKSPACE/$DB_SRC" assets/matched_entries_history.latest.db
-      
-            mapfile -t FILES < <(ls -1t "$SNAP_DIR"/matched_entries_history_*.db 2>/dev/null || true)
-            if [ "${#FILES[@]}" -gt "${KEEP_SNAPSHOTS}" ]; then
-              for f in "${FILES[@]:${KEEP_SNAPSHOTS}}"; do rm -f "$f"; done
-            fi
-      
-            git add -f "$SNAP_PATH" assets/matched_entries_history.latest.db
+
+          # Use git worktree to work on 'data' branch without switching from main
+          # This allows us to commit database files to data branch while keeping main clean
+          WT=/tmp/data-wt
+          mkdir -p "$WT"
+          git worktree add -f "$WT" data
+          cleanup() { git worktree remove -f "$WT" || true; }
+          trap cleanup EXIT  # Ensure worktree is cleaned up even if script fails
+
+          pushd "$WT" >/dev/null
+            mkdir -p "$SNAP_DIR" assets
+            TS="$(date -u +%Y%m%dT%H%M%SZ)"  # ISO timestamp for unique snapshot names
+
+            # Function to create timestamped snapshot and latest copy of a database
+            # Creates two copies: one timestamped for history, one as 'latest' for easy access
+            snapshot_one() {
+              local src="$1"; local stem="$2"
+              if [ -f "$GITHUB_WORKSPACE/$src" ]; then
+                local snap="$SNAP_DIR/${stem}_${TS}.db"  # Timestamped snapshot
+                cp "$GITHUB_WORKSPACE/$src" "$snap"
+                cp "$GITHUB_WORKSPACE/$src" "assets/${stem}.latest.db"  # Latest copy
+                git add -f "$snap" "assets/${stem}.latest.db"
+              else
+                echo "Skip: $src not found"
+              fi
+            }
+
+            # Create snapshots for both databases
+            # matched_entries_history.db: Contains all articles that matched search terms
+            # seen_entries.db: Contains all articles that have been processed (prevents duplicates)
+            snapshot_one "$DB_HISTORY" "matched_entries_history"
+            snapshot_one "$DB_SEEN" "seen_entries"
+
+            # Retention policy: Keep only the most recent KEEP_SNAPSHOTS files per database
+            # This prevents the data branch from growing indefinitely
+            retain() {
+              local stem="$1"
+              mapfile -t FILES < <(ls -1t "$SNAP_DIR"/${stem}_*.db 2>/dev/null || true)
+              if [ "${#FILES[@]}" -gt "${KEEP_SNAPSHOTS}" ]; then
+                for f in "${FILES[@]:${KEEP_SNAPSHOTS}}"; do rm -f "$f"; done
+              fi
+            }
+            retain "matched_entries_history"
+            retain "seen_entries"
+
+            # Stage any file deletions from the retention cleanup
             git add -A "$SNAP_DIR" || true
-      
+
+            # Commit and push if there are any changes (new snapshots or deletions)
+            # [skip ci] prevents this commit from triggering other workflows
             if ! git diff --cached --quiet; then
-              git commit -m "Snapshot matched_entries_history.db @ ${TS} [skip ci]"
+              git commit -m "Snapshot DBs @ ${TS} [skip ci]"
               git push origin data
             else
               echo "No changes to commit."
             fi
-          popd
-      
-          # Clean up the worktree
-          git worktree remove -f /tmp/data-wt
+          popd >/dev/null
+  
           
+      # Prepare files for GitHub Pages deployment
+      # Copy generated HTML files and archive to the site directory
       - name: Prepare site
         run: |
           mkdir site
-          cp -r archive site/ || true
-          cp *.html site/ || true
+          cp -r archive site/ || true  # Copy daily archive files
+          cp *.html site/ || true      # Copy generated HTML summaries
 
+      # Upload the site directory as a GitHub Pages artifact
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./site
 
+  # Deploy the prepared site to GitHub Pages
   deploy:
     needs: build
     runs-on: ubuntu-latest
