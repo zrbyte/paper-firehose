@@ -476,7 +476,7 @@ def build_ranking_prompt(
     regular_items = [item for item in items if not item.get('is_priority', False)]
     
     # Priority items are always included, regular items are limited
-    item_limit = 5 if topic == 'perovskites' else PROMPT_MAX_ITEMS_PER_TOPIC
+    item_limit = PROMPT_MAX_ITEMS_PER_TOPIC
     limited_regular_items = regular_items[:max(0, item_limit - len(priority_items))]
     limited_items = priority_items + limited_regular_items
     
