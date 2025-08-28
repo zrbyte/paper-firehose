@@ -11,7 +11,6 @@ permissions:
   id-token: write
 
 # Prevent concurrent runs from corrupting the SQLite database
-# Only one workflow can run at a time, newer runs cancel older ones
 concurrency:
   group: pages-db
   cancel-in-progress: true
@@ -21,9 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # ensure all branches/refs available
 
       # Cache the seen_entries.db to persist article tracking between runs
-      # This prevents re-processing the same articles on subsequent runs
       - name: Restore database cache
         uses: actions/cache@v3
         with:
@@ -32,11 +32,12 @@ jobs:
           restore-keys: |
             seen-db-                            # Fallback to most recent cache
 
-      # Create assets directory and initialize empty database if cache restore failed
+      # Create assets dir & empty DB if missing (no sqlite3 CLI dependency)
       - name: Ensure assets dir & empty DB if missing
         run: |
+          set -euo pipefail
           mkdir -p assets
-          [ -f assets/seen_entries.db ] || sqlite3 assets/seen_entries.db ".databases" || true
+          python -c "import sqlite3, os; p = 'assets/seen_entries.db'; con = sqlite3.connect(p) if not os.path.exists(p) else None; con.execute('PRAGMA user_version=1;') if con else None; con.close() if con else None"
 
       - uses: actions/setup-python@v5
         with:
@@ -44,70 +45,59 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # Run the main RSS parser to fetch, filter, and summarize articles
-      # --no-upload prevents FTP upload to external server (we only use GitHub Pages)
+      # Run the main RSS parser
       - run: python rssparser.py --no-upload
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       # DATABASE SNAPSHOTTING STEP
-      # This step creates historical snapshots of both databases on a separate 'data' branch
-      # Purpose: Preserve database history for analysis, debugging, and recovery
       - name: Snapshot DBs to data branch with retention (worktree)
         env:
-          KEEP_SNAPSHOTS: "30"                    # Keep last 30 snapshots per database
-          SNAP_DIR: "assets/db_history"           # Directory for timestamped snapshots
-          DB_HISTORY: "assets/matched_entries_history.db"  # Articles that matched search terms
-          DB_SEEN: "assets/seen_entries.db"       # Articles already processed (prevents duplicates)
+          KEEP_SNAPSHOTS: "30"
+          SNAP_DIR: "assets/db_history"
+          DB_HISTORY: "assets/matched_entries_history.db"
+          DB_SEEN: "assets/seen_entries.db"
         run: |
-          set -euo pipefail  # Exit on any error, undefined vars, pipe failures
+          set -euo pipefail
 
-          # Configure git identity for the bot
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin
+          git fetch origin --prune
 
-          # Create 'data' branch if it doesn't exist on remote
-          # This branch will store all database snapshots separately from main code
+          # Ensure remote data branch exists; create from current HEAD if missing
           if ! git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
             git branch -f data HEAD
             git push -u origin data || true
           fi
 
-          # Use git worktree to work on 'data' branch without switching from main
-          # This allows us to commit database files to data branch while keeping main clean
+          # Worktree on data branch (create/reset local branch to origin/data)
           WT=/tmp/data-wt
           mkdir -p "$WT"
-          git worktree add -f "$WT" data
+          git worktree add -B data "$WT" origin/data
           cleanup() { git worktree remove -f "$WT" || true; }
-          trap cleanup EXIT  # Ensure worktree is cleaned up even if script fails
+          trap cleanup EXIT
 
           pushd "$WT" >/dev/null
             mkdir -p "$SNAP_DIR" assets
-            TS="$(date -u +%Y%m%dT%H%M%SZ)"  # ISO timestamp for unique snapshot names
+            TS="$(date -u +%Y%m%dT%H%M%SZ)"
 
-            # Function to create timestamped snapshot and latest copy of a database
-            # Creates two copies: one timestamped for history, one as 'latest' for easy access
             snapshot_one() {
               local src="$1"; local stem="$2"
               if [ -f "$GITHUB_WORKSPACE/$src" ]; then
-                local snap="$SNAP_DIR/${stem}_${TS}.db"  # Timestamped snapshot
+                local snap="$SNAP_DIR/${stem}_${TS}.db"
                 cp "$GITHUB_WORKSPACE/$src" "$snap"
-                cp "$GITHUB_WORKSPACE/$src" "assets/${stem}.latest.db"  # Latest copy
+                cp "$GITHUB_WORKSPACE/$src" "assets/${stem}.latest.db"
                 git add -f "$snap" "assets/${stem}.latest.db"
               else
                 echo "Skip: $src not found"
               fi
             }
 
-            # Create snapshots for both databases
-            # matched_entries_history.db: Contains all articles that matched search terms
-            # seen_entries.db: Contains all articles that have been processed (prevents duplicates)
+            # Both DBs
             snapshot_one "$DB_HISTORY" "matched_entries_history"
             snapshot_one "$DB_SEEN" "seen_entries"
 
-            # Retention policy: Keep only the most recent KEEP_SNAPSHOTS files per database
-            # This prevents the data branch from growing indefinitely
+            # Retention per DB
             retain() {
               local stem="$1"
               mapfile -t FILES < <(ls -1t "$SNAP_DIR"/${stem}_*.db 2>/dev/null || true)
@@ -118,11 +108,9 @@ jobs:
             retain "matched_entries_history"
             retain "seen_entries"
 
-            # Stage any file deletions from the retention cleanup
+            # Stage deletions from retention
             git add -A "$SNAP_DIR" || true
 
-            # Commit and push if there are any changes (new snapshots or deletions)
-            # [skip ci] prevents this commit from triggering other workflows
             if ! git diff --cached --quiet; then
               git commit -m "Snapshot DBs @ ${TS} [skip ci]"
               git push origin data
@@ -130,22 +118,18 @@ jobs:
               echo "No changes to commit."
             fi
           popd >/dev/null
-  
-          
+
       # Prepare files for GitHub Pages deployment
-      # Copy generated HTML files and archive to the site directory
       - name: Prepare site
         run: |
           mkdir site
-          cp -r archive site/ || true  # Copy daily archive files
-          cp *.html site/ || true      # Copy generated HTML summaries
+          cp -r archive site/ || true
+          cp *.html site/ || true
 
-      # Upload the site directory as a GitHub Pages artifact
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./site
 
-  # Deploy the prepared site to GitHub Pages
   deploy:
     needs: build
     runs-on: ubuntu-latest
