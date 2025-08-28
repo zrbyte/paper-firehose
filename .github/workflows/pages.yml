@@ -3,7 +3,8 @@ name: Build and Deploy
 on:
   workflow_dispatch:  # Manual trigger
   schedule:
-    - cron: '0 4 * * *'  # 04:00 UTC daily
+    - cron: '28 20 * * *'
+    #- cron: '0 4 * * *'  # 04:00 UTC daily
 
 permissions:
   contents: write # Required for uploading DB snapshots to data branch
