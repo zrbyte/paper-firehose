@@ -37,11 +37,11 @@
     UNIQUE(feed_name, topic, id)
 
 Migration Path
-Phase 1: Switch to YAML based config for feeds and topics. Each topic should have a separate journal list. Each topic has a yaml file with a journal list and regex search terms.
-Phase 2: Modify rssparser.py to write to the new schema while keeping current output. Add a main.py to act sa a cli interface.
-Phase 3: Create ranking.py that reads from DB and adds rank scores
-Phase 4: Modify llmsummary.py to read ranked entries from DB
-Phase 5: Add paper-qa summarization of top pdfs.
+- Phase 1: Switch to YAML based config for feeds and topics. Each topic should have a separate journal list. Each topic has a yaml file with a journal list and regex search terms.
+- Phase 2: Modify rssparser.py to write to the new schema while keeping current output. Add a main.py to act sa a cli interface.
+- Phase 3: Create ranking.py that reads from DB and adds rank scores
+- Phase 4: Modify llmsummary.py to read ranked entries from DB
+- Phase 5: Add paper-qa summarization of top pdfs.
 
 # Future developement directions
 
