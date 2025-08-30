@@ -8,15 +8,60 @@
 - **Complete pipeline**: CLI command `paper-firehose run`
 
 **Architecture principles:**
-- Single SQLite database for all data (`assets/papers.db`)
+- Three SQLite databases for feed management and processing
 - YAML-based configuration with topic-specific files
 - Modular processors that can be extended
 - Database-driven workflow enabling pause/resume
+- Only new RSS entries are processed to avoid duplicate work
 
-# Minimal Database Schema
+**Database strategy:**
+- `all_feed_entries.db`: All RSS entries ever fetched (unfiltered) - for deduplication. Purge entries that are older than 4 months from the database.
+- `matched_entries_history.db`: All entries that matched regex filters across all topics - for historical reference, never gets purged, accumulating.
+- `papers.db`: Current run's processing data (filtered → ranked → summarized). Each runs database kept for future reference, with an altered filename, with a date.
 
+# Database Schema
+
+## all_feed_entries.db (All RSS entries for deduplication)
 ```sql
--- Core entries table - minimal but extensible
+-- All RSS entries ever fetched from any feed
+CREATE TABLE feed_entries (
+    entry_id TEXT PRIMARY KEY,  -- SHA1 hash of id/link
+    feed_name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    link TEXT NOT NULL,
+    summary TEXT,
+    authors TEXT,
+    published_date TEXT,
+    first_seen TEXT DEFAULT (datetime('now')),
+    last_seen TEXT DEFAULT (datetime('now')),
+    raw_data TEXT,  -- JSON blob of original entry
+    
+    UNIQUE(feed_name, entry_id)
+);
+```
+
+## matched_entries_history.db (Historical record of all matches)
+```sql
+-- All entries that have ever matched regex filters across all topics
+CREATE TABLE matched_entries (
+    entry_id TEXT NOT NULL,
+    feed_name TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    title TEXT NOT NULL,
+    link TEXT NOT NULL,
+    summary TEXT,
+    authors TEXT,
+    published_date TEXT,
+    matched_date TEXT DEFAULT (datetime('now')),
+    raw_data TEXT,  -- JSON blob
+    
+    PRIMARY KEY (entry_id, feed_name, topic)
+);
+```
+
+## papers.db (Current run processing data)
+```sql
+-- Current run's entries being processed
 CREATE TABLE entries (
     id TEXT PRIMARY KEY,
     topic TEXT NOT NULL,
@@ -45,17 +90,6 @@ CREATE TABLE entries (
     
     UNIQUE(feed_name, topic, id)
 );
-
--- Simple deduplication
-CREATE TABLE seen_entries (
-    feed_name TEXT,
-    topic TEXT,
-    entry_id TEXT,
-    title TEXT,
-    link TEXT,
-    first_seen TEXT DEFAULT (datetime('now')),
-    PRIMARY KEY (feed_name, topic, entry_id)
-);
 ```
 
 # Directory Structure
@@ -83,16 +117,19 @@ paper-firehose/
 ├── cli/
 │   └── main.py                  # CLI entry point
 └── assets/
-    └── papers.db               # SQLite database
+    ├── all_feed_entries.db     # All RSS entries (deduplication)
+    ├── matched_entries_history.db  # Historical matches
+    └── papers.db               # Current run processing
 ```
 
 # Migration Path
 
 - **Phase 1**: Create minimal CLI structure with `paper-firehose` command
-- **Phase 2**: Implement basic filter → rank → summarize pipeline
+- **Phase 2**: Implement basic filter → rank → summarize pipeline  
 - **Phase 3**: Add YAML configuration system
 - **Phase 4**: Migrate existing functionality to new structure
-- **Phase 5**: Add extensibility points for future features
+- **Phase 5**: Update GitHub Actions workflow (pages.yaml) for new structure
+- **Phase 6**: Future features
 
 # Configuration Examples
 
@@ -153,7 +190,20 @@ paper-firehose summarize --topic primary
 
 # Process specific topic only
 paper-firehose run --topic primary
+
+# Database management (for testing)
+paper-firehose purge --days 30        # Remove entries older than 30 days
+paper-firehose purge --all            # Clear all databases
 ```
+
+# Processing Workflow
+
+1. **Feed fetching**: All RSS entries stored in `all_feed_entries.db` for deduplication
+2. **New entry detection**: Only entries not in `all_feed_entries.db` are processed
+3. **Regex filtering**: New entries tested against topic patterns
+4. **Historical storage**: Matched entries stored in `matched_entries_history.db` 
+5. **Current run processing**: Matched entries copied to `papers.db` for ranking/summarization
+6. **Preservation**: Historical databases never auto-purged, only via manual `purge` commands
 
 # Future Development
 - User profiles with individual YAML configs
