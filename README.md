@@ -1,91 +1,128 @@
-# cond-mat, paper RSS parser
+# Paper Firehose - RSS Feed Filtering and Ranking
 
-The project fetches articles from various journal feeds, filters them using regular expressions, summarizes them using an OpenAI language model, and uploads HTML summaries via FTP.
+A modular, CLI-based system for fetching research papers from RSS feeds, filtering them using regular expressions, and generating organized HTML summaries. Features a three-database architecture for efficient deduplication and historical tracking.
+
+## Architecture
+
+- **Modular Design**: Extensible processor-based architecture
+- **CLI Interface**: Simple commands for filtering, ranking, and summarization
+- **YAML Configuration**: Topic-specific configurations with regex patterns
+- **Three-Database System**: Efficient deduplication and historical tracking
+- **RSS Feed Processing**: Supports 33+ academic journal feeds
 
 ## Installation
 
-Developed with **Python 3.11** (requires Python 3.8+ for PaperQA compatibility). Install dependencies:
+Developed with **Python 3.11**. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
-Key dependencies include:
-- [feedparser](https://pypi.org/project/feedparser/) for RSS parsing
-- [paper-qa](https://github.com/Future-House/paper-qa) for advanced paper analysis and ranking
 
-## Setup
+Key dependencies:
+- [feedparser](https://pypi.org/project/feedparser/) - RSS parsing
+- [PyYAML](https://pyyaml.org/) - Configuration management  
+- [click](https://click.palletsprojects.com/) - CLI framework
 
-### Configuration Files
-
-- **feeds.json**: Required. Map feed names to RSS URLs. Must be placed next to `rssparser.py`.
-- **search_terms.json**: Optional. Defines topics as key/value pairs, where keys are topic names and values are regular expressions.
-  - The special topic `rg` (rhombohedral graphite) is updated daily.
-  - The search terms and the behavior of the `rg` topic is tailored to the needs of our research group, but adding new topics is easy, by appending the `search_terms.json` file. Future development may make this behavior more general, or maybe it won't :)
-  - Other topics (e.g., `primary`, `perovskites`) generate daily HTML summaries that are automatically archived.
-- **llm_prompts.json**: Optional. Custom instructions for language model summaries. Place next to `llmsummary.py`, keys correspond to topic names.
-- **priority_journals.json**: Optional. List of high-priority journals whose articles are always processed by LLM summary regardless of search term matches. Defaults to Nature, Science, and Nature family journals.
-
-### Environment Variables
-
-Set these variables (e.g., in your crontab):
-
-- `FTP_HOST`: FTP server hostname
-- `FTP_USER`: FTP username
-- `FTP_PASS`: FTP password
-- `OPENAI_API_KEY`: OpenAI API key for summarization (optional; see below)
-
-Alternatively, store your OpenAI API key in a file named `openaikulcs.env` next to `llmsummary.py`.
-
-## Usage
-
-### RSS Parser
-
-Run the main parser:
+## Quick Start
 
 ```bash
-python rssparser.py [options]
+# Check system status
+python cli/main.py status
+
+# Filter all topics
+python cli/main.py filter
+
+# Filter specific topic
+python cli/main.py filter --topic primary
+
+# Database cleanup
+python cli/main.py purge --days 30
 ```
 
-#### Command-Line Options
+## Configuration
 
-- `--no-upload`: Skip FTP upload (useful for testing)
-- `--no-summary`: Skip summarization step
-- `--clear-db`: Clear stored article IDs and exit
-- `--purge-days X`: Remove database entries older than `X` days and exit
+### Main Configuration (`config/config.yaml`)
 
-By default, the script generates a ranked, topic‑organized report with `llmsummary.py` into `summary.html` for the entries discovered in the current run.
+```yaml
+database:
+  path: "assets/papers.db"
+  all_feeds_path: "assets/all_feed_entries.db" 
+  history_path: "assets/matched_entries_history.db"
 
-### PaperQA Summarizer
+feeds:
+  cond-mat:
+    name: "arXiv Condensed Matter"
+    url: "https://rss.arxiv.org/rss/cond-mat"
+    enabled: true
+  nature:
+    name: "Nature"
+    url: "https://www.nature.com/nature.rss"
+    enabled: true
 
-Testing PaperQA summarizer:
+priority_journals:
+  - "nature"
+  - "science"
+  - "nat-mat"
+```
+
+### Topic Configuration (`config/topics/primary.yaml`)
+
+```yaml
+name: "Primary Research"
+description: "Topological materials and condensed matter physics"
+
+feeds:
+  - "cond-mat"
+  - "nature"
+  - "science"
+
+filter:
+  pattern: "(topolog[a-z]+)|(graphit[a-z]+)|(weyl)|(dirac)"
+  fields: ["title", "summary"]
+
+output:
+  filename: "results_primary.html"
+```
+
+## CLI Commands
+
+### Core Commands
 
 ```bash
-python paperqa_summarizer.py [arxiv_id_or_url]
+# Check system status and configuration
+python cli/main.py status
+
+# Filter RSS feeds and apply regex patterns
+python cli/main.py filter [--topic TOPIC]
+
+# Database management
+python cli/main.py purge --days 30     # Remove entries older than 30 days
+python cli/main.py purge --all         # Clear all databases
 ```
 
-This tool:
-- Downloads PDFs from arXiv URLs or IDs (e.g., `2506.20738` or `https://arxiv.org/abs/2506.20738`)
-- Uses PaperQA's AI-powered analysis to answer comprehensive questions about the paper
-- Provides detailed summaries including research objectives, methods, findings, and implications
-- Requires OpenAI API key (loaded from `openaikulcs.env` or `OPENAI_API_KEY` environment variable)
+### Command Details
 
-### Daily summary (topic-ranked report)
+#### `filter`
+Fetches RSS feeds, applies regex filters, and generates HTML output:
+1. Fetches new entries from configured RSS feeds
+2. Applies topic-specific regex patterns to titles and summaries
+3. Includes entries from priority journals regardless of regex match
+4. Stores filtered entries in three databases for efficient processing
+5. Generates HTML output files organized by feed
 
-- **What it produces**: `summary.html` with per‑topic sections (e.g., `primary`, `rg`, `perovskites`). Each section contains:
-  - **Overview**: 1–3 sentence high‑level takeaways (when using LLM ranking).
-  - **Top items**: The most important papers from this run, each showing title (linked), authors, journal (bold), a 4–5 sentence summary, and a **Score** badge.
+Example output: `results_primary.html` with 403 filtered entries
 
-- **How "Score" is calculated**:
-  - **LLM ranking (default when `OPENAI_API_KEY` is available)**
-    - The model ranks entries per topic and assigns an `importance_score` on a 1–5 scale (higher is more important) considering topical relevance, novelty/impact, and experimental/theory significance.
-    - Articles from priority journals (Nature, Science, etc.) are always included and given preferential treatment in ranking.
-    - The page displays that `importance_score` in the badge.
-  - **Future Enhancement**: Planning on implementing PaperQA-based ranking for more sophisticated analysis using two-stage evaluation (abstract screening + full PDF analysis for top candidates).
+#### `status`
+Shows system configuration and health:
+- Configuration file validation
+- Available topics and enabled feeds
+- Database paths and status
 
-- **Configuration**:
-  - `llm_prompts.json`: optional per‑topic guidance to steer ranking and phrasing.
-  - `search_terms.json`: topic regexes are provided as context to the model.
-  - API key: set `OPENAI_API_KEY` or place it in `openaikulcs.env` next to `llmsummary.py`.
+#### `purge`
+Database cleanup and management:
+- Remove entries older than specified days
+- Complete database reset for testing
+- Maintains deduplication efficiency
 
 
 ## GitHub Actions and Pages
@@ -102,22 +139,67 @@ Current URLs:
 - [Summary](https://zrbyte.github.io/paper-firehose/summary.html)
 - [Primary Results](https://zrbyte.github.io/paper-firehose/results_primary.html)
 
-## Database Details
+## Database Architecture
 
-Seen article IDs and titles are tracked in an SQLite database (`assets/seen_entries.db`):
+The system uses a three-database approach for efficient processing and historical tracking:
 
-- Each database row is unique per feed and topic to prevent cross-feed collisions.
-- IDs are generated via SHA‑1 hash from entry `id`, URL (cleaned of query parameters), or a combination of title and publication date.
-- Duplicate detection uses article titles, skipping identical entries even if links change.
+### 1. `all_feed_entries.db` - Deduplication Database
+- **Purpose**: Tracks all RSS entries ever fetched to prevent reprocessing
+- **Contents**: Entry ID, feed name, title, link, authors, publication date
+- **Retention**: Entries older than 4 months are automatically purged
+- **Key Feature**: Only new entries (not in this database) are processed
 
-Metadata for all new matching entries is stored in a separate SQLite database (`assets/matched_entries_history.db`).
-Each row stores the feed name, topic, entry ID, timestamp and the full entry metadata as JSON for later queries.
-The history database is never automatically purged, so it accumulates all matched entries across runs.
+### 2. `matched_entries_history.db` - Historical Matches
+- **Purpose**: Permanent record of all entries that matched regex filters
+- **Contents**: Entry metadata for all matched entries across all topics and runs
+- **Retention**: Never automatically purged - accumulates all matches for historical analysis
+- **Use Case**: Research trends, pattern analysis, long-term statistics
+
+### 3. `papers.db` - Current Run Processing
+- **Purpose**: Working database for current processing session
+- **Contents**: Filtered entries with processing status (filtered → ranked → summarized)
+- **Lifecycle**: Cleared at start of each run, populated during processing
+- **Features**: Supports workflow tracking and pause/resume functionality
+
+### Entry ID Generation
+- **Primary**: SHA-1 hash of cleaned URL (removes query parameters)  
+- **Fallback**: SHA-1 hash of title + publication date combination
+- **Ensures**: Stable IDs across feeds and consistent deduplication
+
+## Current Implementation Status
+
+✅ **Phase 1 Complete** - Basic CLI and Filter Command
+- Modular directory structure with extensible architecture
+- YAML-based configuration system for feeds and topics  
+- Three-database approach for deduplication and historical tracking
+- RSS feed processing with regex filtering
+- HTML output generation with proper LaTeX support
+- CLI interface with `filter`, `status`, and `purge` commands
+
+🚧 **Phase 2** - LLM Ranking (Planned)
+- LLM-based entry ranking and importance scoring
+- Integration with existing topic-specific prompts
+- Priority journal handling in ranking process
+
+🚧 **Phase 3** - Enhanced Summarization (Planned)  
+- LLM summarization of top-ranked entries
+- Integration with topic-ranked HTML output
+- Advanced PaperQA analysis for PDF processing
 
 ## Future Development
 
-- **Two-Stage PaperQA Ranking**: Integration of PaperQA into the main RSS workflow for more sophisticated paper ranking
-  - Stage 1: Fast abstract-based screening of all papers
-  - Stage 2: Deep PDF analysis of top candidates
-  - Enhanced relevance scoring based on full content analysis
-- Additional features and details available in the repository wiki
+- **Two-Stage PaperQA Ranking**: Enhanced paper analysis using full PDF content
+- **User Profiles**: Individual YAML configurations for different research groups
+- **Web Interface**: Configuration management and result browsing
+- **API Layer**: REST interface for programmatic access
+- **Enhanced Analytics**: Trend analysis and research pattern detection
+
+## Legacy Support
+
+The previous monolithic scripts are preserved in the `old/` directory:
+- `old/rssparser.py` - Original entry point  
+- `old/feedfilter.py` - Feed processing logic
+- `old/llmsummary.py` - LLM summarization
+- `old/*.json` - Original JSON configurations
+
+These remain functional for backward compatibility during the transition period.

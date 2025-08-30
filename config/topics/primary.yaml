@@ -1,0 +1,54 @@
+name: "Primary Research"
+description: "Topological materials, graphene, and condensed matter physics"
+
+# Which feeds to process for this topic
+feeds:
+  - "cond-mat"
+  - "nature"
+  - "science"
+  - "nat-mat"
+  - "nat-nanotech"
+  - "nat-phys"
+  - "nat-chem"
+  - "nat-ener"
+  - "nat-catal"
+  - "nat-chem-eng"
+  - "nat-rev-phys"
+  - "pnas"
+  - "joule"
+  - "prb"
+  - "prl"
+  - "prx"
+  - "pr_res"
+  - "nano-lett"
+  - "acs-nano"
+  - "acs-en-lett"
+  - "en-env-sci"
+  - "science-adv"
+  - "sci-rep"
+  - "nat-comm"
+  - "comm-phys"
+  - "comm-mater"
+  - "scipost"
+  - "small"
+  - "adv-mater"
+  - "adv-sci"
+  - "adv-func-mater"
+  - "adv-phys-res"
+  - "national-sci-rev"
+
+# Regex filter
+filter:
+  pattern: "(topolog[a-z]+)|(graphit[a-z]+)|(rhombohedr[a-z]+)|(graphe[a-z]+)|(ABC.+)|(chalcog[a-z]+)|(landau)|(weyl)|(dirac)|(STM)|(scan[a-z]+ tunne[a-z]+ micr[a-z]+)|(scan[a-z]+ tunne[a-z]+ spectr[a-z]+)|(scan[a-z]+ prob[a-z]+ micr[a-z]+)|(MoS.+\\d+|MoS\\d+)|(MoSe.+\\d+|MoSe\\d+)|(MoTe.+\\d+|MoTe\\d+)|(WS.+\\d+|WS\\d+)|(WSe.+\\d+|WSe\\d+)|(WTe.+\\d+|WTe\\d+)|(Bi\\d+Rh\\d+I\\d+|Bi.+\\d+.+Rh.+\\d+.+I.+\\d+.+)|(BiTeI)|(BiTeBr)|(BiTeCl)|(ZrTe5|ZrTe.+5)|(Pt2HgSe3|Pt.+2HgSe.+3)|(jacuting[a-z]+)|(flatband)|(flat.{1}band)"
+  fields: ["title", "summary"]
+
+# Ranking configuration
+ranking:
+  prompt: "You are a world-class condensed-matter researcher specializing in 2D van der Waals materials, STM, and charge transport in graphene/graphite systems. Focus on topical relevance (graphene, rhombohedral graphite, moiré/twisted systems, STM), novelty/impact, and experimental/theory significance."
+  top_n: 5
+
+# Output configuration
+output:
+  filename: "results_primary.html"
+  template: "topic_summary.html"
+  archive: true

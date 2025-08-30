@@ -1,0 +1,16 @@
+name: "Rhombohedral Graphite"
+description: "ABC-stacked graphene multilayers"
+
+feeds:
+  - "cond-mat"
+
+filter:
+  pattern: "(rhombohedr[a-z]+.*graph[a-z]+)|(ABC.*graph[a-z]+)|(ABC.*trilay[a-z]+)|(ABCA.*tetralay[a-z]+)|(ABCB.*tetralay[a-z]+)|(tetralay[a-z]+.*graph[a-z]+)|(pentalay[a-z]+.*graph[a-z]+)|(graph[a-z]+.*pentalay[a-z]+)|(hexalay[a-z]+.*graph[a-z]+)|(graph[a-z]+.*hexalay[a-z]+)|(heptalay[a-z]+.*graph[a-z]+)|(graph[a-z]+.*heptalay[a-z]+)"
+  fields: ["title", "summary"]
+
+ranking:
+  prompt: "You are a world-class condensed-matter researcher with deep expertise in rhombohedral graphite (ABC-stacked graphene multilayers) and related STM/transport phenomena. Prioritize entries that directly concern ABC/rhombohedral stacking, few-layer graphene with rhombohedral domains, or unambiguous experimental/theory advances in this subfield."
+  top_n: 3
+
+output:
+  filename: "rg_filtered_articles.html"

@@ -1,0 +1,156 @@
+# Main application configuration
+database:
+  path: "assets/papers.db"
+  all_feeds_path: "assets/all_feed_entries.db"
+  history_path: "assets/matched_entries_history.db"
+
+llm:
+  model: "gpt-4o-mini"
+  api_key_env: "OPENAI_API_KEY"
+  
+feeds:
+  cond-mat:
+    name: "arXiv Condensed Matter"
+    url: "https://rss.arxiv.org/rss/cond-mat"
+    enabled: true
+  nature:
+    name: "Nature"
+    url: "https://www.nature.com/nature.rss"
+    enabled: true
+  science:
+    name: "Science"
+    url: "https://www.science.org/action/showFeed?type=axatoc&feed=rss&jc=science"
+    enabled: true
+  nat-mat:
+    name: "Nature Materials"
+    url: "https://www.nature.com/nmat.rss"
+    enabled: true
+  nat-nanotech:
+    name: "Nature Nanotechnology"
+    url: "https://www.nature.com/nnano.rss"
+    enabled: true
+  nat-phys:
+    name: "Nature Physics"
+    url: "https://www.nature.com/nphys.rss"
+    enabled: true
+  nat-chem:
+    name: "Nature Chemistry"
+    url: "https://www.nature.com/nchem.rss"
+    enabled: true
+  nat-ener:
+    name: "Nature Energy"
+    url: "https://www.nature.com/nenergy.rss"
+    enabled: true
+  nat-catal:
+    name: "Nature Catalysis"
+    url: "https://www.nature.com/natcatal.rss"
+    enabled: true
+  nat-chem-eng:
+    name: "Nature Chemical Engineering"
+    url: "https://www.nature.com/natchemeng.rss"
+    enabled: true
+  nat-rev-phys:
+    name: "Nature Reviews Physics"
+    url: "https://www.nature.com/natrevphys.rss"
+    enabled: true
+  pnas:
+    name: "PNAS"
+    url: "https://www.pnas.org/action/showFeed?type=searchTopic&taxonomyCode=topic&tagCode=phys-sci"
+    enabled: true
+  joule:
+    name: "Joule"
+    url: "https://www.cell.com/joule/inpress.rss"
+    enabled: true
+  prb:
+    name: "Physical Review B"
+    url: "http://feeds.aps.org/rss/recent/prb.xml"
+    enabled: true
+  prl:
+    name: "Physical Review Letters"
+    url: "http://feeds.aps.org/rss/recent/prl.xml"
+    enabled: true
+  prx:
+    name: "Physical Review X"
+    url: "http://feeds.aps.org/rss/recent/prx.xml"
+    enabled: true
+  pr_res:
+    name: "Physical Review Research"
+    url: "http://feeds.aps.org/rss/recent/prresearch.xml"
+    enabled: true
+  nano-lett:
+    name: "Nano Letters"
+    url: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=nalefd"
+    enabled: true
+  acs-nano:
+    name: "ACS Nano"
+    url: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ancac3"
+    enabled: true
+  acs-en-lett:
+    name: "ACS Energy Letters"
+    url: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=aelccp"
+    enabled: true
+  en-env-sci:
+    name: "Energy & Environmental Science"
+    url: "http://feeds.rsc.org/rss/ee"
+    enabled: true
+  science-adv:
+    name: "Science Advances"
+    url: "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv"
+    enabled: true
+  sci-rep:
+    name: "Scientific Reports"
+    url: "http://feeds.nature.com/srep/rss/current"
+    enabled: true
+  nat-comm:
+    name: "Nature Communications"
+    url: "https://www.nature.com/subjects/physical-sciences/ncomms.rss"
+    enabled: true
+  comm-phys:
+    name: "Communications Physics"
+    url: "https://www.nature.com/commsphys.rss"
+    enabled: true
+  comm-mater:
+    name: "Communications Materials"
+    url: "https://www.nature.com/commsmat.rss"
+    enabled: true
+  scipost:
+    name: "SciPost"
+    url: "https://scipost.org/rss/submissions/"
+    enabled: true
+  small:
+    name: "Small"
+    url: "https://onlinelibrary.wiley.com/feed/16136829/most-recent"
+    enabled: true
+  adv-mater:
+    name: "Advanced Materials"
+    url: "https://onlinelibrary.wiley.com/feed/15214095/most-recent"
+    enabled: true
+  adv-sci:
+    name: "Advanced Science"
+    url: "https://onlinelibrary.wiley.com/feed/21983844/most-recent"
+    enabled: true
+  adv-func-mater:
+    name: "Advanced Functional Materials"
+    url: "https://onlinelibrary.wiley.com/feed/16163028/most-recent"
+    enabled: true
+  adv-phys-res:
+    name: "Advanced Physics Research"
+    url: "https://onlinelibrary.wiley.com/feed/27511200/most-recent"
+    enabled: true
+  national-sci-rev:
+    name: "National Science Review"
+    url: "https://academic.oup.com/rss/site_5332/advanceAccess_3198.xml"
+    enabled: true
+
+# Priority journals (always processed regardless of regex match)
+priority_journals:
+  - "nature"
+  - "science"
+  - "nat-nanotech"
+  - "nat-mat"
+  - "nat-phys"
+
+# Global defaults
+defaults:
+  top_n_per_topic: 5
+  ranking_enabled: true
