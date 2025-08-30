@@ -11,7 +11,7 @@
 
 # Main sqlite structure
 -- Main entries table (replaces dictionary based communication between scripts)
-CREATE TABLE matched_entries (
+  CREATE TABLE matched_entries 
     id TEXT PRIMARY KEY,
     feed_name TEXT,
     topic TEXT,
