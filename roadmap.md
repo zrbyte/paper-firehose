@@ -1,16 +1,16 @@
 - Topics in which we're accumulating knowledge, like "RG" is separate from paper search and ranking. They should be kept separate.
 	- Set topic type, to **accumulating**, where we're constantly appending to a html. For this implement sqlite database of entries, alongside the html file. All accumulating topics should go to an sqlite database: `accumulating_papers.db`.
 	- All **daily** topic result entries stemming from the regexp search still go to `matched_entries_history.db`.
-- Moving the feed entries across python scripts and ranking will need sqlite. Switch over from using dictinary to sqlite.
+- Moving the feed entries across python scripts and ranking will need sqlite. Switch over from using dictinary to sqlite. Single sqlite structure from rssparsing, ranking to llm summarization. Each daily sqlite will be updated as the scripts (feedfilter, ranking, llmsummary, paperqa-summary) run.
 - Pipeline for filtering papers:
 	- Take RSS entries and filter title and abstract by regex.
 	- The entries from this filtering get passed to ranking. There should be a `ranking.py` which attaches a score to each entry. This ranking can be done by title + abstract. Use paper-qa? 
 		- Ranking gets done on all the entries irrespective of journal.
 	- Top 20%? of entries gets summarised by LMM, passed to `llmsummary.py`. For these the abstract is also fetched from crossref if available.
 	- For the top 5? arXiv entries the pdf is downloaded and the whole entry is summarised by paper-qa. Appears in a dropdown menu in the `summary.html`.
-		- The dictionary element of the entry gets another key, with the rank? Switch to sqlite?
 
--- Main entries table (replaces all_new_entries)
+# Main sqlite structure
+-- Main entries table (replaces dictionary based communication between scripts)
 CREATE TABLE matched_entries (
     id TEXT PRIMARY KEY,
     feed_name TEXT,
@@ -37,10 +37,13 @@ CREATE TABLE matched_entries (
     UNIQUE(feed_name, topic, id)
 
 Migration Path
-Phase 1: Modify rssparser.py to write to the new schema while keeping current output. Add a main.py to act sa a cli interface.
-Phase 2: Create ranking.py that reads from DB and adds rank scores
-Phase 3: Modify llmsummary.py to read ranked entries from DB
-Phase 4: Remove dictionary passing between scripts
+Phase 1: Switch to YAML based config for feeds and topics. Each topic should have a separate journal list. Each topic has a yaml file with a journal list and regex search terms.
+Phase 2: Modify rssparser.py to write to the new schema while keeping current output. Add a main.py to act sa a cli interface.
+Phase 3: Create ranking.py that reads from DB and adds rank scores
+Phase 4: Modify llmsummary.py to read ranked entries from DB
+Phase 5: Add paper-qa summarization of top pdfs.
+
+# Future developement directions
 
 # Proposed modular redesign
 - rss-feed-search/
@@ -85,7 +88,6 @@ feeds:
     name: "arXiv Condensed Matter"
     url: "https://rss.arxiv.org/rss/cond-mat"
     enabled: true
-    fetch_interval: "1h"
     rate_limit: 
       requests_per_minute: 10
     
@@ -93,7 +95,6 @@ feeds:
     name: "Nature"
     url: "https://www.nature.com/nature.rss"
     enabled: true
-    fetch_interval: "2h"
 
 # search_topics.yaml
 topics:
