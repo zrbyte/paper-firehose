@@ -10,8 +10,8 @@
 	- For the top 5? arXiv entries the pdf is downloaded and the whole entry is summarised by paper-qa. Appears in a dropdown menu in the `summary.html`.
 
 # Main sqlite structure
--- Main entries table (replaces dictionary based communication between scripts)
-  CREATE TABLE matched_entries 
+    -- Main entries table (replaces dictionary based communication between scripts)
+      CREATE TABLE matched_entries 
     id TEXT PRIMARY KEY,
     feed_name TEXT,
     topic TEXT,
