@@ -480,7 +480,7 @@ def process_feeds(upload: bool = True):
                     all_new_entries[topic][feed_name].append(entry)
                     save_entry_metadata(entry, feed_name, topic, entry_id, entry_datetime)
                     seen_entries[entry_id] = ( # type: ignore
-                        entry_datetime, entry_title
+                        current_time, entry_title  # Use current_time instead of entry_datetime for discovery time
                     )
                     seen_titles.add(entry_title)
                 

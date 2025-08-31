@@ -24,7 +24,7 @@ OPENAI_MODEL = "gpt-5"  # default model to use
 OPENAI_MAX_RETRIES = 5  # total attempts including the first
 OPENAI_BACKOFF_SECONDS = 1.0  # initial backoff before exponential growth
 OPENAI_SLEEP_BETWEEN_TOPICS = 0.0  # pause between topic calls
-SUMMARY_TOP_N_DEFAULT = 20  # max number of items returned per topic
+SUMMARY_TOP_N_DEFAULT = 10  # max number of items returned per topic
 PROMPT_MAX_ITEMS_PER_TOPIC = 30  # cap entries included in the prompt to limit tokens
 OPENAI_MODEL_FALLBACK = "gpt-4o-mini"  # fallback if primary model fails
 
@@ -509,7 +509,7 @@ def build_ranking_prompt(
         f"Entries (each has title, link, authors, feed, summary):\n" + "\n\n".join(numbered) + "\n\n"
         "Task: Rank the entries by importance for an expert reader. Consider topical relevance, novelty, likely impact, experimental/theory significance, and match to the topic. "
         "IMPORTANT: Entries marked with [PRIORITY JOURNAL] are from high-impact journals and should be strongly favored for inclusion unless they are completely irrelevant. "
-        f"Return ONLY a valid RFC 8259 JSON object with at most {top_n} items. No markdown, no code fences, no comments, no trailing commas.\n"
+        f"Return ONLY a valid RFC 8259 JSON object with EXACTLY {top_n} items or fewer. Keep response under 15000 tokens. No markdown, no code fences, no comments, no trailing commas.\n"
         "JSON shape (values shown for type only):\n"
         "{\n"
         "  \"topic\": \"string\",\n"
@@ -567,7 +567,7 @@ def rank_entries_with_llm(
         priority_journals=priority_journals,
     )
     # Increase output tokens for gpt-5 models that use reasoning tokens separately
-    raw = chat_completion_with_fallback(prompt, max_tokens=6000)
+    raw = chat_completion_with_fallback(prompt, max_tokens=20000)
     if not raw:
         logging.error("LLM returned empty content for topic '%s'", topic)
         return {"topic": topic, "overview": "", "items": []}

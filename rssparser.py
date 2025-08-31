@@ -51,7 +51,7 @@ if __name__ == "__main__":
         type=int,
         metavar="DAYS",
         dest="purge_days",
-        help="remove database entries older than DAYS days and exit",
+        help="remove database entries discovered more than DAYS days ago and exit",
     )
     parser.add_argument(
         "--no-summary",
