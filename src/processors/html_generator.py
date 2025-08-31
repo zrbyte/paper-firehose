@@ -100,7 +100,9 @@ class HTMLGenerator:
         )
         
         # Ensure output directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        output_dir = os.path.dirname(output_path)
+        if output_dir:  # Only create directory if path contains a directory component
+            os.makedirs(output_dir, exist_ok=True)
         
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(rendered)
@@ -150,12 +152,12 @@ class HTMLGenerator:
         
         FEED_HEADER = Template('<h2>Feed: $title</h2>')
         ENTRY_TEMPLATE = Template(
-            '<div class="entry">\\n'
-            '  <h3><a href="$link">$title</a></h3>\\n'
-            '  <p><strong>Authors:</strong> $authors</p>\\n'
-            '  <p><em>Published: $published</em></p>\\n'
-            '  <p>$summary</p>\\n'
-            '</div>\\n<hr>'
+            '<div class="entry">\n'
+            '  <h3><a href="$link">$title</a></h3>\n'
+            '  <p><strong>Authors:</strong> $authors</p>\n'
+            '  <p><em>Published: $published</em></p>\n'
+            '  <p>$summary</p>\n'
+            '</div>\n<hr>'
         )
         
         # Check if there are any entries
