@@ -17,7 +17,7 @@ import urllib.parse
 logging.basicConfig(level=logging.INFO)
 
 # Constants
-TIME_DELTA = datetime.timedelta(days=182)  # Approximately 6 months
+TIME_DELTA = datetime.timedelta(days=365)  # 1 year retention window
 MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(MAIN_DIR, 'assets')
 ARCHIVE_DIR = os.path.join(MAIN_DIR, 'archive')
@@ -50,6 +50,7 @@ def ensure_database_schema():
                 entry_id TEXT,
                 timestamp TEXT,
                 title TEXT,
+                "publication date" TEXT,
                 PRIMARY KEY (feed_name, search_type, entry_id)
             )"""
         )
@@ -60,6 +61,8 @@ def ensure_database_schema():
     pk_columns = [row[1] for row in info if row[5] > 0]
     needs_migration = False
     if "title" not in columns:
+        needs_migration = True
+    if "publication date" not in columns:
         needs_migration = True
     if pk_columns != ["feed_name", "search_type", "entry_id"]:
         needs_migration = True
@@ -77,12 +80,22 @@ def ensure_database_schema():
                 entry_id TEXT,
                 timestamp TEXT,
                 title TEXT,
+                "publication date" TEXT,
                 PRIMARY KEY (feed_name, search_type, entry_id)
             )"""
         )
+        # When migrating, initialize "publication date" with the existing timestamp value
+        rows_with_pub = [(
+            feed_name,
+            search_type,
+            entry_id,
+            timestamp,
+            title,
+            timestamp,
+        ) for (feed_name, search_type, entry_id, timestamp, title) in rows]
         cursor.executemany(
-            "INSERT OR REPLACE INTO seen_entries (feed_name, search_type, entry_id, timestamp, title) VALUES (?, ?, ?, ?, ?)",
-            rows,
+            "INSERT OR REPLACE INTO seen_entries (feed_name, search_type, entry_id, timestamp, title, \"publication date\") VALUES (?, ?, ?, ?, ?, ?)",
+            rows_with_pub,
         )
         conn.commit()
 
@@ -96,9 +109,16 @@ def ensure_entries_schema():
             entry_id TEXT,
             timestamp TEXT,
             data TEXT,
+            "publication date" TEXT,
             PRIMARY KEY (feed_name, search_type, entry_id)
         )"""
     )
+    # If the table already exists, ensure the "publication date" column is present
+    entries_cursor.execute("PRAGMA table_info(matched_entries)")
+    entries_info = entries_cursor.fetchall()
+    entries_columns = [row[1] for row in entries_info]
+    if "publication date" not in entries_columns:
+        entries_cursor.execute("ALTER TABLE matched_entries ADD COLUMN \"publication date\" TEXT")
     entries_conn.commit()
 
 
@@ -193,6 +213,15 @@ def load_seen_entries(feed_name, search_type):
     }
 
 
+def load_all_seen_titles():
+    """Load all seen entry titles across all feeds and topics for global deduplication."""
+    cursor.execute(
+        "SELECT DISTINCT title FROM seen_entries"
+    )
+    rows = cursor.fetchall()
+    return {title for (title,) in rows if title}
+
+
 def save_seen_entries(entries, feed_name, search_type):
     """Persist seen entries for a feed/search type to the database."""
     cutoff = (datetime.datetime.now() - TIME_DELTA).isoformat()
@@ -202,9 +231,17 @@ def save_seen_entries(entries, feed_name, search_type):
     )
     for entry_id, value in entries.items():
         ts, title = value
+        # Normalize to date string YYYY-MM-DD (from 'published' date)
+        if isinstance(ts, datetime.datetime):
+            date_str = ts.date().isoformat()
+        elif isinstance(ts, datetime.date):
+            date_str = ts.isoformat()
+        else:
+            # Fallback: assume string, trim to YYYY-MM-DD
+            date_str = str(ts)[:10]
         cursor.execute(
-            "INSERT OR REPLACE INTO seen_entries (feed_name, search_type, entry_id, timestamp, title) VALUES (?, ?, ?, ?, ?)",
-            (feed_name, search_type, entry_id, ts.isoformat(), title),
+            "INSERT OR REPLACE INTO seen_entries (feed_name, search_type, entry_id, timestamp, title, \"publication date\") VALUES (?, ?, ?, ?, ?, ?)",
+            (feed_name, search_type, entry_id, ts.isoformat() if isinstance(ts, datetime.datetime) else (ts.isoformat() if isinstance(ts, datetime.date) else str(ts)), title, date_str),
         )
     conn.commit()
 
@@ -227,10 +264,24 @@ def purge_database(days: int):
 def save_entry_metadata(entry, feed_name, search_type, entry_id, timestamp):
     """Store metadata about a new entry in the entries database."""
     data = json.dumps(entry, default=str)
+    # Normalize to date string YYYY-MM-DD (from 'published' date)
+    if isinstance(timestamp, datetime.datetime):
+        date_str = timestamp.date().isoformat()
+    elif isinstance(timestamp, datetime.date):
+        date_str = timestamp.isoformat()
+    else:
+        date_str = str(timestamp)[:10]
     entries_cursor.execute(
-        "INSERT OR IGNORE INTO matched_entries (feed_name, search_type, entry_id, timestamp, data)"
-        " VALUES (?, ?, ?, ?, ?)",
-        (feed_name, search_type, entry_id, timestamp.isoformat(), data),
+        "INSERT OR IGNORE INTO matched_entries (feed_name, search_type, entry_id, timestamp, data, \"publication date\")"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            feed_name,
+            search_type,
+            entry_id,
+            timestamp.isoformat() if isinstance(timestamp, datetime.datetime) else (timestamp.isoformat() if isinstance(timestamp, datetime.date) else str(timestamp)),
+            data,
+            date_str,
+        ),
     )
     entries_conn.commit()
 
@@ -251,7 +302,7 @@ def matches_search_terms(entry, search_pattern):
 
 
 def clean_old_entries(seen_entries):
-    """Remove entries older than 6 months from seen_entries."""
+    """Remove entries older than 1 year from seen_entries."""
     current_time = datetime.datetime.now()
     keys_to_delete = []
     for entry_id, (entry_datetime, _title) in seen_entries.items():
@@ -416,6 +467,9 @@ def process_feeds(upload: bool = True):
             html_files[topic] = archive_files[topic]
             stable_files[topic] = f'{topic}_filtered_articles.html'
 
+    # Build a global set of seen titles across all feeds and topics
+    seen_titles_global = load_all_seen_titles()
+
     for feed_name in feeds:
         rss_feed_url = database.get(feed_name)
         if rss_feed_url is None:
@@ -433,10 +487,11 @@ def process_feeds(upload: bool = True):
         for entry in feed_entries:
             entry['feed_title'] = feed_title
 
-        # Load seen entries for all topics once
+        # Load seen entries per-topic for saving/persistence
         seen_entries_per_topic = {
             topic: load_seen_entries(feed_name, topic) for topic in topics
         }
+        # Rebuild per-topic seen title sets for incremental updates and persistence
         seen_titles_per_topic = {
             topic: {
                 details[1] for details in seen_entries_per_topic[topic].values()
@@ -473,16 +528,18 @@ def process_feeds(upload: bool = True):
 
                 # Check if entry matches search terms or is from a priority journal
                 matches_search = matches_search_terms(entry, pattern)
-                is_new_entry = entry_title not in seen_titles
+                # Global title-based deduplication across all feeds and topics by title only
+                is_new_entry = entry_title not in seen_titles_global
                 
                 # Add to all_new_entries if it matches search terms
                 if is_new_entry and matches_search:
                     all_new_entries[topic][feed_name].append(entry)
                     save_entry_metadata(entry, feed_name, topic, entry_id, entry_datetime)
                     seen_entries[entry_id] = ( # type: ignore
-                        current_time, entry_title  # Use current_time instead of entry_datetime for discovery time
+                        entry_datetime, entry_title
                     )
                     seen_titles.add(entry_title)
+                    seen_titles_global.add(entry_title)
                 
                 # Also add to priority_journal_entries for this topic only if it matches the topic
                 # This prevents priority entries from leaking into unrelated topics
