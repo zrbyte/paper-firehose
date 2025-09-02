@@ -252,11 +252,20 @@ def clear_database():
 
 
 def purge_database(days: int):
-    """Remove entries older than the specified number of days from the database."""
-    cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat()
+    """Remove entries from the most recent N days (including today) based on publication date (YYYY-MM-DD)."""
+    start_date = (datetime.datetime.now().date() - datetime.timedelta(days=days - 1)).isoformat()
+    end_date = datetime.datetime.now().date().isoformat()
+    print(start_date)
+    print(end_date)
+
     cursor.execute(
-        "DELETE FROM seen_entries WHERE timestamp < ?",
-        (cutoff,),
+        """
+        DELETE FROM seen_entries
+        WHERE "publication date" IS NOT NULL
+          AND TRIM("publication date") != ''
+          AND DATE("publication date") BETWEEN DATE(?) AND DATE(?)
+        """,
+        (start_date, end_date),
     )
     conn.commit()
 
