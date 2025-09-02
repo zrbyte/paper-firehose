@@ -127,17 +127,7 @@ Database cleanup and management:
 
 ## GitHub Actions and Pages
 
-A GitHub Actions workflow (`.github/workflows/pages.yml`) runs the parser daily and publishes results to GitHub Pages:
-
-- Set the `OPENAI_API_KEY` repository secret for summarization (optional; if omitted, the ranked lists will be empty and only section headers/overviews may appear).
-- Use `--no-summary` in the workflow to disable summarization if desired.
-- Enable GitHub Pages in repository settings with source set to **GitHub Actions**.
-
-Your summaries will be available at the URL provided in the workflow output. The `summary.html` is the topic‑ranked report for that day’s run.
-
-Current URLs:
-- [Summary](https://zrbyte.github.io/paper-firehose/summary.html)
-- [Primary Results](https://zrbyte.github.io/paper-firehose/results_primary.html)
+To add...
 
 ## Database Architecture
 
@@ -203,3 +193,24 @@ The previous monolithic scripts are preserved in the `old/` directory:
 - `old/*.json` - Original JSON configurations
 
 These remain functional for backward compatibility during the transition period.
+
+## Python API (Jupyter/Programmatic)
+
+You can use the core functionality directly from Python (e.g., in notebooks):
+
+```python
+import paper_firehose as pf
+
+# Inspect configuration status
+pf.status()
+
+# Run filtering for a specific topic (defaults to config/config.yaml)
+pf.filter(topic="primary")
+
+# Purge all data (CAUTION)
+# pf.purge(all_data=True)
+```
+
+Notes:
+- Ensure you run Python from the repository root (so the package can locate `src/` and `config/`).
+- Alternatively, add the repository root to `PYTHONPATH` before importing.
