@@ -36,7 +36,7 @@ python cli/main.py filter
 python cli/main.py filter --topic primary
 
 # Database cleanup
-python cli/main.py purge --days 30
+python cli/main.py purge --days 30     # Remove entries from last 30 days (including today)
 ```
 
 ## Configuration
@@ -120,7 +120,7 @@ Shows system configuration and health:
 
 #### `purge`
 Database cleanup and management:
-- Remove entries older than specified days
+- Remove entries from the most recent N days (including today) based on publication date
 - Complete database reset for testing
 - Maintains deduplication efficiency
 
@@ -144,6 +144,7 @@ The system uses a three-database approach for efficient processing and historica
 - **Contents**: Entry metadata for all matched entries across all topics and runs
 - **Retention**: Never automatically purged - accumulates all matches for historical analysis
 - **Use Case**: Research trends, pattern analysis, long-term statistics
+- **Key Feature**: **Topic Merging** - If an entry matches multiple topics, all topics are stored in a single record (e.g., "primary, rg")
 
 ### 3. `papers.db` - Current Run Processing
 - **Purpose**: Working database for current processing session
@@ -156,6 +157,16 @@ The system uses a three-database approach for efficient processing and historica
 - **Fallback**: SHA-1 hash of title + publication date combination
 - **Ensures**: Stable IDs across feeds and consistent deduplication
 
+### Topic Merging and Deduplication
+- **Smart Deduplication**: Each unique entry is stored only once in `matched_entries_history.db`
+- **Topic Accumulation**: If an entry matches multiple topics, all topics are merged into a single record
+- **Example**: An entry matching both 'primary' and 'rg' topics shows as "primary, rg" in the topics field
+- **Benefits**: 
+  - Eliminates duplicate database entries
+  - Reduces database operations during testing/rerunning
+  - Provides clear visibility into which entries are relevant to multiple research areas
+  - Maintains historical accuracy while improving efficiency
+
 ## Current Implementation Status
 
 ✅ **Phase 1 Complete** - Basic CLI and Filter Command
@@ -163,8 +174,9 @@ The system uses a three-database approach for efficient processing and historica
 - YAML-based configuration system for feeds and topics  
 - Three-database approach for deduplication and historical tracking
 - RSS feed processing with regex filtering
-- HTML output generation with proper LaTeX support
+- **Improved HTML Generation**: Database-first approach with standalone capability
 - CLI interface with `filter`, `status`, and `purge` commands
+- **Topic Merging**: Intelligent deduplication across multiple topics
 
 🚧 **Phase 2** - LLM Ranking (Planned)
 - LLM-based entry ranking and importance scoring
@@ -175,6 +187,27 @@ The system uses a three-database approach for efficient processing and historica
 - LLM summarization of top-ranked entries
 - Integration with topic-ranked HTML output
 - Advanced PaperQA analysis for PDF processing
+
+## HTML Generation
+
+The system now features an improved HTML generation system that works directly from the database:
+
+### **Database-First Approach**
+- **Direct Database Access**: HTML is generated directly from `papers.db` content
+- **Standalone Capability**: Can generate HTML without running the full filter pipeline
+- **Consistent Data Source**: Always reflects the current state of the database
+- **Efficient Processing**: No need to re-parse RSS data for HTML generation
+
+### **Usage Examples**
+```python
+# Generate HTML from current database state
+pf.generate_html(topic="primary")
+
+# Standalone HTML generation
+from processors.html_generator import HTMLGenerator
+html_gen = HTMLGenerator()
+html_gen.generate_html_for_topic_from_database(db_manager, topic_name, output_path)
+```
 
 ## Future Development
 
@@ -207,6 +240,12 @@ pf.status()
 # Run filtering for a specific topic (defaults to config/config.yaml)
 pf.filter(topic="primary")
 
+# Generate HTML for a topic directly from papers.db
+pf.generate_html(topic="primary")
+
+# Purge entries from the last N days (based on publication date)
+# pf.purge(days=30)
+
 # Purge all data (CAUTION)
 # pf.purge(all_data=True)
 ```
@@ -214,3 +253,4 @@ pf.filter(topic="primary")
 Notes:
 - Ensure you run Python from the repository root (so the package can locate `src/` and `config/`).
 - Alternatively, add the repository root to `PYTHONPATH` before importing.
+- **Testing Efficiency**: The new topic merging system eliminates duplicate database operations, making testing and rerunning much more efficient.

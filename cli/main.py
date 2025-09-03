@@ -50,11 +50,11 @@ def filter_feeds(ctx, topic):
 
 
 @cli.command('purge')
-@click.option('--days', type=int, help='Remove entries older than DAYS days')
+@click.option('--days', type=int, help='Remove entries from the most recent DAYS days (including today)')
 @click.option('--all', 'all_data', is_flag=True, help='Clear all databases')
 @click.pass_context
 def purge(ctx, days, all_data):
-    """Remove old entries from databases"""
+    """Remove entries from databases based on publication date"""
     if not days and not all_data:
         click.echo("Error: Must specify either --days X or --all", err=True)
         sys.exit(1)
@@ -69,7 +69,7 @@ def purge(ctx, days, all_data):
         if all_data:
             click.echo("✅ All data purged successfully")
         else:
-            click.echo(f"✅ Entries older than {days} days purged successfully")
+            click.echo(f"✅ Entries from the most recent {days} days purged successfully")
     except Exception as e:
         click.echo(f"❌ Purge command failed: {e}", err=True)
         sys.exit(1)

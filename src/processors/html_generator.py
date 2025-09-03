@@ -38,24 +38,34 @@ class HTMLGenerator:
         
         return text
     
-    def generate_html(self, entries_per_feed: Dict[str, List[Dict[str, Any]]], 
-                     output_path: str, topic_name: str, topic_description: str = None) -> None:
+    def generate_html_from_database(self, db_manager, topic_name: str, output_path: str, topic_description: str = None) -> None:
         """
-        Generate HTML file for filtered articles.
+        Generate HTML file for filtered articles directly from papers.db.
         
         Args:
-            entries_per_feed: Dict mapping feed names to entry lists
-            output_path: Path to output HTML file
+            db_manager: Database manager instance
             topic_name: Name of the topic
+            output_path: Path to output HTML file
             topic_description: Description for the topic
         """
-        file_exists = os.path.exists(output_path)
+        # Always create a fresh HTML file for each run
+        self._create_new_html_file(output_path, topic_name, topic_description)
         
-        # Create new file if it doesn't exist
-        if not file_exists:
-            self._create_new_html_file(output_path, topic_name, topic_description)
+        # Get entries from papers.db for this topic
+        entries = db_manager.get_current_entries(topic=topic_name, status='filtered')
         
-        # Read existing content
+        # Organize entries by feed
+        entries_per_feed = {}
+        for entry in entries:
+            feed_name = entry.get('feed_name', 'unknown')
+            if feed_name not in entries_per_feed:
+                entries_per_feed[feed_name] = []
+            entries_per_feed[feed_name].append(entry)
+        
+        # Generate HTML for entries
+        entries_html = self._generate_entries_html_from_db(entries_per_feed)
+        
+        # Read the template file we just created
         with open(output_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
         
@@ -64,21 +74,57 @@ class HTMLGenerator:
         if insert_position == -1:
             insert_position = len(html_content)
         
-        # Generate HTML for new entries
-        new_entries_html = self._generate_entries_html(entries_per_feed)
-        
-        # Insert new content
+        # Insert entries content
         updated_html = (
             html_content[:insert_position]
-            + '\n'.join(new_entries_html)
+            + '\n'.join(entries_html)
             + html_content[insert_position:]
         )
         
-        # Write updated content
+        # Write the complete content
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(updated_html)
         
-        logger.info(f"Generated/Updated HTML file: {output_path}")
+        logger.info(f"Generated fresh HTML file from database: {output_path}")
+    
+    def generate_html(self, entries_per_feed: Dict[str, List[Dict[str, Any]]], 
+                     output_path: str, topic_name: str, topic_description: str = None) -> None:
+        """
+        Generate HTML file for filtered articles (legacy method for backward compatibility).
+        
+        Args:
+            entries_per_feed: Dict mapping feed names to entry lists
+            output_path: Path to output HTML file
+            topic_name: Name of the topic
+            topic_description: Description for the topic
+        """
+        # Always create a fresh HTML file for each run
+        self._create_new_html_file(output_path, topic_name, topic_description)
+        
+        # Generate HTML for entries
+        entries_html = self._generate_entries_html(entries_per_feed)
+        
+        # Read the template file we just created
+        with open(output_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        # Find insertion point (before </body>)
+        insert_position = html_content.rfind('</body>')
+        if insert_position == -1:
+            insert_position = len(html_content)
+        
+        # Insert entries content
+        updated_html = (
+            html_content[:insert_position]
+            + '\n'.join(entries_html)
+            + html_content[insert_position:]
+        )
+        
+        # Write the complete content
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(updated_html)
+        
+        logger.info(f"Generated fresh HTML file: {output_path}")
     
     def _create_new_html_file(self, output_path: str, topic_name: str, topic_description: str = None) -> None:
         """Create a new HTML file using the template."""
@@ -93,9 +139,10 @@ class HTMLGenerator:
             template = PercentTemplate(tmpl.read())
         
         title = topic_description or f"Filtered Articles - {topic_name}"
+        current_date = datetime.date.today()
         rendered = template.substitute(
             title=html.escape(title),
-            date=datetime.date.today(),
+            date=current_date,
             content="",
         )
         
@@ -146,8 +193,54 @@ class HTMLGenerator:
         with open(self.template_path, 'w', encoding='utf-8') as f:
             f.write(basic_template)
     
+    def _generate_entries_html_from_db(self, entries_per_feed: Dict[str, List[Dict[str, Any]]]) -> List[str]:
+        """Generate HTML content for database entries organized by feed."""
+        html_parts = []
+        
+        FEED_HEADER = Template('<h2>Feed: $title</h2>')
+        ENTRY_TEMPLATE = Template(
+            '<div class="entry">\n'
+            '  <h3><a href="$link">$title</a></h3>\n'
+            '  <p><strong>Authors:</strong> $authors</p>\n'
+            '  <p><em>Published: $published</em></p>\n'
+            '  <p>$summary</p>\n'
+            '</div>\n<hr>'
+        )
+        
+        # Check if there are any entries
+        has_entries = any(entries for entries in entries_per_feed.values())
+        
+        if not has_entries:
+            html_parts.append('<p class="no-entries">No new entries found.</p>')
+        else:
+            for feed_name, entries in entries_per_feed.items():
+                if not entries:
+                    continue
+                
+                # Add feed header
+                html_parts.append(FEED_HEADER.substitute(title=html.escape(feed_name)))
+                
+                # Add entries for this feed
+                for entry in entries:
+                    title = self.process_text(entry.get('title', 'No title'))
+                    link = entry.get('link', '#')
+                    published = entry.get('published_date', 'No published date')
+                    summary = self.process_text(entry.get('summary', 'No summary'))
+                    authors = self.process_text(entry.get('authors', 'No author'))
+                    
+                    context = {
+                        'link': link,
+                        'title': title,
+                        'authors': authors,
+                        'published': published,
+                        'summary': summary,
+                    }
+                    html_parts.append(ENTRY_TEMPLATE.substitute(context))
+        
+        return html_parts
+    
     def _generate_entries_html(self, entries_per_feed: Dict[str, List[Dict[str, Any]]]) -> List[str]:
-        """Generate HTML content for entries organized by feed."""
+        """Generate HTML content for RSS feed entries organized by feed (legacy method)."""
         html_parts = []
         
         FEED_HEADER = Template('<h2>Feed: $title</h2>')
@@ -203,7 +296,7 @@ class HTMLGenerator:
     def generate_topic_html(self, topic_name: str, entries: List[Dict[str, Any]], 
                            output_path: str, topic_config: Dict[str, Any] = None) -> None:
         """
-        Generate HTML for a specific topic with entries organized by feed.
+        Generate HTML for a specific topic with entries organized by feed (legacy method).
         
         Args:
             topic_name: Name of the topic
@@ -228,3 +321,16 @@ class HTMLGenerator:
         
         # Generate HTML
         self.generate_html(entries_per_feed, output_path, topic_name, description)
+    
+    def generate_html_for_topic_from_database(self, db_manager, topic_name: str, output_path: str, topic_description: str = None) -> None:
+        """
+        Standalone method to generate HTML for a topic directly from papers.db.
+        This method can be called independently without going through the filter command.
+        
+        Args:
+            db_manager: Database manager instance
+            topic_name: Name of the topic
+            output_path: Path to output HTML file
+            topic_description: Description for the topic
+        """
+        self.generate_html_from_database(db_manager, topic_name, output_path, topic_description)

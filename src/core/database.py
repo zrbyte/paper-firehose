@@ -84,30 +84,74 @@ class DatabaseManager:
         conn = sqlite3.connect(self.db_paths['history'])
         cursor = conn.cursor()
         
+        # Check if we need to migrate from old schema
+        cursor.execute("PRAGMA table_info(matched_entries)")
+        table_info = cursor.fetchall()
+        columns = [row[1] for row in table_info]
+        
+        if 'topic' in columns and 'topics' not in columns:
+            # Migrate from old schema to new schema
+            logger.info("Migrating matched_entries table from 'topic' to 'topics' field")
+            
+            # Create new table with new schema
+            cursor.execute('''
+                CREATE TABLE matched_entries_new (
+                    entry_id TEXT PRIMARY KEY,
+                    feed_name TEXT NOT NULL,
+                    topics TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    link TEXT NOT NULL,
+                    summary TEXT,
+                    authors TEXT,
+                    published_date TEXT,
+                    matched_date TEXT DEFAULT (datetime('now')),
+                    raw_data TEXT
+                )
+            ''')
+            
+            # Copy data, converting topic to topics
+            cursor.execute('''
+                INSERT INTO matched_entries_new 
+                SELECT entry_id, feed_name, topic, title, link, summary, authors, 
+                       published_date, matched_date, raw_data
+                FROM matched_entries
+            ''')
+            
+            # Drop old table and rename new one
+            cursor.execute('DROP TABLE matched_entries')
+            cursor.execute('ALTER TABLE matched_entries_new RENAME TO matched_entries')
+            
+            logger.info("Migration completed successfully")
+        
+        # Create table if it doesn't exist
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS matched_entries (
-                entry_id TEXT NOT NULL,
+                entry_id TEXT PRIMARY KEY,
                 feed_name TEXT NOT NULL,
-                topic TEXT NOT NULL,
+                topics TEXT NOT NULL,
                 title TEXT NOT NULL,
                 link TEXT NOT NULL,
                 summary TEXT,
                 authors TEXT,
                 published_date TEXT,
                 matched_date TEXT DEFAULT (datetime('now')),
-                raw_data TEXT,
-                PRIMARY KEY (entry_id, feed_name, topic)
+                raw_data TEXT
             )
         ''')
         
         cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_matched_entries_topic 
-            ON matched_entries(topic)
+            CREATE INDEX IF NOT EXISTS idx_matched_entries_topics 
+            ON matched_entries(topics)
         ''')
         
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_matched_entries_matched_date 
             ON matched_entries(matched_date)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_matched_entries_entry_id 
+            ON matched_entries(entry_id)
         ''')
         
         conn.commit()
@@ -163,14 +207,14 @@ class DatabaseManager:
         concat = "||".join(parts)
         return hashlib.sha1(concat.encode("utf-8")).hexdigest()
     
-    def is_new_entry(self, entry_id: str, feed_name: str) -> bool:
-        """Check if an entry is new (not in all_feed_entries.db)."""
+    def is_new_entry(self, title: str) -> bool:
+        """Check if an entry is new (title not in all_feed_entries.db)."""
         conn = sqlite3.connect(self.db_paths['all_feeds'])
         cursor = conn.cursor()
         
         cursor.execute(
-            "SELECT 1 FROM feed_entries WHERE entry_id = ? AND feed_name = ?",
-            (entry_id, feed_name)
+            "SELECT 1 FROM feed_entries WHERE title = ?",
+            (title,)
         )
         result = cursor.fetchone()
         conn.close()
@@ -178,56 +222,118 @@ class DatabaseManager:
         return result is None
     
     def save_feed_entry(self, entry: Dict[str, Any], feed_name: str, entry_id: str):
-        """Save an entry to all_feed_entries.db."""
+        """Save an entry to all_feed_entries.db with proper date formatting."""
         conn = sqlite3.connect(self.db_paths['all_feeds'])
         cursor = conn.cursor()
         
         authors = self._extract_authors(entry)
         raw_data = json.dumps(entry, default=str)
         
+        # Ensure published_date is in YYYY-MM-DD format
+        published_date = self._format_published_date(entry)
+        title = entry.get('title', '').strip()
+        
         cursor.execute('''
             INSERT OR REPLACE INTO feed_entries 
             (entry_id, feed_name, title, link, summary, authors, published_date, 
              first_seen, last_seen, raw_data)
             VALUES (?, ?, ?, ?, ?, ?, ?, 
-                    COALESCE((SELECT first_seen FROM feed_entries WHERE entry_id = ? AND feed_name = ?), datetime('now')),
+                    COALESCE((SELECT first_seen FROM feed_entries WHERE title = ?), datetime('now')),
                     datetime('now'), ?)
         ''', (
             entry_id, feed_name, 
-            entry.get('title', ''), 
+            title, 
             entry.get('link', ''),
             entry.get('summary', entry.get('description', '')),
             authors,
-            entry.get('published', entry.get('updated', '')),
-            entry_id, feed_name,  # for COALESCE subquery
+            published_date,
+            title,  # for COALESCE subquery
             raw_data
         ))
         
         conn.commit()
         conn.close()
     
-    def save_matched_entry(self, entry: Dict[str, Any], feed_name: str, topic: str, entry_id: str):
-        """Save a matched entry to matched_entries_history.db."""
+    def is_entry_in_history(self, entry_id: str) -> bool:
+        """Check if an entry is already in matched_entries_history.db."""
         conn = sqlite3.connect(self.db_paths['history'])
         cursor = conn.cursor()
         
-        authors = self._extract_authors(entry)
-        raw_data = json.dumps(entry, default=str)
+        cursor.execute(
+            "SELECT 1 FROM matched_entries WHERE entry_id = ?",
+            (entry_id,)
+        )
+        result = cursor.fetchone()
+        conn.close()
         
-        cursor.execute('''
-            INSERT OR IGNORE INTO matched_entries 
-            (entry_id, feed_name, topic, title, link, summary, authors, 
-             published_date, matched_date, raw_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
-        ''', (
-            entry_id, feed_name, topic,
-            entry.get('title', ''),
-            entry.get('link', ''),
-            entry.get('summary', entry.get('description', '')),
-            authors,
-            entry.get('published', entry.get('updated', '')),
-            raw_data
-        ))
+        return result is not None
+    
+    def get_entry_topics_from_history(self, entry_id: str) -> List[str]:
+        """Get the list of topics for an entry from matched_entries_history.db."""
+        conn = sqlite3.connect(self.db_paths['history'])
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            "SELECT topics FROM matched_entries WHERE entry_id = ?",
+            (entry_id,)
+        )
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result and result[0]:
+            return [t.strip() for t in result[0].split(',')]
+        return []
+    
+    def save_matched_entry(self, entry: Dict[str, Any], feed_name: str, topic: str, entry_id: str):
+        """Save a matched entry to matched_entries_history.db, merging topics if entry already exists."""
+        conn = sqlite3.connect(self.db_paths['history'])
+        cursor = conn.cursor()
+        
+        # Check if entry already exists in history
+        cursor.execute(
+            "SELECT topics FROM matched_entries WHERE entry_id = ?",
+            (entry_id,)
+        )
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Entry exists, merge the new topic with existing topics
+            existing_topics = existing[0].split(', ') if existing[0] else []
+            if topic not in existing_topics:
+                existing_topics.append(topic)
+                merged_topics = ', '.join(sorted(existing_topics))
+                
+                cursor.execute('''
+                    UPDATE matched_entries 
+                    SET topics = ?, matched_date = datetime('now')
+                    WHERE entry_id = ?
+                ''', (merged_topics, entry_id))
+                
+                logger.debug(f"Updated entry {entry_id[:8]}... with merged topics: {merged_topics}")
+            else:
+                logger.debug(f"Entry {entry_id[:8]}... already has topic '{topic}', skipping")
+        else:
+            # New entry, insert it
+            authors = self._extract_authors(entry)
+            raw_data = json.dumps(entry, default=str)
+            published_date = self._format_published_date(entry)
+            
+            cursor.execute('''
+                INSERT INTO matched_entries 
+                (entry_id, feed_name, topics, title, link, summary, authors, 
+                 published_date, matched_date, raw_data)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+            ''', (
+                entry_id, feed_name, topic,
+                entry.get('title', ''),
+                entry.get('link', ''),
+                entry.get('summary', entry.get('description', '')),
+                authors,
+                published_date,
+                raw_data
+            ))
+            
+            logger.debug(f"Added new entry {entry_id[:8]}... to history database with topic: {topic}")
         
         conn.commit()
         conn.close()
@@ -239,6 +345,7 @@ class DatabaseManager:
         
         authors = self._extract_authors(entry)
         raw_data = json.dumps(entry, default=str)
+        published_date = self._format_published_date(entry)
         
         cursor.execute('''
             INSERT OR REPLACE INTO entries 
@@ -251,7 +358,7 @@ class DatabaseManager:
             entry.get('link', ''),
             entry.get('summary', entry.get('description', '')),
             authors,
-            entry.get('published', entry.get('updated', '')),
+            published_date,
             raw_data
         ))
         
@@ -286,6 +393,20 @@ class DatabaseManager:
         conn.close()
         return entries
     
+    def get_entries_for_html_generation(self, topic: str) -> List[Dict[str, Any]]:
+        """Get entries from papers.db organized by feed for HTML generation."""
+        entries = self.get_current_entries(topic=topic, status='filtered')
+        
+        # Organize by feed
+        entries_by_feed = {}
+        for entry in entries:
+            feed_name = entry.get('feed_name', 'unknown')
+            if feed_name not in entries_by_feed:
+                entries_by_feed[feed_name] = []
+            entries_by_feed[feed_name].append(entry)
+        
+        return entries_by_feed
+    
     def clear_current_db(self):
         """Clear the current run database."""
         conn = sqlite3.connect(self.db_paths['current'])
@@ -295,19 +416,62 @@ class DatabaseManager:
         conn.close()
     
     def purge_old_entries(self, days: int):
-        """Remove entries older than specified days from all databases."""
-        cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat()
+        """Remove entries from the most recent N days (including today) based on publication date (YYYY-MM-DD)."""
+        start_date = (datetime.datetime.now().date() - datetime.timedelta(days=days - 1)).isoformat()
+        end_date = datetime.datetime.now().date().isoformat()
         
-        # Purge from all_feed_entries (keep recent for deduplication)
-        if days < 120:  # Don't purge too aggressively from deduplication DB
-            logger.warning(f"Not purging all_feed_entries.db - {days} days is too recent for deduplication")
-        else:
-            conn = sqlite3.connect(self.db_paths['all_feeds'])
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM feed_entries WHERE first_seen < ?", (cutoff,))
-            conn.commit()
-            conn.close()
-            logger.info(f"Purged entries older than {days} days from all_feed_entries.db")
+        logger.info(f"Purging entries from {start_date} to {end_date} (last {days} days)")
+        
+        # Purge from all_feed_entries.db based on publication_date
+        conn = sqlite3.connect(self.db_paths['all_feeds'])
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM feed_entries
+            WHERE published_date IS NOT NULL
+              AND TRIM(published_date) != ''
+              AND DATE(published_date) BETWEEN DATE(?) AND DATE(?)
+            """,
+            (start_date, end_date),
+        )
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        logger.info(f"Purged {deleted_count} entries from all_feed_entries.db")
+        
+        # Purge from matched_entries_history.db based on published_date
+        conn = sqlite3.connect(self.db_paths['history'])
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM matched_entries
+            WHERE published_date IS NOT NULL
+              AND TRIM(published_date) != ''
+              AND DATE(published_date) BETWEEN DATE(?) AND DATE(?)
+            """,
+            (start_date, end_date),
+        )
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        logger.info(f"Purged {deleted_count} entries from matched_entries_history.db")
+        
+        # Purge from papers.db based on published_date
+        conn = sqlite3.connect(self.db_paths['current'])
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM entries
+            WHERE published_date IS NOT NULL
+              AND TRIM(published_date) != ''
+              AND DATE(published_date) BETWEEN DATE(?) AND DATE(?)
+            """,
+            (start_date, end_date),
+        )
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        logger.info(f"Purged {deleted_count} entries from papers.db")
     
     def _extract_authors(self, entry: Dict[str, Any]) -> str:
         """Extract authors string from entry."""
@@ -315,6 +479,38 @@ class DatabaseManager:
         if authors:
             return ', '.join(author.get('name', '') for author in authors)
         return entry.get('author', '')
+    
+    def _format_published_date(self, entry: Dict[str, Any]) -> str:
+        """Ensure published date is in YYYY-MM-DD format."""
+        import time
+        
+        # Try to get parsed date first
+        entry_published = entry.get('published_parsed') or entry.get('updated_parsed')
+        if entry_published and isinstance(entry_published, time.struct_time):
+            return datetime.date(*entry_published[:3]).isoformat()
+        
+        # Try string dates
+        published_str = entry.get('published') or entry.get('updated', '')
+        if published_str:
+            try:
+                # Try parsing common date formats
+                for fmt in ['%Y-%m-%d', '%Y-%m-%dT%H:%M:%S%z', '%a, %d %b %Y %H:%M:%S %z']:
+                    try:
+                        dt = datetime.datetime.strptime(published_str[:19], fmt[:19])
+                        return dt.date().isoformat()
+                    except ValueError:
+                        continue
+                
+                # If all parsing fails, try to extract YYYY-MM-DD if present
+                import re
+                match = re.search(r'(\d{4}-\d{2}-\d{2})', published_str)
+                if match:
+                    return match.group(1)
+            except Exception:
+                pass
+        
+        # Fallback to current date
+        return datetime.date.today().isoformat()
     
     def close_all_connections(self):
         """Close any open database connections (placeholder for connection pooling)."""

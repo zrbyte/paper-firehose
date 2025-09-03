@@ -21,9 +21,10 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
     
     1. Load config and topic definitions
     2. Fetch RSS feeds for each topic
-    3. Apply regex filters
-    4. Generate HTML output
-    5. Store filtered entries in database with status='filtered'
+    3. Deduplicate feeds. 
+    4. Apply regex filters
+    5. Generate HTML output
+    6. Store filtered entries in database with status='filtered'
     
     Args:
         config_path: Path to the main configuration file
@@ -62,6 +63,8 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
             logger.info(f"Processing all topics: {topics_to_process}")
         
         # Process each topic
+        all_processed_entries = {}  # Track all entries for saving to dedup DB later
+        
         for topic_name in topics_to_process:
             try:
                 logger.info(f"Processing topic: {topic_name}")
@@ -69,20 +72,29 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
                 # Load topic configuration
                 topic_config = config_manager.load_topic_config(topic_name)
                 
-                # Process topic: fetch feeds and apply filters
-                matched_entries = feed_processor.process_topic(topic_name)
+                # Fetch feeds first (don't save to dedup DB yet)
+                entries_per_feed = feed_processor.fetch_feeds(topic_name)
                 
-                # Generate HTML output
+                # Collect all entries for later saving to dedup DB
+                for feed_name, entries in entries_per_feed.items():
+                    if feed_name not in all_processed_entries:
+                        all_processed_entries[feed_name] = []
+                    all_processed_entries[feed_name].extend(entries)
+                
+                # Apply filters and save to papers.db/history.db as appropriate
+                matched_entries = feed_processor.apply_filters(entries_per_feed, topic_name)
+                
+                # Generate HTML output from papers.db data
                 output_config = topic_config.get('output', {})
                 output_filename = output_config.get('filename', f'{topic_name}_filtered_articles.html')
                 output_path = output_filename
                 
-                # Generate HTML
-                html_generator.generate_topic_html(
-                    topic_name=topic_name,
-                    entries=matched_entries,
-                    output_path=output_path,
-                    topic_config=topic_config
+                # Generate HTML directly from papers.db
+                html_generator.generate_html_from_database(
+                    db_manager,
+                    topic_name,
+                    output_path,
+                    topic_config.get('description', f"Articles related to {topic_name}")
                 )
                 
                 logger.info(f"Completed processing topic '{topic_name}': {len(matched_entries)} entries, output: {output_path}")
@@ -90,6 +102,10 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
             except Exception as e:
                 logger.error(f"Error processing topic '{topic_name}': {e}")
                 continue
+        
+        # Save ALL processed entries to deduplication database
+        if all_processed_entries:
+            feed_processor.save_all_entries_to_dedup_db(all_processed_entries)
         
         # Close database connections
         db_manager.close_all_connections()
@@ -131,9 +147,9 @@ def purge(config_path: str, days: Optional[int] = None, all_data: bool = False) 
             logger.info("Databases reinitialized")
             
         elif days is not None:
-            logger.info(f"Purging entries older than {days} days")
+            logger.info(f"Purging entries from the most recent {days} days (including today)")
             db_manager.purge_old_entries(days)
-            logger.info(f"Purged entries older than {days} days")
+            logger.info(f"Purge completed for entries from the most recent {days} days")
         
         else:
             logger.warning("No purge action specified (use --days X or --all)")

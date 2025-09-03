@@ -12,6 +12,8 @@ if _SRC_PATH not in sys.path:
 
 from commands import filter as filter_cmd  # type: ignore
 from core.config import ConfigManager  # type: ignore
+from core.database import DatabaseManager  # type: ignore
+from processors.html_generator import HTMLGenerator  # type: ignore
 
 _DEFAULT_CONFIG = os.path.join(_REPO_ROOT, 'config', 'config.yaml')
 
@@ -19,6 +21,7 @@ __all__ = [
     'filter',
     'purge',
     'status',
+    'generate_html',
 ]
 
 
@@ -71,5 +74,36 @@ def status(config_path: Optional[str] = None) -> Dict[str, Any]:
     except Exception as e:
         info.update({'valid': False, 'error': str(e)})
         return info
+
+
+def generate_html(topic: str, output_path: str = None, config_path: str | None = None) -> None:
+    """Generate HTML for a topic directly from papers.db.
+    
+    Args:
+        topic: Topic name to generate HTML for
+        output_path: Optional output path (defaults to topic config filename)
+        config_path: Path to main YAML config; defaults to repo config
+    """
+    cfg_path = config_path or _DEFAULT_CONFIG
+    
+    # Load config and initialize components
+    config_manager = ConfigManager(cfg_path)
+    config = config_manager.load_config()
+    db_manager = DatabaseManager(config)
+    
+    # Get output path from topic config if not specified
+    if not output_path:
+        topic_config = config_manager.load_topic_config(topic)
+        output_config = topic_config.get('output', {})
+        output_path = output_config.get('filename', f'{topic}_filtered_articles.html')
+    
+    # Generate HTML
+    html_generator = HTMLGenerator()
+    html_generator.generate_html_for_topic_from_database(
+        db_manager,
+        topic,
+        output_path,
+        topic_config.get('description', f"Articles related to {topic}")
+    )
 
 

@@ -1,8 +1,8 @@
 # Main application configuration
 database:
-  path: "assets/papers.db"
-  all_feeds_path: "assets/all_feed_entries.db"
-  history_path: "assets/matched_entries_history.db"
+  path: "assets/papers.db" # current run processing database
+  all_feeds_path: "assets/all_feed_entries.db" # all RSS entries for deduplication
+  history_path: "assets/matched_entries_history.db" # historical matches across all topics
 
 llm:
   model: "gpt-4o-mini"

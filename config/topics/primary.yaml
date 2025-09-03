@@ -51,4 +51,4 @@ ranking:
 output:
   filename: "results_primary.html"
   template: "topic_summary.html"
-  archive: true
+  archive: true # archive the output file to the "matched_entries_history.db" database

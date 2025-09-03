@@ -15,8 +15,8 @@ from core.config import ConfigManager
 
 logger = logging.getLogger(__name__)
 
-# Time window for processing entries (6 months like the old code)
-TIME_DELTA = datetime.timedelta(days=182)
+# Time window for processing entries (1 year)
+TIME_DELTA = datetime.timedelta(days=365)
 
 
 class FeedProcessor:
@@ -83,12 +83,11 @@ class FeedProcessor:
                     if (current_time - entry_datetime) > TIME_DELTA:
                         continue
                     
-                    # Check if this is a new entry
-                    if self.db.is_new_entry(entry_id, feed_name):
-                        # Save to all_feed_entries.db
-                        self.db.save_feed_entry(entry, feed_name, entry_id)
+                    # Check if this is a new entry (by title)
+                    title = entry.get('title', '').strip()
+                    if self.db.is_new_entry(title):
                         new_entries.append(entry)
-                        logger.debug(f"New entry found: {entry.get('title', 'No title')[:50]}...")
+                        logger.debug(f"New entry found: {title[:50]}...")
                 
                 new_entries_per_feed[feed_name] = new_entries
                 logger.info(f"Found {len(new_entries)} new entries in feed '{feed_name}'")
@@ -142,10 +141,13 @@ class FeedProcessor:
                     entry['topic'] = topic_name
                     entry['is_priority'] = is_priority_feed
                     
-                    # Save to matched_entries_history.db if it matches regex
+                    # Save to matched_entries_history.db if it matches regex AND topic has archive: true
                     # (priority entries that don't match regex are not saved to history)
                     if matches_regex:
-                        self.db.save_matched_entry(entry, feed_name, topic_name, entry_id)
+                        topic_config = self.config.load_topic_config(topic_name)
+                        output_config = topic_config.get('output', {})
+                        if output_config.get('archive', False):
+                            self.db.save_matched_entry(entry, feed_name, topic_name, entry_id)
                     
                     # Save to papers.db for current run processing
                     self.db.save_current_entry(entry, feed_name, topic_name, entry_id)
@@ -176,6 +178,15 @@ class FeedProcessor:
                 return True
         
         return False
+    
+    def save_all_entries_to_dedup_db(self, all_entries_per_feed: Dict[str, List[Dict[str, Any]]]):
+        """Save ALL processed entries to all_feed_entries.db for deduplication."""
+        for feed_name, entries in all_entries_per_feed.items():
+            for entry in entries:
+                entry_id = self.db.compute_entry_id(entry)
+                self.db.save_feed_entry(entry, feed_name, entry_id)
+        
+        logger.info(f"Saved all processed entries to deduplication database")
     
     def process_topic(self, topic_name: str) -> List[Dict[str, Any]]:
         """

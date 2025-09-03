@@ -14,3 +14,4 @@ ranking:
 
 output:
   filename: "rg_filtered_articles.html"
+  archive: true
