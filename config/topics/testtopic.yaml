@@ -1,0 +1,54 @@
+name: "Primary Research"
+description: "Topological materials, graphene, and condensed matter physics"
+
+# Which feeds to process for this topic
+feeds:
+  - "cond-mat"
+  - "nature"
+  - "science"
+  - "nat-mat"
+  - "nat-nanotech"
+  - "nat-phys"
+  - "nat-chem"
+  - "nat-ener"
+  - "nat-catal"
+  - "nat-chem-eng"
+  - "nat-rev-phys"
+  - "pnas"
+  - "joule"
+  - "prb"
+  - "prl"
+  - "prx"
+  - "pr_res"
+  - "nano-lett"
+  - "acs-nano"
+  - "acs-en-lett"
+  - "en-env-sci"
+  - "science-adv"
+  - "sci-rep"
+  - "nat-comm"
+  - "comm-phys"
+  - "comm-mater"
+  - "scipost"
+  - "small"
+  - "adv-mater"
+  - "adv-sci"
+  - "adv-func-mater"
+  - "adv-phys-res"
+  - "national-sci-rev"
+
+# Regex filter
+filter:
+  pattern: "graphe[a-z]+"
+  fields: ["title", "summary"]
+
+# Ranking configuration
+ranking:
+  prompt: "You are a world-class condensed-matter researcher specializing in 2D van der Waals materials, STM, and charge transport in graphene/graphite systems. Focus on topical relevance (graphene, rhombohedral graphite, moiré/twisted systems, STM), novelty/impact, and experimental/theory significance."
+  top_n: 5
+
+# Output configuration
+output:
+  filename: "results_testtopic.html"
+  template: "testtopic_summary.html"
+  archive: true # archive the output file to the "matched_entries_history.db" database
