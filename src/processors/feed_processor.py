@@ -131,30 +131,30 @@ class FeedProcessor:
             for entry in entries:
                 entry_id = self.db.compute_entry_id(entry)
                 
-                # Check if entry matches regex or is from priority journal
+                # Check if entry matches regex pattern
                 matches_regex = self._matches_pattern(entry, regex, fields)
                 
-                if matches_regex or is_priority_feed:
+                # Only include entries that match the regex pattern
+                # Priority status is preserved for future LLM ranking/summarization
+                if matches_regex:
                     # Add metadata
                     entry['entry_id'] = entry_id
                     entry['feed_name'] = feed_name
                     entry['topic'] = topic_name
                     entry['is_priority'] = is_priority_feed
                     
-                    # Save to matched_entries_history.db if it matches regex AND topic has archive: true
-                    # (priority entries that don't match regex are not saved to history)
-                    if matches_regex:
-                        topic_config = self.config.load_topic_config(topic_name)
-                        output_config = topic_config.get('output', {})
-                        if output_config.get('archive', False):
-                            self.db.save_matched_entry(entry, feed_name, topic_name, entry_id)
+                    # Save to matched_entries_history.db if topic has archive: true
+                    topic_config = self.config.load_topic_config(topic_name)
+                    output_config = topic_config.get('output', {})
+                    if output_config.get('archive', False):
+                        self.db.save_matched_entry(entry, feed_name, topic_name, entry_id)
                     
                     # Save to papers.db for current run processing
                     self.db.save_current_entry(entry, feed_name, topic_name, entry_id)
                     
                     matched_entries.append(entry)
                     
-                    logger.debug(f"Entry matched for topic '{topic_name}': {entry.get('title', 'No title')[:50]}...")
+                    logger.debug(f"Entry matched for topic '{topic_name}': {entry.get('title', 'No title')[:50]}... (priority: {is_priority_feed})")
         
         logger.info(f"Found {len(matched_entries)} entries matching filters for topic '{topic_name}'")
         return matched_entries

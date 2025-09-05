@@ -51,6 +51,6 @@ ranking:
 
 # Output configuration
 output:
-  filename: "results_testtopic.html"
-  template: "testtopic_summary.html"
+  filename: "results_testtopic2.html"
+  template: "testtopic2_summary.html"
   archive: true # archive the output file to the "matched_entries_history.db" database
