@@ -165,15 +165,7 @@ The system uses a three-database approach for efficient processing and historica
 - **Ensures**: Stable IDs across feeds and consistent deduplication
 
 ### Topic Merging and Deduplication
-- **Smart Deduplication**: Each unique entry is stored only once in `matched_entries_history.db`
-- **Topic Accumulation**: If an entry matches multiple topics, all topics are merged into a single record
-- **Example**: An entry matching both 'primary' and 'rg' topics shows as "primary, rg" in the topics field
-- **Benefits**: 
-  - Eliminates duplicate database entries
-  - Reduces database operations during testing/rerunning
-  - Provides clear visibility into which entries are relevant to multiple research areas
-  - Maintains historical accuracy while improving efficiency
-
+Each unique entry is stored only once in `matched_entries_history.db`
 Note: In `papers.db` (current-run DB), matching multiple topics creates separate rows (one per topic) to allow per-topic status, ranking, and summaries.
 
 ## Current Implementation Status
