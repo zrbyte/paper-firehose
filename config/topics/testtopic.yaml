@@ -39,7 +39,7 @@ feeds:
 
 # Regex filter
 filter:
-  pattern: "maximum von Neumann entropy"
+  pattern: "valley polarization"
   fields: ["title", "summary"]
 
 # Ranking configuration

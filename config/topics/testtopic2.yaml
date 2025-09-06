@@ -39,7 +39,7 @@ feeds:
 
 # Regex filter
 filter:
-  pattern: "Gaussian states subject to chiral constraints"
+  pattern: "parametric oscillation"
   fields: ["title", "summary"]
 
 # Ranking configuration

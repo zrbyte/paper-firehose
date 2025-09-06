@@ -158,13 +158,79 @@ class DatabaseManager:
         conn.close()
     
     def _init_current_db(self):
-        """Initialize the current run processing database."""
+        """Initialize the current run processing database.
+
+        Uses a composite primary key on (id, topic) so the same entry can
+        exist once per topic. Includes a migration from the legacy schema
+        where `id` alone was the primary key.
+        """
         conn = sqlite3.connect(self.db_paths['current'])
         cursor = conn.cursor()
-        
+
+        # Detect if entries table exists and whether it uses legacy PK
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='entries'")
+        table_exists = cursor.fetchone() is not None
+
+        if table_exists:
+            # Inspect primary key columns
+            cursor.execute("PRAGMA table_info(entries)")
+            info = cursor.fetchall()  # columns: cid, name, type, notnull, dflt_value, pk
+            pk_cols = [row[1] for row in info if row[5] > 0]
+
+            # Legacy schema had only `id` as PRIMARY KEY
+            if pk_cols == ['id'] or (len(pk_cols) == 1 and pk_cols[0] == 'id'):
+                logger.info("Migrating papers.db entries table to composite PRIMARY KEY (id, topic)")
+
+                # Create new table with desired schema
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS entries_new (
+                        id TEXT NOT NULL,
+                        topic TEXT NOT NULL,
+                        feed_name TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        link TEXT NOT NULL,
+                        summary TEXT,
+                        authors TEXT,
+                        published_date TEXT,
+                        discovered_date TEXT DEFAULT (datetime('now')),
+                        status TEXT DEFAULT 'new' CHECK(status IN ('new', 'filtered', 'ranked', 'summarized')),
+                        rank_score REAL,
+                        rank_reasoning TEXT,
+                        llm_summary TEXT,
+                        raw_data TEXT,
+                        PRIMARY KEY (id, topic),
+                        UNIQUE(feed_name, topic, id)
+                    )
+                ''')
+
+                # Copy data from legacy table
+                cursor.execute('''
+                    INSERT OR REPLACE INTO entries_new
+                    (id, topic, feed_name, title, link, summary, authors, published_date,
+                     discovered_date, status, rank_score, rank_reasoning, llm_summary, raw_data)
+                    SELECT id, topic, feed_name, title, link, summary, authors, published_date,
+                           discovered_date, status, rank_score, rank_reasoning, llm_summary, raw_data
+                    FROM entries
+                ''')
+
+                # Replace old table
+                cursor.execute('DROP TABLE entries')
+                cursor.execute('ALTER TABLE entries_new RENAME TO entries')
+
+                # Recreate index
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_entries_topic_status 
+                    ON entries(topic, status)
+                ''')
+
+                conn.commit()
+                conn.close()
+                return
+
+        # Create table fresh (new deployments or already-migrated DBs)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS entries (
-                id TEXT PRIMARY KEY,
+                id TEXT NOT NULL,
                 topic TEXT NOT NULL,
                 feed_name TEXT NOT NULL,
                 title TEXT NOT NULL,
@@ -178,15 +244,16 @@ class DatabaseManager:
                 rank_reasoning TEXT,
                 llm_summary TEXT,
                 raw_data TEXT,
+                PRIMARY KEY (id, topic),
                 UNIQUE(feed_name, topic, id)
             )
         ''')
-        
+
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_entries_topic_status 
             ON entries(topic, status)
         ''')
-        
+
         conn.commit()
         conn.close()
     
