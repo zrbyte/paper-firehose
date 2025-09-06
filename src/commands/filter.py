@@ -10,7 +10,7 @@ from typing import Optional
 from core.config import ConfigManager
 from core.database import DatabaseManager
 from processors.feed_processor import FeedProcessor
-from processors.html_generator import HTMLGenerator
+from commands import generate_html as html_cmd  # reuse shared HTML generation
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,6 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         
         # Initialize processors
         feed_processor = FeedProcessor(db_manager, config_manager)
-        html_generator = HTMLGenerator()
         
         # Determine topics to process
         if topic:
@@ -84,20 +83,7 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
                 # Apply filters and save to papers.db/history.db as appropriate
                 matched_entries = feed_processor.apply_filters(entries_per_feed, topic_name)
                 
-                # Generate HTML output from papers.db data
-                output_config = topic_config.get('output', {})
-                output_filename = output_config.get('filename', f'{topic_name}_filtered_articles.html')
-                output_path = output_filename
-                
-                # Generate HTML directly from papers.db
-                html_generator.generate_html_from_database(
-                    db_manager,
-                    topic_name,
-                    output_path,
-                    topic_config.get('description', f"Articles related to {topic_name}")
-                )
-                
-                logger.info(f"Completed processing topic '{topic_name}': {len(matched_entries)} entries, output: {output_path}")
+                logger.info(f"Completed processing topic '{topic_name}': {len(matched_entries)} entries")
                 
             except Exception as e:
                 logger.error(f"Error processing topic '{topic_name}': {e}")
@@ -106,6 +92,12 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         # Save ALL processed entries to deduplication database
         if all_processed_entries:
             feed_processor.save_all_entries_to_dedup_db(all_processed_entries)
+        
+        # After processing, regenerate HTML for all topics from the current DB
+        try:
+            html_cmd.run(config_path)
+        except Exception as e:
+            logger.error(f"HTML regeneration failed after filtering: {e}")
         
         # Close database connections
         db_manager.close_all_connections()

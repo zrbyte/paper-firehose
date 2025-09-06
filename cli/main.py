@@ -15,6 +15,7 @@ src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src')
 sys.path.insert(0, src_path)
 
 from commands import filter as filter_cmd
+from commands import generate_html as html_cmd
 
 # Setup logging
 logging.basicConfig(
@@ -46,6 +47,22 @@ def filter_feeds(ctx, topic):
         click.echo(f"✅ Filter command completed successfully")
     except Exception as e:
         click.echo(f"❌ Filter command failed: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command('html')
+@click.option('--topic', help='Generate HTML for a specific topic only')
+@click.pass_context
+def generate_html(ctx, topic):
+    """Generate topic HTML(s) directly from papers.db (no fetching)."""
+    try:
+        html_cmd.run(ctx.obj['config_path'], topic)
+        if topic:
+            click.echo(f"✅ HTML generated for topic '{topic}'")
+        else:
+            click.echo("✅ HTML generated for all topics")
+    except Exception as e:
+        click.echo(f"❌ HTML generation failed: {e}", err=True)
         sys.exit(1)
 
 

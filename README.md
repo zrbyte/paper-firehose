@@ -35,6 +35,12 @@ python cli/main.py filter
 # Filter specific topic
 python cli/main.py filter --topic primary
 
+# Generate HTML for all topics from papers.db (no fetching)
+python cli/main.py html
+
+# Generate HTML for a single topic from papers.db
+python cli/main.py html --topic primary
+
 # Database cleanup
 python cli/main.py purge --days 30     # Remove entries from last 30 days (including today)
 ```
@@ -94,6 +100,7 @@ python cli/main.py status
 
 # Filter RSS feeds and apply regex patterns
 python cli/main.py filter [--topic TOPIC]
+python cli/main.py html [--topic TOPIC]
 
 # Database management
 python cli/main.py purge --days 30     # Remove entries older than 30 days
@@ -108,7 +115,7 @@ Fetches RSS feeds, applies regex filters, and generates HTML output:
 2. Applies topic-specific regex patterns to titles and summaries
 3. Includes entries from priority journals regardless of regex match
 4. Stores filtered entries in three databases for efficient processing
-5. Generates HTML output files organized by feed
+5. Regenerates topic HTML for all topics from `papers.db` (DB-first)
 
 Example output: `results_primary.html` with 403 filtered entries
 
@@ -150,7 +157,7 @@ The system uses a three-database approach for efficient processing and historica
 - **Purpose**: Working database for current processing session
 - **Contents**: Filtered entries with processing status (filtered → ranked → summarized)
 - **Lifecycle**: Cleared at start of each run, populated during processing
-- **Features**: Supports workflow tracking and pause/resume functionality
+- **Features**: Composite primary key `PRIMARY KEY(id, topic)` stores one row per (entry, topic) so entries that match multiple topics are tracked independently. Supports workflow tracking and pause/resume functionality.
 
 ### Entry ID Generation
 - **Primary**: SHA-1 hash of cleaned URL (removes query parameters)  
@@ -166,6 +173,8 @@ The system uses a three-database approach for efficient processing and historica
   - Reduces database operations during testing/rerunning
   - Provides clear visibility into which entries are relevant to multiple research areas
   - Maintains historical accuracy while improving efficiency
+
+Note: In `papers.db` (current-run DB), matching multiple topics creates separate rows (one per topic) to allow per-topic status, ranking, and summaries.
 
 ## Current Implementation Status
 
@@ -209,6 +218,28 @@ html_gen = HTMLGenerator()
 html_gen.generate_html_for_topic_from_database(db_manager, topic_name, output_path)
 ```
 
+CLI usage:
+
+```bash
+# All topics
+python cli/main.py html
+
+# Specific topic
+python cli/main.py html --topic primary
+```
+
+The `filter` command also regenerates HTML for all topics at the end of a run using the same DB-backed pathway to ensure consistency.
+
+Feed headers in DB-backed HTML use the `feed_name` (e.g., `prl`). If you prefer human-readable titles, we can map them from `config.yaml`.
+
+## Schema Change & Migration
+
+As of this version, `papers.db` uses a composite primary key `PRIMARY KEY(id, topic)` so an entry can exist once per topic. A safe, automatic migration runs on startup:
+
+- Detects the legacy schema (`id` as the sole primary key), creates a new table with the composite key, copies rows, drops the old table, and recreates the index.
+- No manual action required; existing data are preserved.
+
+
 ## Future Development
 
 - **Two-Stage PaperQA Ranking**: Enhanced paper analysis using full PDF content
@@ -230,6 +261,18 @@ These remain functional for backward compatibility during the transition period.
 ## Python API (Jupyter/Programmatic)
 
 You can use the core functionality directly from Python (e.g., in notebooks):
+#### `html`
+Generate topic HTML directly from `papers.db` without fetching or filtering. Useful after a previous filter run or when only presentation needs updating.
+
+```bash
+# All topics
+python cli/main.py html
+
+# Single topic
+python cli/main.py html --topic testtopic2
+```
+
+Uses entries with `status='filtered'` scoped to each topic.
 
 ```python
 import paper_firehose as pf
