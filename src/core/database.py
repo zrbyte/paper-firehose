@@ -11,7 +11,7 @@ import os
 import datetime
 import hashlib
 import urllib.parse
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 import logging
 import shutil
 import glob
@@ -392,35 +392,8 @@ class DatabaseManager:
         conn.commit()
         conn.close()
     
-    def is_entry_in_history(self, entry_id: str) -> bool:
-        """Check if an entry is already in matched_entries_history.db."""
-        conn = sqlite3.connect(self.db_paths['history'])
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            "SELECT 1 FROM matched_entries WHERE entry_id = ?",
-            (entry_id,)
-        )
-        result = cursor.fetchone()
-        conn.close()
-        
-        return result is not None
-    
-    def get_entry_topics_from_history(self, entry_id: str) -> List[str]:
-        """Get the list of topics for an entry from matched_entries_history.db."""
-        conn = sqlite3.connect(self.db_paths['history'])
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            "SELECT topics FROM matched_entries WHERE entry_id = ?",
-            (entry_id,)
-        )
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result and result[0]:
-            return [t.strip() for t in result[0].split(',')]
-        return []
+    # Note: helper methods `is_entry_in_history` and `get_entry_topics_from_history`
+    # were unused and have been removed to reduce surface area.
     
     def save_matched_entry(self, entry: Dict[str, Any], feed_name: str, topic: str, entry_id: str):
         """Save a matched entry to matched_entries_history.db, merging topics if entry already exists."""
@@ -531,19 +504,8 @@ class DatabaseManager:
         conn.close()
         return entries
     
-    def get_entries_for_html_generation(self, topic: str) -> List[Dict[str, Any]]:
-        """Get entries from papers.db organized by feed for HTML generation."""
-        entries = self.get_current_entries(topic=topic, status='filtered')
-        
-        # Organize by feed
-        entries_by_feed = {}
-        for entry in entries:
-            feed_name = entry.get('feed_name', 'unknown')
-            if feed_name not in entries_by_feed:
-                entries_by_feed[feed_name] = []
-            entries_by_feed[feed_name].append(entry)
-        
-        return entries_by_feed
+    # Note: `get_entries_for_html_generation` has been removed; HTML generation
+    # reads via `get_current_entries` directly.
     
     def clear_current_db(self):
         """Clear the current run database."""

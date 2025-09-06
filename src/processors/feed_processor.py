@@ -7,7 +7,7 @@ import feedparser
 import re
 import time
 import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 import logging
 
 from core.database import DatabaseManager
@@ -188,23 +188,4 @@ class FeedProcessor:
         
         logger.info(f"Saved all processed entries to deduplication database")
     
-    def process_topic(self, topic_name: str) -> List[Dict[str, Any]]:
-        """
-        Complete processing pipeline for a topic: fetch feeds and apply filters.
-        
-        Args:
-            topic_name: Name of the topic to process
-            
-        Returns:
-            List of entries that passed filtering
-        """
-        logger.info(f"Starting processing for topic '{topic_name}'")
-        
-        # Fetch new entries from RSS feeds
-        entries_per_feed = self.fetch_feeds(topic_name)
-        
-        # Apply regex filters
-        matched_entries = self.apply_filters(entries_per_feed, topic_name)
-        
-        logger.info(f"Completed processing for topic '{topic_name}': {len(matched_entries)} entries matched")
-        return matched_entries
+    # Note: the previous convenience method `process_topic` has been removed as unused.

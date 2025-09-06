@@ -60,10 +60,7 @@ class ConfigManager:
         
         return topics
     
-    def get_feeds_for_topic(self, topic_name: str) -> List[str]:
-        """Get the list of feeds for a specific topic."""
-        topic_config = self.load_topic_config(topic_name)
-        return topic_config.get('feeds', [])
+    # Note: `get_feeds_for_topic` removed as unused by current code paths.
     
     def get_enabled_feeds(self) -> Dict[str, Dict[str, Any]]:
         """Get all enabled feeds from the main configuration."""
