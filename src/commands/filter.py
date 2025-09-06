@@ -47,6 +47,9 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         # Initialize database manager
         db_manager = DatabaseManager(config)
         
+        # Local safety: backup important databases before we modify them
+        db_manager.backup_important_databases()
+        
         # Clear current run database
         db_manager.clear_current_db()
         
@@ -125,6 +128,9 @@ def purge(config_path: str, days: Optional[int] = None, all_data: bool = False) 
         config_manager = ConfigManager(config_path)
         config = config_manager.load_config()
         db_manager = DatabaseManager(config)
+        
+        # Safety: backup important databases before purge
+        db_manager.backup_important_databases()
         
         if all_data:
             logger.info("Purging all data from databases")

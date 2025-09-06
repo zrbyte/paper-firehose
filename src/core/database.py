@@ -13,6 +13,8 @@ import hashlib
 import urllib.parse
 from typing import Dict, List, Any, Optional, Tuple
 import logging
+import shutil
+import glob
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,75 @@ class DatabaseManager:
         
         # Initialize papers.db (current run)
         self._init_current_db()
+
+    def _backup_sqlite(self, src_path: str, dest_path: str) -> None:
+        """Create a consistent backup copy of a SQLite database.
+
+        Creates a consistent copy of `src_path` at `dest_path` using the
+        SQLite backup API. Overwrites any existing backup file at dest_path.
+        """
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        # Use SQLite backup API for safety
+        src_conn = sqlite3.connect(src_path)
+        try:
+            # Remove existing backup to avoid appending old pages
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            dest_conn = sqlite3.connect(dest_path)
+            try:
+                src_conn.backup(dest_conn)
+            finally:
+                dest_conn.close()
+        finally:
+            src_conn.close()
+
+    def _rotate_backups(self, directory: str, stem: str, keep: int = 3) -> None:
+        """Keep only the newest `keep` backups matching the given stem.
+
+        Backup files are expected to match pattern: f"{stem}.YYYYMMDD-HHMMSS.backup.db".
+        Older files beyond the `keep` most recent (by filename) are deleted.
+        """
+        pattern = os.path.join(directory, f"{stem}.*.backup.db")
+        files = sorted(glob.glob(pattern))
+        if len(files) <= keep:
+            return
+        to_delete = files[0 : len(files) - keep]
+        for fp in to_delete:
+            try:
+                os.remove(fp)
+                logger.info(f"Pruned old backup: {fp}")
+            except Exception as e:
+                logger.warning(f"Failed to remove old backup {fp}: {e}")
+
+    def backup_important_databases(self) -> Dict[str, str]:
+        """Backup history and all_feeds databases with timestamped rotation.
+
+        - Writes timestamped backups alongside the source DBs in `assets/`.
+        - Keeps up to 3 most recent backups per database, pruning older ones.
+
+        Returns a dict mapping logical db keys to the created backup file paths.
+        """
+        backups = {}
+        now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        mappings = {
+            'all_feeds': ('all_feed_entries', self.db_paths['all_feeds']),
+            'history': ('matched_entries_history', self.db_paths['history']),
+        }
+        for key, (stem, path) in mappings.items():
+            # Skip if source DB does not yet exist
+            if not os.path.exists(path):
+                continue
+            directory = os.path.dirname(path)
+            dest = os.path.join(directory, f"{stem}.{now}.backup.db")
+            try:
+                self._backup_sqlite(path, dest)
+                backups[key] = dest
+                logger.info(f"Backed up database '{key}' to {dest}")
+                # Rotate: keep only newest 3
+                self._rotate_backups(directory, stem, keep=3)
+            except Exception as e:
+                logger.error(f"Failed to backup database '{key}' from {path} to {dest}: {e}")
+        return backups
     
     def _init_all_feeds_db(self):
         """Initialize the all RSS entries database."""

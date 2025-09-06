@@ -297,3 +297,23 @@ Notes:
 - Ensure you run Python from the repository root (so the package can locate `src/` and `config/`).
 - Alternatively, add the repository root to `PYTHONPATH` before importing.
 - **Testing Efficiency**: The new topic merging system eliminates duplicate database operations, making testing and rerunning much more efficient.
+# Local backups (automatic)
+# Up to 3 timestamped backups of the two important databases are written to assets/ at run start.
+# Examples:
+#   assets/all_feed_entries.20250906-164500.backup.db
+#   assets/matched_entries_history.20250906-164500.backup.db
+# The oldest backups beyond 3 are pruned automatically.
+## Backups & CI Archiving
+
+### Local Backups (Implemented)
+- On each `filter` run (and before `purge`), the app writes timestamped backups of the two important databases into `assets/` and keeps only the latest 3 per database:
+  - `assets/all_feed_entries.YYYYMMDD-HHMMSS.backup.db`
+  - `assets/matched_entries_history.YYYYMMDD-HHMMSS.backup.db`
+- This safeguards against accidental corruption during a run while avoiding unbounded growth.
+
+### GitHub Actions Archiving (TODO)
+- For GitHub Actions runs, persist `assets/all_feed_entries.db` and `assets/matched_entries_history.db` to a `data` branch so history and dedup state survive between CI runs.
+- TODO:
+  - Add a workflow that checks out the `data` branch, copies updated DBs from `assets/`, commits, and pushes.
+  - Gate writes to `data` branch to CI context only.
+  - Consider attaching DB artifacts to releases for manual recovery.
