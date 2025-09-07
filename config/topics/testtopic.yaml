@@ -39,7 +39,7 @@ feeds:
 
 # Regex filter
 filter:
-  pattern: "valley polarization"
+  pattern: " "
   fields: ["title", "summary"]
 
 # Ranking configuration
