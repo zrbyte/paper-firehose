@@ -158,6 +158,136 @@ def run_ranking_test(
     return {"sampled_docs": sampled_docs, "bm25": bm25_results, "st": st_results}
 
 
+def regex_to_canonical_phrases(pattern: str) -> List[str]:
+    """Convert a topic regex pattern into a small set of canonical phrases.
+
+    This applies lightweight heuristics tailored to common patterns in the
+    repo's topic YAMLs (graphene/graphite/STM/TMDs/etc.). It is intentionally
+    conservative (few phrases, no brute-force expansion) and aims to provide
+    human-readable phrases suitable for sentence-transformer queries.
+
+    Examples handled:
+    - topolog[a-z]+ -> ["topology", "topological"]
+    - graphit[a-z]+ -> ["graphite"], graphe[a-z]+ -> ["graphene"]
+    - scan[a-z]+ tunne[a-z]+ micr[a-z]+ -> ["scanning tunneling microscopy", "STM"]
+    - TMDs like (MoS\d+, WSe\d+) -> ["MoS2", "WSe2"]
+    - Specific compounds: ["ZrTe5", "Pt2HgSe3", "BiTeI", ...]
+    - Fallback: if pattern has no regex metacharacters, return it as-is
+    """
+    import re
+
+    phrases: set[str] = set()
+    s = pattern or ""
+    s_l = s.lower()
+
+    # If the pattern is a simple phrase without regex operators, use it directly.
+    if not re.search(r"[\[\]{}()|+*?.\\]", s):
+        simple = re.sub(r"\s+", " ", s.strip())
+        if simple:
+            phrases.add(simple)
+
+    # Heuristic mappings for known stems and constructs
+    if re.search(r"topolog", s_l):
+        phrases.update(["topology", "topological"])
+    if re.search(r"graphit", s_l):
+        phrases.add("graphite")
+    if re.search(r"graphe", s_l):
+        phrases.add("graphene")
+    if re.search(r"rhombohedr", s_l):
+        # Commonly refers to ABC-stacked/rhombohedral graphite/graphene
+        phrases.update(["rhombohedral graphite", "rhombohedral"])
+    if re.search(r"\babc", s, flags=re.IGNORECASE):
+        phrases.update(["ABC-stacked graphene", "ABC stacking"])  # context specific
+    if re.search(r"chalcog", s_l):
+        phrases.update(["chalcogenide", "chalcogenides"])  # broad material class
+    if re.search(r"\blandau\b", s_l):
+        phrases.add("Landau levels")
+    if re.search(r"\bweyl\b", s_l):
+        phrases.update(["Weyl semimetal", "Weyl"])
+    if re.search(r"\bdirac\b", s_l):
+        phrases.update(["Dirac material", "Dirac"]) 
+    if re.search(r"\bSTM\b", s):
+        phrases.update(["scanning tunneling microscopy", "STM"]) 
+
+    # Scanning microscopy variants (robust to stem patterns in the regex)
+    if re.search(r"scan[a-z]*\s*tunne[a-z]*\s*micr[a-z]*", s_l):
+        phrases.update(["scanning tunneling microscopy", "STM"])
+    if re.search(r"scan[a-z]*\s*tunne[a-z]*\s*spectr[a-z]*", s_l):
+        phrases.update(["scanning tunneling spectroscopy", "STS"]) 
+    if re.search(r"scan[a-z]*\s*prob[a-z]*\s*micr[a-z]*", s_l):
+        phrases.update(["scanning probe microscopy", "SPM"]) 
+
+    # Transition metal dichalcogenides (TMDs) — assume common 2H stoichiometry '2'
+    if re.search(r"MoS", s):
+        phrases.add("MoS2")
+    if re.search(r"MoSe", s):
+        phrases.add("MoSe2")
+    if re.search(r"MoTe", s):
+        phrases.add("MoTe2")
+    if re.search(r"WS[^(e)]", s):  # plain WS (avoid double-matching WSe)
+        phrases.add("WS2")
+    if re.search(r"WSe", s):
+        phrases.add("WSe2")
+    if re.search(r"WTe", s):
+        phrases.add("WTe2")
+
+    # Specific compounds and families
+    if re.search(r"BiTeI", s):
+        phrases.add("BiTeI")
+    if re.search(r"BiTeBr", s):
+        phrases.add("BiTeBr")
+    if re.search(r"BiTeCl", s):
+        phrases.add("BiTeCl")
+    if re.search(r"Bi\\d\+Rh\\d\+I\\d\+|Bi\W+\\d\W+Rh\W+\\d\W+I\W+\\d", s):
+        phrases.add("BiRhI")  # generic family shorthand
+    if re.search(r"ZrTe5|ZrTe\W*5", s):
+        phrases.add("ZrTe5")
+    if re.search(r"Pt2HgSe3|Pt\W*2HgSe\W*3", s):
+        phrases.add("Pt2HgSe3")
+    if re.search(r"jacuting", s_l):
+        phrases.add("jacutingaite")
+
+    # Flat band variants
+    if re.search(r"flat\s*band|flat.?band", s_l):
+        phrases.update(["flat band", "flat bands"]) 
+
+    # Normalize: dedupe, keep readable casing, and sort for determinism
+    out = sorted({p.strip() for p in phrases if p.strip()})
+    return out
+
+
+def canonical_phrases_from_topic_yaml(topic_yaml_path: str) -> List[str]:
+    """Load a topic YAML file and return canonical phrases from its regex.
+
+    Reads `filter.pattern` and converts it via `regex_to_canonical_phrases`.
+    If PyYAML is unavailable, falls back to a naive pattern extraction.
+    """
+    pattern = None
+    try:
+        if yaml is not None:
+            with open(topic_yaml_path, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f)
+            if isinstance(cfg, dict):
+                filt = cfg.get("filter", {}) or {}
+                pattern = filt.get("pattern")
+        else:
+            # Fallback: naive regex to extract a quoted pattern line
+            import re
+            with open(topic_yaml_path, "r", encoding="utf-8") as f:
+                text = f.read()
+            m = re.search(r"pattern:\s*\"([^\"]*)\"", text)
+            if not m:
+                m = re.search(r"pattern:\s*'([^']*)'", text)
+            if m:
+                pattern = m.group(1)
+    except Exception:
+        pattern = None
+
+    if not pattern:
+        return []
+    return regex_to_canonical_phrases(str(pattern))
+
+
 if __name__ == "__main__":
     # Run with defaults for convenience
     run_ranking_test()

@@ -514,6 +514,30 @@ class DatabaseManager:
         cursor.execute("DELETE FROM entries")
         conn.commit()
         conn.close()
+
+    def update_entry_rank(self, entry_id: str, topic: str, score: float | None, reasoning: str | None = None) -> None:
+        """Update rank_score (and optionally rank_reasoning) for a single entry.
+
+        Args:
+            entry_id: Entry identifier (sha1 or normalized link id)
+            topic: Topic name (composite key component)
+            score: Rank score to persist (cosine similarity or None)
+            reasoning: Optional concise reasoning string
+        """
+        conn = sqlite3.connect(self.db_paths['current'])
+        cursor = conn.cursor()
+        if reasoning is None:
+            cursor.execute(
+                "UPDATE entries SET rank_score = ? WHERE id = ? AND topic = ?",
+                (score, entry_id, topic),
+            )
+        else:
+            cursor.execute(
+                "UPDATE entries SET rank_score = ?, rank_reasoning = ? WHERE id = ? AND topic = ?",
+                (score, reasoning, entry_id, topic),
+            )
+        conn.commit()
+        conn.close()
     
     def purge_old_entries(self, days: int):
         """Remove entries from the most recent N days (including today) based on publication date (YYYY-MM-DD)."""

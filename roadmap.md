@@ -213,61 +213,14 @@ paper-firehose purge --all            # Clear all databases
 
 ---
 
-# Ranking Plan (Title-Only, Regex-First)
+# Ranking Status (Sentence-Transformers)
 
-Objective
-- Implement a ranking command that reads `assets/papers.db` (status='filtered'), ranks entries using title-only signals centered on topic regex patterns, writes `rank_score` and `rank_reasoning`, and optionally marks top-N as `status='ranked'` for LLM summarization.
+Implemented
+- CLI: `paper-firehose rank` writes cosine `rank_score` for entries with `status='filtered'` using `ranking.query` and `ranking.model` from topic YAMLs.
+- Processor: minimal ST ranker (`src/processors/st_ranker.py`) with title-only scoring.
+- DB: `update_entry_rank` helper in `src/core/database.py`.
 
-Out-of-the-box packages (optional)
-- sentence-transformers: Dual-encoder embeddings and cross-encoders for hybrid ranking later (e.g., `all-MiniLM-L6-v2`, `intfloat/e5-small-v2`, `BAAI/bge-small-en`, `cross-encoder/ms-marco-MiniLM-L-6-v2`).
-- rank-bm25: Lightweight lexical baseline if needed.
-- rapidfuzz: Fuzzy/partial string matching to soften strict regex where useful.
-- faiss-cpu / hnswlib: ANN for dense retrieval at scale (later).
-- ranx / pytrec_eval: Offline eval on a small labeled set.
-
-Configuration design (YAML)
-- Place ranking settings under each topic YAML (`config/topics/*.yaml`) in a `ranking:` section.
-- For now, use identical parameters across topics by default (global semantics), while allowing per-topic overrides in the future.
-- Synonyms remain baked into the `filter.pattern` regex.
-- Keys (initial set):
-  - `ranking.top_n`: integer (selection size for summarization).
-  - `ranking.method`: "regex" (default), leave room for "hybrid", "bi", "cross" later.
-  - `ranking.discouraged_terms`: list of lowercased terms to penalize (e.g., ["comment", "reply", "corrigendum", "erratum", "editorial"]).
-  - Optional future keys (forward-compatible): `phrases`, `weights`, `synonyms`, `hybrid` block (alpha, model name).
-
-Title-only scoring signals (regex-first)
-- Base match: +1.0 if the topic `filter.pattern` matches anywhere in the title.
-- Match count: +0.75 per non-overlapping regex match.
-- Coverage: +2.0 × (longest matched span length / max(10, len(title))).
-- Position: +0.25 if a match begins within the first 10 characters.
-- Priority feed: +0.50 if `feed_name` is listed under `priority_journals` in main config.
-- Recency: +0.5 × exp(-2 × days_since_pub/365) to lightly prefer fresh papers.
-- Discouraged terms penalty: -0.50 if any discouraged term appears in title (configurable).
-- Reasoning: store a concise trace, e.g., `"base=1.0, matches=2, longest_ratio=0.31, priority=+0.50, recency=+0.26, penalty=-0.50"`.
-
-Module and CLI (no implementation yet)
-- Module: `src/commands/ranking.py`
-  - API: `run(config_path: str, topic: str | None = None, method: str = "regex", mark_top_as_ranked: bool = False) -> None`.
-  - Reads `papers.db` entries for the topic(s) with `status='filtered'`.
-  - Computes scores using the above signals and updates `rank_score` and `rank_reasoning`.
-  - By default, keep `status='filtered'` to preserve behavior; optionally set `status='ranked'` for the top `ranking.top_n` when `mark_top_as_ranked=True`.
-- CLI: add `rank` subcommand in `cli/main.py` (e.g., `paper-firehose rank --topic primary --method regex --mark-top`).
-
-Database updates (no implementation yet)
-- Add helper to `src/core/database.py`:
-  - `update_entry_rank(entry_id: str, topic: str, score: float | None, reasoning: str | None, new_status: str | None = None)` to atomically set `rank_score`, `rank_reasoning`, and optionally `status`.
-- Future (optional): embeddings cache table for hybrid ranking, keyed by `(id, topic, model)`.
-
-Selection and diversity (later)
-- After scoring, select top `ranking.top_n` per topic for summarization.
-- Optionally apply MMR with title embeddings to ensure diversity; use a small sentence-transformers model for cosine similarity if enabled.
-
-Evaluation and tuning (optional)
-- Create a tiny labeled set (20–50 titles) per topic.
-- Compare regex-only vs hybrid; tune weights (e.g., coverage coefficient, recency strength, penalty magnitude) and blend factor for hybrid using `ranx`/`pytrec_eval`.
-
-Notes and decisions
-- Synonyms are primarily handled inside the topic regex patterns; we will not introduce separate synonym expansion by default.
-- Ranking parameters live in topic YAML files to allow future per-topic overrides, while defaults can be shared across topics.
-- `ranking.top_n` is the authoritative YAML option for how many ranked items to pass to LLM summarization.
-- Initial scope is title-only to avoid dependency on abstracts; can later enrich with abstracts (e.g., Crossref) for improved ranking.
+Next
+- Apply cutoffs: `ranking.score_cutoff` and `ranking.percentile_cutoff` (use the strongest; fewest entries kept).
+- Support `ranking.negative_queries` to downweight off-topic senses.
+- Optional: multi-query aggregation (max/mean), mark `top_n` as `status='ranked'`, cache embeddings.

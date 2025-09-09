@@ -16,6 +16,7 @@ sys.path.insert(0, src_path)
 
 from commands import filter as filter_cmd
 from commands import generate_html as html_cmd
+from commands import rank as rank_cmd
 
 # Setup logging
 logging.basicConfig(
@@ -63,6 +64,22 @@ def generate_html(ctx, topic):
             click.echo("✅ HTML generated for all topics")
     except Exception as e:
         click.echo(f"❌ HTML generation failed: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command('rank')
+@click.option('--topic', help='Rank a specific topic only')
+@click.pass_context
+def rank(ctx, topic):
+    """Compute and write rank scores into papers.db (rank_score only)."""
+    try:
+        rank_cmd.run(ctx.obj['config_path'], topic)
+        if topic:
+            click.echo(f"✅ Ranking completed for topic '{topic}'")
+        else:
+            click.echo("✅ Ranking completed for all topics")
+    except Exception as e:
+        click.echo(f"❌ Rank command failed: {e}", err=True)
         sys.exit(1)
 
 
