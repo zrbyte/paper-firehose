@@ -42,8 +42,10 @@ filter:
 
 ranking:
   prompt: >
-    You are a world-class condensed-matter researcher with deep expertise in rhombohedral graphite (ABC-stacked graphene multilayers) and related STM/transport phenomena. 
-    Prioritize entries that directly concern ABC/rhombohedral stacking, few-layer graphene with rhombohedral domains, or unambiguous experimental/theory advances in this subfield.
+    You are a world-class condensed-matter researcher with deep expertise in rhombohedral graphite
+    (ABC-stacked graphene multilayers) and related STM/transport phenomena. 
+    Prioritize entries that directly concern ABC/rhombohedral stacking, few-layer graphene
+    with rhombohedral domains, or unambiguous experimental/theory advances in this subfield.
   # Natural-language ranking query used for sentence-transformers similarity
   query: >
     Rhombohedral graphite, rhombohedral stacking, rhombohedral multilayer graphene,
@@ -51,7 +53,7 @@ ranking:
     heptalayer graphene, chiral graphene
 
   # Optional additional negative phrases to downweight (list may be empty)
-  negative_queries: []
+  negative_queries: [erratum, correction, reply, corrigendum]
 
   # Sentence-Transformers model used for ranking (can be overridden per topic)
   model: "all-MiniLM-L6-v2"

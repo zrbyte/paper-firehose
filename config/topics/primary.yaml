@@ -49,13 +49,14 @@ ranking:
     Focus on topical relevance (graphene, rhombohedral graphite, moiré/twisted systems, STM), novelty/impact, and experimental/theory significance.
   # Natural-language ranking query used for sentence-transformers similarity
   query: >
-    Graphene and rhombohedral graphite research, ABC stacking, STM/STS, moiré/twisted systems, van der Waals materials
+    graphene and rhombohedral graphite research, ABC stacking, STM, scanning tunneling microscopy,
+    scanning probe, moiré, moir\'e, twisted systems, van der Waals materials
 
   # Optional additional negative phrases to downweight (list may be empty)
   negative_queries: [erratum, correction, reply, corrigendum]
 
   # Sentence-Transformers model used for ranking (can be overridden per topic)
-  model: "all-MiniLM-L6-v2"
+  model: "all-MiniLM-L6-v2" # with this model input text longer than 256 word pieces is truncated.
 
   # Cutoffs: strongest cutoff applies (the one returning the fewest entries)
   # - score_cutoff: minimum cosine similarity (0.0–1.0); default 0.2
@@ -63,7 +64,7 @@ ranking:
   score_cutoff: 0.2
   percentile_cutoff: 0.30
   # Top N papers to return, hard cutoff after score_cutoff and percentile_cutoff
-  top_n: 5
+  top_n: 10
 
 # Output configuration
 output:

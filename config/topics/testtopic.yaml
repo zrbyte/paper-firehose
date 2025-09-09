@@ -44,9 +44,7 @@ filter:
 
 # Ranking configuration
 ranking:
-  prompt: "You are a world-class condensed-matter researcher specializing in 
-    graphene. Focus on topical relevance (graphene), 
-    novelty/impact, and experimental/theory significance."
+  prompt: "Summarize"
   # Natural-language ranking query used for sentence-transformers similarity
   query: "Graphene research and related condensed matter topics"
 
