@@ -39,17 +39,24 @@ feeds:
 
 # Regex filter
 filter:
-  pattern: " "
+  pattern: "(perovskit.*photoelec.*)|(perovskit.*photocatho.*)|(perovskit.*photoano.*)|(organi.*photoelec.*)|(solar.*water.*splitt.*)|(photoelectrochem.*water.*splitt.*)|(photoelectrochem.*biom.*oxid.*)|(photoelectrochem.*valu.*add.*)|(perovsk.*sola.*cell)|(organi.*sola.*cell)"
   fields: ["title", "summary"]
 
 # Ranking configuration
 ranking:
-  prompt: "Summarize"
+  prompt: >
+    You are a domain expert on perovskite solar cells and photoelectrochemistry.
+    Emphasize entries that materially advance stability, efficiency, interface physics/chemistry,
+    and catalysis mechanisms. Prefer clear methodological advances and results with high potential impact.
+    Be concise and expert-focused. Keep text concise and information-dense.
+    Avoid using superlatives and other over-the-top language.
+    CRITICAL: Return ONLY valid JSON with the exact structure specified.
+    No markdown formatting, no explanations, no text before or after the JSON object.
   # Natural-language ranking query used for sentence-transformers similarity
-  query: "Graphene research and related condensed matter topics"
+  query: "Perovskites, solar cells, photoelectrochemistry, solar water splitting, solar fuels"
 
   # Optional additional negative phrases to downweight (list may be empty)
-  negative_queries: []
+  negative_queries: [erratum, correction, reply, corrigendum]
 
   # Sentence-Transformers model used for ranking (can be overridden per topic)
   model: "all-MiniLM-L6-v2"
@@ -59,10 +66,10 @@ ranking:
   # - percentile_cutoff: keep top X% by score within the candidate set; default 0.30 (top 30%)
   score_cutoff: 0.2
   percentile_cutoff: 0.30
-  top_n: 5
+  top_n: 10
 
 # Output configuration
 output:
-  filename: "results_testtopic.html"
-  template: "testtopic_summary.html"
+  filename: "results_perovskites.html"
+  template: "perovskites_summary.html"
   archive: true # archive the output file to the "matched_entries_history.db" database

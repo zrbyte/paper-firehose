@@ -49,14 +49,15 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
             output_config = topic_config.get('output', {})
             output_filename = output_config.get('filename', f'{topic_name}_filtered_articles.html')
 
-            description = topic_config.get('description', f"Articles related to {topic_name}")
+            # Use the topic's display name as the main heading in HTML
+            heading = topic_config.get('name', topic_name)
 
             # Generate from DB for this topic
             html_generator.generate_html_from_database(
                 db_manager,
                 topic_name,
                 output_filename,
-                description,
+                heading,
             )
 
             logger.info(f"Generated HTML for topic '{topic_name}': {output_filename}")
@@ -66,4 +67,3 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
 
     db_manager.close_all_connections()
     logger.info("HTML generation from database completed")
-

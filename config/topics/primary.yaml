@@ -11,19 +11,14 @@ feeds:
   - "nat-phys"
   - "nat-chem"
   - "nat-ener"
-  - "nat-catal"
-  - "nat-chem-eng"
   - "nat-rev-phys"
   - "pnas"
-  - "joule"
   - "prb"
   - "prl"
   - "prx"
   - "pr_res"
   - "nano-lett"
   - "acs-nano"
-  - "acs-en-lett"
-  - "en-env-sci"
   - "science-adv"
   - "sci-rep"
   - "nat-comm"
@@ -45,8 +40,14 @@ filter:
 # Ranking configuration
 ranking:
   prompt: >
-    You are a world-class condensed-matter researcher specializing in 2D van der Waals materials, STM, and charge transport in graphene/graphite systems. 
-    Focus on topical relevance (graphene, rhombohedral graphite, moiré/twisted systems, STM), novelty/impact, and experimental/theory significance.
+    You are a world-class condensed-matter researcher specializing in 2D van der Waals materials,
+    STM, and charge transport in graphene/graphite systems. 
+    Focus on topical relevance (graphene, rhombohedral graphite,
+    moiré/twisted systems, STM), novelty/impact, and experimental/theory significance.
+    Be concise and expert-focused. Keep text concise and information-dense.
+    Avoid using superlatives and other over-the-top language.
+    CRITICAL: Return ONLY valid JSON with the exact structure specified.
+    No markdown formatting, no explanations, no text before or after the JSON object.
   # Natural-language ranking query used for sentence-transformers similarity
   query: >
     graphene and rhombohedral graphite research, ABC stacking, STM, scanning tunneling microscopy,
@@ -61,7 +62,7 @@ ranking:
   # Cutoffs: strongest cutoff applies (the one returning the fewest entries)
   # - score_cutoff: minimum cosine similarity (0.0–1.0); default 0.2
   # - percentile_cutoff: keep top X% by score within the candidate set; default 0.30 (top 30%)
-  score_cutoff: 0.2
+  score_cutoff: 0.25
   percentile_cutoff: 0.30
   # Top N papers to return, hard cutoff after score_cutoff and percentile_cutoff
   top_n: 10

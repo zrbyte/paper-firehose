@@ -1,3 +1,4 @@
 feedparser
 PyYAML
 click
+sentence-transformers>=2.2.2  # needed for `rank` command scoring

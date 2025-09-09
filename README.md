@@ -326,13 +326,23 @@ The system uses a three-database approach for efficient processing and historica
 
   
 
-🚧 **Phase 2** - LLM Ranking (Planned)
+🚀 Ranking
 
-- LLM-based entry ranking and importance scoring
+- Sentence-Transformers based entry ranking that writes `rank_score` into `papers.db`.
+- Uses per-topic ranking settings from `config/topics/<topic>.yaml` (`ranking.query`, optional `ranking.model`).
+- Optional flag `--topic` lets you rank a single topic; omit to rank all topics.
 
-- Integration with existing topic-specific prompts
+Usage:
 
-- Priority journal handling in ranking process
+```
+python cli/main.py rank               # rank all topics
+python cli/main.py rank --topic primary
+```
+
+Notes:
+- Install `sentence-transformers` to enable scoring: `pip install sentence-transformers`.
+- If the model cannot be loaded, the command logs a warning and skips scoring gracefully.
+- The command writes scores only to the DB.
 
   
 
