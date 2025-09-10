@@ -20,6 +20,8 @@ _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import logging
 from typing import Optional, List, Dict, Any
+import unicodedata
+import re
 
 from core.config import ConfigManager
 from core.database import DatabaseManager
@@ -116,6 +118,66 @@ def _build_entry_text(entry: Dict[str, Any]) -> str:
     return (entry.get("title") or "").strip()
 
 
+def _strip_accents(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+
+
+def _norm_name(text: str) -> str:
+    t = _strip_accents(text or "").lower()
+    t = re.sub(r"[^a-z\s\-]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _parse_name_parts(name: str) -> tuple[str, List[str]]:
+    """Return (lastname, initials[]) from a human name.
+
+    Handles "Last, First M" and "First M Last" styles, ignores accents/case.
+    """
+    if not name:
+        return "", []
+    # Preserve comma pattern before normalization for ordering hint
+    if "," in name:
+        last_raw, _, rest_raw = name.partition(",")
+        last = _norm_name(last_raw)
+        rest = _norm_name(rest_raw)
+        tokens = rest.split()
+    else:
+        n = _norm_name(name)
+        tokens = n.split()
+        last = tokens[-1] if tokens else ""
+        tokens = tokens[:-1]
+    initials = [t[0] for t in tokens if t]
+    return last, initials
+
+
+def _names_match(a: str, b: str) -> bool:
+    la, ia = _parse_name_parts(a)
+    lb, ib = _parse_name_parts(b)
+    if not la or not lb:
+        return False
+    if la != lb:
+        return False
+    if ia and ib and not set(ia).intersection(ib):
+        return False
+    return True
+
+
+def _entry_has_preferred_author(entry: Dict[str, Any], preferred_authors: List[str]) -> bool:
+    if not preferred_authors:
+        return False
+    authors_blob = entry.get("authors") or ""
+    parts = re.split(r"[,;]", authors_blob)
+    authors = [p.strip() for p in parts if p.strip()]
+    if not authors:
+        return False
+    for want in preferred_authors:
+        for have in authors:
+            if _names_match(have, want):
+                return True
+    return False
+
+
 def run(config_path: str, topic: Optional[str] = None) -> None:
     """
     Compute rank scores and write them into papers.db (rank_score).
@@ -157,6 +219,22 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         negative_terms = [
             t.strip() for t in (ranking_cfg.get("negative_queries") or []) if isinstance(t, str) and t.strip()
         ]
+        preferred_authors = [
+            t.strip() for t in (ranking_cfg.get("preferred_authors") or []) if isinstance(t, str) and t.strip()
+        ]
+        author_boost = float(ranking_cfg.get("priority_author_boost") or 0.0)
+
+        # Global priority journal boost
+        prio_keys = set(config.get("priority_journals", []) or [])
+        feeds_cfg = (config.get("feeds") or {})
+        prio_display_names = set()
+        for k in prio_keys:
+            feed = feeds_cfg.get(k)
+            if isinstance(feed, dict):
+                name = feed.get("name")
+                if name:
+                    prio_display_names.add(str(name))
+        journal_boost = float(config.get("priority_journal_boost") or 0.0)
 
         if not query:
             logger.warning("Topic '%s' has no ranking.query; skipping.", topic_name)
@@ -203,15 +281,45 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
             )
             scores = adjusted
 
-        # Write scores
+        # Write scores with boosts
         updated = 0
+        boosted_auth = 0
+        boosted_jour = 0
+        entry_by_key = {(e["id"], e["topic"]): e for e in entries}
         for eid, tname, score in scores:
+            s = float(score)
+            entry = entry_by_key.get((eid, tname)) or {}
+            # Preferred author boost
+            if preferred_authors and author_boost > 0 and _entry_has_preferred_author(entry, preferred_authors):
+                s += author_boost
+                boosted_auth += 1
+            # Priority journal boost by display name
+            if journal_boost > 0:
+                feed_name = (entry.get("feed_name") or "").strip()
+                if feed_name in prio_display_names:
+                    s += journal_boost
+                    boosted_jour += 1
+            s = max(0.0, min(1.0, s))
             try:
-                db.update_entry_rank(eid, tname, float(score))
+                db.update_entry_rank(eid, tname, s)
                 updated += 1
             except Exception as e:
                 logger.error("Failed to update rank for %s/%s: %s", eid[:8], tname, e)
 
+        if preferred_authors and author_boost > 0:
+            logger.info(
+                "Topic '%s': applied preferred author boost to %d entries (+%.2f)",
+                topic_name,
+                boosted_auth,
+                author_boost,
+            )
+        if journal_boost > 0:
+            logger.info(
+                "Topic '%s': applied priority journal boost to %d entries (+%.2f)",
+                topic_name,
+                boosted_jour,
+                journal_boost,
+            )
         logger.info("Topic '%s': wrote rank_score for %d entries", topic_name, updated)
 
         # After scoring, render ranked HTML (highest score first)

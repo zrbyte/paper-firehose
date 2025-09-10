@@ -6,6 +6,7 @@ import yaml
 import os
 from typing import Dict, Any, List
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,23 @@ class ConfigManager:
                 if key not in db_config:
                     logger.error(f"Missing required database path '{key}'")
                     return False
+
+            # Validate priority_journals keys and optional boost type
+            priority_journals = config.get('priority_journals', [])
+            if priority_journals is not None and not isinstance(priority_journals, list):
+                logger.error("'priority_journals' must be a list of feed keys in config.yaml")
+                return False
+            if isinstance(priority_journals, list):
+                available_feeds = list(config['feeds'].keys())
+                for feed_key in priority_journals:
+                    if feed_key not in available_feeds:
+                        logger.warning(f"priority_journals contains unknown feed key '{feed_key}'")
+            # Optional global boost
+            if 'priority_journal_boost' in config:
+                pj_boost = config.get('priority_journal_boost')
+                if not isinstance(pj_boost, (int, float)):
+                    logger.error("'priority_journal_boost' must be a number (int/float)")
+                    return False
             
             # Validate topic configs
             topics = self.get_available_topics()
@@ -117,6 +135,36 @@ class ConfigManager:
                 for feed in topic_feeds:
                     if feed not in available_feeds:
                         logger.error(f"Topic '{topic}' references unknown feed '{feed}'")
+                        return False
+
+                # Validate filter pattern presence and compilability
+                filter_cfg = topic_config.get('filter', {})
+                pattern = filter_cfg.get('pattern')
+                if not isinstance(pattern, str) or not pattern.strip():
+                    logger.error(f"Topic '{topic}' filter.pattern must be a non-empty string")
+                    return False
+                try:
+                    re.compile(pattern, re.IGNORECASE)
+                except re.error as e:
+                    logger.error(f"Topic '{topic}' filter.pattern is not a valid regex: {e}")
+                    return False
+
+                # Optional ranking config validation
+                ranking_cfg = topic_config.get('ranking', {}) or {}
+                if ranking_cfg:
+                    neg = ranking_cfg.get('negative_queries')
+                    if neg is not None:
+                        if not isinstance(neg, list) or not all(isinstance(x, str) for x in neg):
+                            logger.error(f"Topic '{topic}' ranking.negative_queries must be a list of strings")
+                            return False
+                    pref = ranking_cfg.get('preferred_authors')
+                    if pref is not None:
+                        if not isinstance(pref, list) or not all(isinstance(x, str) for x in pref):
+                            logger.error(f"Topic '{topic}' ranking.preferred_authors must be a list of strings")
+                            return False
+                    pab = ranking_cfg.get('priority_author_boost')
+                    if pab is not None and not isinstance(pab, (int, float)):
+                        logger.error(f"Topic '{topic}' ranking.priority_author_boost must be a number (int/float)")
                         return False
             
             logger.info("Configuration validation passed")

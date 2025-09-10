@@ -49,6 +49,7 @@ Run with Python 3.11+.
   - `python cli/main.py rank [--topic TOPIC]`
   - Computes and writes `rank_score` for `papers.db` entries using sentence-transformers. HTML files with ranked entries are generated.
   - Model selection: if `models/all-MiniLM-L6-v2` exists, it is used; otherwise it falls back to the Hugging Face repo id `all-MiniLM-L6-v2` and downloads once into cache. You can vendor the model with `python scripts/vendor_model.py`.
+  - Scoring details: applies a small penalty for `ranking.negative_queries` matches (title/summary). Optional boosts: per-topic `ranking.preferred_authors` with `ranking.priority_author_boost`, and global `priority_journal_boost` for feeds listed in `priority_journals`.
 
 - HTML (re-render only; no fetching)
   - `python cli/main.py html [--topic TOPIC]`
@@ -72,6 +73,7 @@ Run with Python 3.11+.
   - `feeds`: list of feed keys from `config.yaml`.
   - `filter.pattern` and `filter.fields`: regex and fields to match (defaults include `title` and `summary`).
   - `ranking`: optional `query`, `model`, cutoffs, etc. (for the rank command).
+    - Optional: `negative_queries` (list), `preferred_authors` (list of names), `priority_author_boost` (float, e.g., 0.1).
   - `output.filename` and `output.filename_ranked`: HTML output; `archive: true` enables history DB writes.
 
 ## Data Flow
@@ -86,4 +88,4 @@ Run with Python 3.11+.
 
 ## Next
 
-- Implement LLM summarization of filtered (and optionally ranked) entries, writing into `entries.llm_summary` and updating HTML rendering.
+- Implement LLM summarization of filtered and ranked entries, writing into `entries.llm_summary` and updating HTML rendering.

@@ -5,7 +5,7 @@ database:
   history_path: "assets/matched_entries_history.db" # historical matches across all topics
 
 llm:
-  model: "gpt-4o-mini"
+  model: "gpt-5"
   api_key_env: "OPENAI_API_KEY"
   
 feeds:
@@ -141,16 +141,29 @@ feeds:
     name: "National Science Review"
     url: "https://academic.oup.com/rss/site_5332/advanceAccess_3198.xml"
     enabled: true
+  npj-2d-mater:
+    name: "npj 2D Materials and Applications"
+    url: "https://www.nature.com/npj2dmaterials.rss"
+    enabled: true
+  npj-comp-mater:
+    name: "npj Computational Materials"
+    url: "https://www.nature.com/npjcompumats.rss"
+    enabled: true
+  npj-qmat:
+    name: "npj Quantum Materials"
+    url: "https://www.nature.com/npjquantmats.rss"
+    enabled: true
 
-# Priority journals (always processed regardless of regex match)
+# Priority journals (boosted in ranking)
 priority_journals:
   - "nature"
   - "science"
   - "nat-nanotech"
   - "nat-mat"
   - "nat-phys"
+priority_journal_boost: 0.20
 
 # Global defaults
 defaults:
-  top_n_per_topic: 5
+  top_n_per_topic: 10
   ranking_enabled: true

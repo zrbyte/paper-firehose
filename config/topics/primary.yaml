@@ -31,6 +31,9 @@ feeds:
   - "adv-func-mater"
   - "adv-phys-res"
   - "national-sci-rev"
+  - "npj-2d-mater"
+  - "npj-comp-mater"
+  - "npj-qmat"
 
 # Regex filter
 filter:
@@ -83,6 +86,10 @@ ranking:
   # Optional additional negative phrases to downweight (list may be empty)
   negative_queries: [erratum, correction, reply, corrigendum]
 
+  # Preferred authors. Names in this list get a ranking boost. Order: First name (or initial), Last name.
+  preferred_authors: [Chen Guorui, A Yazdani, Avram Nurit, Markus Morgenstern]
+  priority_author_boost: 0.1
+
   # Sentence-Transformers model used for ranking (can be overridden per topic)
   model: "all-MiniLM-L6-v2" # with this model input text longer than 256 word pieces is truncated.
 
@@ -90,11 +97,11 @@ ranking:
   # - score_cutoff: minimum cosine similarity (0.0–1.0); default 0.2
   score_cutoff: 0.25
   # Top N papers to return, hard cutoff after score_cutoff and percentile_cutoff
-  top_n: 10
+  top_n: 5
 
 # Output configuration
 output:
   filename: "results_primary.html"
   filename_ranked: "results_primary_ranked.html"
-  template: "topic_summary.html"
+  filename_summary: "results_primary_summary.html"
   archive: true # archive the output file to the "matched_entries_history.db" database
