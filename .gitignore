@@ -14,4 +14,5 @@ archive/
 .DS_Store
 .cursor/*
 assets/*  # ignore all files in assets dir. Actions will commit the DB files to GitHub. Will not be downloaded so as to not create conflicts with test runs.
+models/*
 paperqa_downloads/*

@@ -39,7 +39,16 @@ feeds:
 
 # Regex filter
 filter:
-  pattern: "(perovskit.*photoelec.*)|(perovskit.*photocatho.*)|(perovskit.*photoano.*)|(organi.*photoelec.*)|(solar.*water.*splitt.*)|(photoelectrochem.*water.*splitt.*)|(photoelectrochem.*biom.*oxid.*)|(photoelectrochem.*valu.*add.*)|(perovsk.*sola.*cell)|(organi.*sola.*cell)"
+  pattern: "(perovskit.*photoelec.*)|\
+            (perovskit.*photocatho.*)|\
+            (perovskit.*photoano.*)|\
+            (organi.*photoelec.*)|\
+            (solar.*water.*splitt.*)|\
+            (photoelectrochem.*water.*splitt.*)|\
+            (photoelectrochem.*biom.*oxid.*)|\
+            (photoelectrochem.*valu.*add.*)|\
+            (perovsk.*sola.*cell)|\
+            (organi.*sola.*cell)"
   fields: ["title", "summary"]
 
 # Ranking configuration

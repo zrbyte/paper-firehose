@@ -193,4 +193,3 @@ class FeedProcessor:
         
         logger.info(f"Saved all processed entries to deduplication database")
     
-    # Note: the previous convenience method `process_topic` has been removed as unused.

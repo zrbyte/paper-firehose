@@ -93,11 +93,6 @@ def purge(ctx, days, all_data):
         click.echo("Error: Must specify either --days X or --all", err=True)
         sys.exit(1)
     
-    if all_data:
-        if not click.confirm('This will delete all data. Are you sure?'):
-            click.echo("Aborted.")
-            return
-    
     try:
         filter_cmd.purge(ctx.obj['config_path'], days, all_data)
         if all_data:

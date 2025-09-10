@@ -29,6 +29,87 @@ from processors.html_generator import HTMLGenerator
 logger = logging.getLogger(__name__)
 
 
+def _has_model_files(path: str) -> bool:
+    """Heuristic check that a local Sentence-Transformers model folder is valid."""
+    from pathlib import Path
+    p = Path(path)
+    if not p.exists() or not p.is_dir():
+        return False
+    # Common files for ST models
+    candidates = [p / "config.json", p / "modules.json"]
+    return any(c.exists() for c in candidates)
+
+
+def _ensure_local_model(model_spec: str) -> str:
+    """Ensure a local model directory exists for the given spec and return the path or original spec.
+
+    Behavior:
+    - If spec is the default alias 'all-MiniLM-L6-v2':
+        Use 'models/all-MiniLM-L6-v2'. If missing or empty, download
+        'sentence-transformers/all-MiniLM-L6-v2' into that folder.
+    - If spec looks like a repo id (e.g., 'sentence-transformers/x' or 'intfloat/e5-small'):
+        Vendor to 'models/<last-segment>' when not present or empty.
+    - If spec is a local path and valid, return it. If it exists but appears empty,
+      try to infer repo id from the folder name and download into it.
+    - On any failure (e.g., no network), return the original spec and let STRanker handle it.
+    """
+    from pathlib import Path
+    import re
+
+    # Try local path directly if it's already valid
+    if Path(model_spec).exists() and _has_model_files(model_spec):
+        return model_spec
+
+    # Determine target local dir and repo id
+    models_root = Path("models")
+    models_root.mkdir(parents=True, exist_ok=True)
+
+    repo_id: str | None = None
+    target_dir: Path | None = None
+
+    # Case 1: default alias
+    if model_spec == "all-MiniLM-L6-v2":
+        repo_id = "sentence-transformers/all-MiniLM-L6-v2"
+        target_dir = models_root / "all-MiniLM-L6-v2"
+
+    # Case 2: looks like HF repo id "org/name"
+    elif "/" in model_spec and not Path(model_spec).exists():
+        repo_id = model_spec
+        last = model_spec.rsplit("/", 1)[-1]
+        # sanitize last segment for filesystem safety just in case
+        last = re.sub(r"[^A-Za-z0-9._\-]", "_", last)
+        target_dir = models_root / last
+
+    # Case 3: non-default spec that may be a local folder name or alias
+    else:
+        # If spec is a path but empty, try infer repo as sentence-transformers/<name>
+        p = Path(model_spec)
+        name = p.name if p.name else str(model_spec)
+        repo_id = f"sentence-transformers/{name}"
+        target_dir = p if p.is_absolute() else models_root / name
+
+    assert target_dir is not None and repo_id is not None
+
+    # If the target already looks valid, use it
+    if _has_model_files(str(target_dir)):
+        return str(target_dir)
+
+    # Attempt download (best-effort)
+    try:
+        from huggingface_hub import snapshot_download  # type: ignore
+        target_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_download(
+            repo_id=repo_id,
+            local_dir=str(target_dir),
+            local_dir_use_symlinks=False,
+        )
+        return str(target_dir)
+    except Exception as e:  # pragma: no cover - network optional
+        logger.warning("Model vendor failed for '%s' -> %s: %s", repo_id, target_dir, e)
+        # Fall back to original spec; STRanker will try to resolve
+        return model_spec
+
+
 def _build_entry_text(entry: Dict[str, Any]) -> str:
     """Return the text to be ranked for an entry (title-only for now)."""
     # Keep minimal as requested; can switch to title+summary later
@@ -68,7 +149,14 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
 
         ranking_cfg = (tcfg.get("ranking") or {}) if isinstance(tcfg, dict) else {}
         query = ranking_cfg.get("query") or ""
-        model_name = ranking_cfg.get("model") or "all-MiniLM-L6-v2"
+        model_spec = ranking_cfg.get("model") or "all-MiniLM-L6-v2"
+        # Ensure local vendored model (best-effort); falls back to spec on failure
+        model_name = _ensure_local_model(model_spec)
+        if model_name != model_spec:
+            logger.info("Topic '%s': using local model at %s", topic_name, model_name)
+        negative_terms = [
+            t.strip() for t in (ranking_cfg.get("negative_queries") or []) if isinstance(t, str) and t.strip()
+        ]
 
         if not query:
             logger.warning("Topic '%s' has no ranking.query; skipping.", topic_name)
@@ -89,6 +177,31 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         # Build batch (id, topic, text)
         batch = [(e["id"], e["topic"], _build_entry_text(e)) for e in entries]
         scores = ranker.score_entries(query, batch)
+
+        # Apply simple downweight for entries containing any negative term in title or summary
+        if negative_terms:
+            neg_set = {t.lower() for t in negative_terms}
+            # Build quick lookup from (id, topic) -> entry for text access
+            entry_by_key = {(e["id"], e["topic"]): e for e in entries}
+            adjusted: list[tuple[str, str, float]] = []
+            penalized = 0
+            for eid, tname, score in scores:
+                entry = entry_by_key.get((eid, tname)) or {}
+                title = (entry.get("title") or "").lower()
+                summary = (entry.get("summary") or "").lower()
+                blob = f"{title} {summary}"
+                has_negative = any(term in blob for term in neg_set)
+                if has_negative:
+                    # Subtract a fixed penalty and clamp to [0, 1]
+                    new_score = max(0.0, float(score) - 0.25)
+                    penalized += 1
+                else:
+                    new_score = float(score)
+                adjusted.append((eid, tname, new_score))
+            logger.info(
+                "Topic '%s': applied negative term penalty to %d entries", topic_name, penalized
+            )
+            scores = adjusted
 
         # Write scores
         updated = 0

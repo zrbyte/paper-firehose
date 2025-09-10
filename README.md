@@ -45,17 +45,20 @@ Run with Python 3.11+.
   - Saves ALL processed entries (matched and non-matched) to `all_feed_entries.db` for future dedup.
   - Renders per-topic HTML from `papers.db`.
 
+- Rank (optional)
+  - `python cli/main.py rank [--topic TOPIC]`
+  - Computes and writes `rank_score` for `papers.db` entries using sentence-transformers. HTML files with ranked entries are generated.
+  - Model selection: if `models/all-MiniLM-L6-v2` exists, it is used; otherwise it falls back to the Hugging Face repo id `all-MiniLM-L6-v2` and downloads once into cache. You can vendor the model with `python scripts/vendor_model.py`.
+
 - HTML (re-render only; no fetching)
   - `python cli/main.py html [--topic TOPIC]`
   - Reads from `papers.db` to generate filtered and ranked HTML pages.
+  - If the entries in `papers.db` have been ranked it generates in addition to the list of matches the ranked list of entries.
 
-- Rank (optional)
-  - `python cli/main.py rank [--topic TOPIC]`
-  - Computes and writes `rank_score` for `papers.db` entries using sentence-transformers. Files are regenerated to include ranked lists.
 
 - Purge
   - `python cli/main.py purge --days N` removes entries with `published_date` within the most recent N days across all DBs.
-  - `python cli/main.py purge --all` deletes all DB files and reinitializes schemas.
+  - `python cli/main.py purge --all` deletes all DB files and reinitializes schemas (no confirmation prompt).
 
 - Status
   - `python cli/main.py status`
@@ -84,4 +87,3 @@ Run with Python 3.11+.
 ## Next
 
 - Implement LLM summarization of filtered (and optionally ranked) entries, writing into `entries.llm_summary` and updating HTML rendering.
-

@@ -34,7 +34,34 @@ feeds:
 
 # Regex filter
 filter:
-  pattern: "(topolog[a-z]+)|(graphit[a-z]+)|(rhombohedr[a-z]+)|(graphe[a-z]+)|(ABC.+)|(chalcog[a-z]+)|(landau)|(weyl)|(dirac)|(STM)|(scan[a-z]+ tunne[a-z]+ micr[a-z]+)|(scan[a-z]+ tunne[a-z]+ spectr[a-z]+)|(scan[a-z]+ prob[a-z]+ micr[a-z]+)|(MoS.+\\d+|MoS\\d+)|(MoSe.+\\d+|MoSe\\d+)|(MoTe.+\\d+|MoTe\\d+)|(WS.+\\d+|WS\\d+)|(WSe.+\\d+|WSe\\d+)|(WTe.+\\d+|WTe\\d+)|(Bi\\d+Rh\\d+I\\d+|Bi.+\\d+.+Rh.+\\d+.+I.+\\d+.+)|(BiTeI)|(BiTeBr)|(BiTeCl)|(ZrTe5|ZrTe.+5)|(Pt2HgSe3|Pt.+2HgSe.+3)|(jacuting[a-z]+)|(flatband)|(flat.{1}band)"
+  pattern: "(topolog[a-z]+)|\
+            (graphit[a-z]+)|\
+            (rhombohedr[a-z]+)|\
+            (graphe[a-z]+)|\
+            (ABC.+)|\
+            (chalcog[a-z]+)|\
+            (landau)|\
+            (weyl)|\
+            (dirac)|\
+            (STM)|\
+            (scan[a-z]+ tunne[a-z]+ micr[a-z]+)|\
+            (scan[a-z]+ tunne[a-z]+ spectr[a-z]+)|\
+            (scan[a-z]+ prob[a-z]+ micr[a-z]+)|\
+            (MoS.+\\d+|MoS\\d+)|\
+            (MoSe.+\\d+|MoSe\\d+)|\
+            (MoTe.+\\d+|MoTe\\d+)|\
+            (WS.+\\d+|WS\\d+)|\
+            (WSe.+\\d+|WSe\\d+)|\
+            (WTe.+\\d+|WTe\\d+)|\
+            (Bi\\d+Rh\\d+I\\d+|Bi.+\\d+.+Rh.+\\d+.+I.+\\d+.+)|\
+            (BiTeI)|\
+            (BiTeBr)|\
+            (BiTeCl)|\
+            (ZrTe5|ZrTe.+5)|\
+            (Pt2HgSe3|Pt.+2HgSe.+3)|\
+            (jacuting[a-z]+)|\
+            (flatband)|\
+            (flat.{1}band)"
   fields: ["title", "summary"]
 
 # Ranking configuration
@@ -50,8 +77,8 @@ ranking:
     No markdown formatting, no explanations, no text before or after the JSON object.
   # Natural-language ranking query used for sentence-transformers similarity
   query: >
-    graphene and rhombohedral graphite research, ABC stacking, STM, scanning tunneling microscopy,
-    scanning probe, moiré, moir\'e, twisted systems, van der Waals materials
+    graphene rhombohedral graphite ABC stacking STM scanning tunneling microscopy
+    scanning probe moiré moire twisted van der Waals topology Dirac chalcogenide
 
   # Optional additional negative phrases to downweight (list may be empty)
   negative_queries: [erratum, correction, reply, corrigendum]

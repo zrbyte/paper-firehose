@@ -37,7 +37,18 @@ feeds:
   - "national-sci-rev"
 
 filter:
-  pattern: "(rhombohedr[a-z]+.*graph[a-z]+)|(ABC.*graph[a-z]+)|(ABC.*trilay[a-z]+)|(ABCA.*tetralay[a-z]+)|(ABCB.*tetralay[a-z]+)|(tetralay[a-z]+.*graph[a-z]+)|(pentalay[a-z]+.*graph[a-z]+)|(graph[a-z]+.*pentalay[a-z]+)|(hexalay[a-z]+.*graph[a-z]+)|(graph[a-z]+.*hexalay[a-z]+)|(heptalay[a-z]+.*graph[a-z]+)|(graph[a-z]+.*heptalay[a-z]+)"
+  pattern: "(rhombohedr[a-z]+.*graph[a-z]+)|\
+            (ABC.*graph[a-z]+)|\
+            (ABC.*trilay[a-z]+)|\
+            (ABCA.*tetralay[a-z]+)|\
+            (ABCB.*tetralay[a-z]+)|\
+            (tetralay[a-z]+.*graph[a-z]+)|\
+            (pentalay[a-z]+.*graph[a-z]+)|\
+            (graph[a-z]+.*pentalay[a-z]+)|\
+            (hexalay[a-z]+.*graph[a-z]+)|\
+            (graph[a-z]+.*hexalay[a-z]+)|\
+            (heptalay[a-z]+.*graph[a-z]+)|\
+            (graph[a-z]+.*heptalay[a-z]+)"
   fields: ["title", "summary"]
 
 ranking:
