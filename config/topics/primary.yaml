@@ -40,10 +40,10 @@ filter:
   pattern: "(topolog[a-z]+)|\
             (graphit[a-z]+)|\
             (rhombohedr[a-z]+)|\
+            (graph[a-z]+.*polytyp[a-z]+)|\
             (graphe[a-z]+)|\
             (ABC.+)|\
             (chalcog[a-z]+)|\
-            (landau)|\
             (weyl)|\
             (dirac)|\
             (STM)|\

@@ -35,6 +35,7 @@ feeds:
 
 filter:
   pattern: "(rhombohedr[a-z]+.*graph[a-z]+)|\
+            (graph[a-z]+.*polytyp[a-z]+)|\
             (ABC.*graph[a-z]+)|\
             (ABC.*trilay[a-z]+)|\
             (ABCA.*tetralay[a-z]+)|\
