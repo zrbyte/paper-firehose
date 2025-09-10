@@ -85,7 +85,7 @@ ranking:
 # Abstract fetch configuration
 abstract_fetch:
   enabled: true
-  rank_threshold: 0 # this overrides the global rank_threshold in config.yaml
+  rank_threshold: 0.3 # this overrides the global rank_threshold in config.yaml
 
 # Output configuration
 output:

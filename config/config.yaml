@@ -168,4 +168,4 @@ defaults:
   top_n_per_topic: 10
   ranking_enabled: true
   # Above this threshold, the abstract is fetched from Crossref
-  rank_threshold: 0.35
+  rank_threshold: 0.3
