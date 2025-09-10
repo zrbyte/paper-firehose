@@ -99,6 +99,11 @@ ranking:
   # Top N papers to return, hard cutoff after score_cutoff and percentile_cutoff
   top_n: 5
 
+# Abstract fetch configuration
+abstract_fetch:
+  enabled: true
+  rank_threshold: 0 # this overrides the global rank_threshold in config.yaml
+
 # Output configuration
 output:
   filename: "results_primary.html"

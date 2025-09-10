@@ -76,6 +76,11 @@ ranking:
   score_cutoff: 0.2
   top_n: 5
 
+# Abstract fetch configuration
+abstract_fetch:
+  enabled: true
+  rank_threshold: 0 # this overrides the global rank_threshold in config.yaml
+
 output:
   filename: "rg_filtered_articles.html"
   filename_ranked: "rg_filtered_articles_ranked.html"

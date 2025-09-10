@@ -17,6 +17,7 @@ sys.path.insert(0, src_path)
 from commands import filter as filter_cmd
 from commands import generate_html as html_cmd
 from commands import rank as rank_cmd
+from commands import abstracts as abstracts_cmd
 
 # Setup logging
 logging.basicConfig(
@@ -80,6 +81,25 @@ def rank(ctx, topic):
             click.echo("✅ Ranking completed for all topics")
     except Exception as e:
         click.echo(f"❌ Rank command failed: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command('abstracts')
+@click.option('--topic', help='Fetch abstracts for a specific topic only')
+@click.option('--mailto', default=None, help='Contact email for Crossref User-Agent (defaults to $MAILTO env or a safe fallback)')
+@click.option('--limit', type=int, help='Max number of abstracts to fetch per topic')
+@click.option('--rps', type=float, default=1.0, help='Requests per second throttle (default: 1.0)')
+@click.pass_context
+def abstracts(ctx, topic, mailto, limit, rps):
+    """Fetch abstracts from Crossref for high-ranked entries (writes to papers.db)."""
+    try:
+        abstracts_cmd.run(ctx.obj['config_path'], topic, mailto=mailto, max_per_topic=limit, rps=rps)
+        if topic:
+            click.echo(f"✅ Abstracts fetched for topic '{topic}'")
+        else:
+            click.echo("✅ Abstract fetching completed for eligible topics")
+    except Exception as e:
+        click.echo(f"❌ Abstract fetching failed: {e}", err=True)
         sys.exit(1)
 
 

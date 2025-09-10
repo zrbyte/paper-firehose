@@ -167,3 +167,5 @@ priority_journal_boost: 0.20
 defaults:
   top_n_per_topic: 10
   ranking_enabled: true
+  # Above this threshold, the abstract is fetched from Crossref
+  rank_threshold: 0.35
