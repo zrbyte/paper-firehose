@@ -89,3 +89,14 @@ Run with Python 3.11+.
 ## Next
 
 - Implement LLM summarization of filtered and ranked entries, writing into `entries.llm_summary` and updating HTML rendering.
+
+## History Viewer
+
+- `history_viewer.html` is a static browser viewer for `assets/matched_entries_history.db` (table `matched_entries`).
+- By default it auto-loads the latest history DB from GitHub:
+  - Displayed: `https://github.com/zrbyte/paper-firehose/tree/data/assets/matched_entries_history.latest.db`
+  - The viewer automatically normalizes GitHub page links to their raw content (e.g., `raw.githubusercontent.com`) before fetching.
+- You can override with a query param or local file:
+  - `history_viewer.html?db=<url>` to load a specific remote DB
+  - Use the file input or drag-and-drop a local `matched_entries_history.db`
+- The viewer uses `sql.js` (WASM SQLite) from a CDN and includes a runtime fallback. If you encounter `initSqlJs is not defined`, verify network access; for fully offline usage, vendor `sql-wasm.js` and `sql-wasm.wasm` locally and update the script path.
