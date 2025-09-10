@@ -40,24 +40,26 @@ class FeedProcessor:
         new_entries_per_feed = {}
         current_time = datetime.datetime.now()
         
-        for feed_name in feeds_to_process:
-            if feed_name not in enabled_feeds:
-                logger.warning(f"Feed '{feed_name}' not enabled, skipping")
+        for feed_key in feeds_to_process:
+            if feed_key not in enabled_feeds:
+                logger.warning(f"Feed '{feed_key}' not enabled, skipping")
                 continue
             
-            feed_config = enabled_feeds[feed_name]
+            feed_config = enabled_feeds[feed_key]
             feed_url = feed_config['url']
+            feed_display_name = feed_config.get('name', feed_key)
             
-            logger.info(f"Processing feed '{feed_name}' for topic '{topic_name}'")
+            logger.info(f"Processing feed '{feed_display_name}' for topic '{topic_name}'")
             
             try:
                 # Fetch and parse RSS feed
                 feed = feedparser.parse(feed_url)
                 if feed.bozo:
-                    logger.warning(f"Feed '{feed_name}' has parsing issues: {feed.bozo_exception}")
+                    logger.warning(f"Feed '{feed_display_name}' has parsing issues: {feed.bozo_exception}")
                 
                 feed_entries = feed.entries
-                feed_title = getattr(feed.feed, 'title', feed_name)
+                logger.debug(f"Feed '{feed_display_name}' returned {len(feed_entries)} raw entries")
+                feed_title = getattr(feed.feed, 'title', feed_display_name)
                 
                 # Add feed metadata to each entry
                 for entry in feed_entries:
@@ -89,12 +91,12 @@ class FeedProcessor:
                         new_entries.append(entry)
                         logger.debug(f"New entry found: {title[:50]}...")
                 
-                new_entries_per_feed[feed_name] = new_entries
-                logger.info(f"Found {len(new_entries)} new entries in feed '{feed_name}'")
+                new_entries_per_feed[feed_key] = new_entries
+                logger.info(f"Found {len(new_entries)} new entries in feed '{feed_display_name}'")
                 
             except Exception as e:
-                logger.error(f"Error processing feed '{feed_name}': {e}")
-                new_entries_per_feed[feed_name] = []
+                logger.error(f"Error processing feed '{feed_display_name}': {e}")
+                new_entries_per_feed[feed_key] = []
         
         return new_entries_per_feed
     
@@ -125,8 +127,9 @@ class FeedProcessor:
         matched_entries = []
         priority_journals = self.config.get_priority_journals()
         
-        for feed_name, entries in entries_per_feed.items():
-            is_priority_feed = feed_name in priority_journals
+        for feed_key, entries in entries_per_feed.items():
+            is_priority_feed = feed_key in priority_journals
+            feed_display_name = self.config.get_enabled_feeds().get(feed_key, {}).get('name', feed_key)
             
             for entry in entries:
                 entry_id = self.db.compute_entry_id(entry)
@@ -139,7 +142,7 @@ class FeedProcessor:
                 if matches_regex:
                     # Add metadata
                     entry['entry_id'] = entry_id
-                    entry['feed_name'] = feed_name
+                    entry['feed_name'] = feed_display_name
                     entry['topic'] = topic_name
                     entry['is_priority'] = is_priority_feed
                     
@@ -147,10 +150,10 @@ class FeedProcessor:
                     topic_config = self.config.load_topic_config(topic_name)
                     output_config = topic_config.get('output', {})
                     if output_config.get('archive', False):
-                        self.db.save_matched_entry(entry, feed_name, topic_name, entry_id)
+                        self.db.save_matched_entry(entry, feed_display_name, topic_name, entry_id)
                     
                     # Save to papers.db for current run processing
-                    self.db.save_current_entry(entry, feed_name, topic_name, entry_id)
+                    self.db.save_current_entry(entry, feed_display_name, topic_name, entry_id)
                     
                     matched_entries.append(entry)
                     
@@ -181,10 +184,12 @@ class FeedProcessor:
     
     def save_all_entries_to_dedup_db(self, all_entries_per_feed: Dict[str, List[Dict[str, Any]]]):
         """Save ALL processed entries to all_feed_entries.db for deduplication."""
-        for feed_name, entries in all_entries_per_feed.items():
+        enabled_feeds = self.config.get_enabled_feeds()
+        for feed_key, entries in all_entries_per_feed.items():
+            display_name = enabled_feeds.get(feed_key, {}).get('name', feed_key)
             for entry in entries:
                 entry_id = self.db.compute_entry_id(entry)
-                self.db.save_feed_entry(entry, feed_name, entry_id)
+                self.db.save_feed_entry(entry, display_name, entry_id)
         
         logger.info(f"Saved all processed entries to deduplication database")
     

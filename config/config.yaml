@@ -10,7 +10,7 @@ llm:
   
 feeds:
   cond-mat:
-    name: "arXiv Condensed Matter"
+    name: "arXiv cond-mat"
     url: "https://rss.arxiv.org/rss/cond-mat"
     enabled: true
   nature:
@@ -103,7 +103,7 @@ feeds:
     enabled: true
   nat-comm:
     name: "Nature Communications"
-    url: "https://www.nature.com/subjects/physical-sciences/ncomms.rss"
+    url: "https://www.nature.com/ncomms.rss"
     enabled: true
   comm-phys:
     name: "Communications Physics"

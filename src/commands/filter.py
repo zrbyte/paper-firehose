@@ -76,6 +76,14 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
                 
                 # Fetch feeds first (don't save to dedup DB yet)
                 entries_per_feed = feed_processor.fetch_feeds(topic_name)
+                # Debug: summarize fetched counts per feed
+                try:
+                    fetched_total = sum(len(v) for v in entries_per_feed.values())
+                    logger.info(f"Fetched {fetched_total} new entries across {len(entries_per_feed)} feeds for topic '{topic_name}'")
+                    for fk, lst in entries_per_feed.items():
+                        logger.debug(f"  Feed '{fk}' fetched {len(lst)} new entries (post-dedup)")
+                except Exception:
+                    pass
                 
                 # Collect all entries for later saving to dedup DB
                 for feed_name, entries in entries_per_feed.items():

@@ -151,22 +151,31 @@ class DatabaseManager:
         conn.close()
     
     def _init_history_db(self):
-        """Initialize the historical matches database."""
+        """Initialize the historical matches database.
+
+        Creates the `matched_entries` table if missing. If present but
+        missing required columns (abstract, doi, topics), it recreates the
+        table for testing simplicity.
+        """
         conn = sqlite3.connect(self.db_paths['history'])
         cursor = conn.cursor()
-        
-        # Check if we need to migrate from old schema
+
+        # Inspect existing table
         cursor.execute("PRAGMA table_info(matched_entries)")
-        table_info = cursor.fetchall()
-        columns = [row[1] for row in table_info]
-        
-        if 'topic' in columns and 'topics' not in columns:
-            # Migrate from old schema to new schema
-            logger.info("Migrating matched_entries table from 'topic' to 'topics' field")
-            
-            # Create new table with new schema
+        info = cursor.fetchall()
+        columns = {row[1] for row in info}
+
+        required_columns = {
+            'entry_id', 'feed_name', 'topics', 'title', 'link', 'summary',
+            'authors', 'abstract', 'doi', 'published_date', 'matched_date', 'raw_data'
+        }
+
+        need_recreate = (len(columns) == 0) or (not required_columns.issubset(columns))
+
+        if need_recreate:
+            cursor.execute('DROP TABLE IF EXISTS matched_entries')
             cursor.execute('''
-                CREATE TABLE matched_entries_new (
+                CREATE TABLE matched_entries (
                     entry_id TEXT PRIMARY KEY,
                     feed_name TEXT NOT NULL,
                     topics TEXT NOT NULL,
@@ -174,41 +183,13 @@ class DatabaseManager:
                     link TEXT NOT NULL,
                     summary TEXT,
                     authors TEXT,
+                    abstract TEXT,
+                    doi TEXT,
                     published_date TEXT,
                     matched_date TEXT DEFAULT (datetime('now')),
                     raw_data TEXT
                 )
             ''')
-            
-            # Copy data, converting topic to topics
-            cursor.execute('''
-                INSERT INTO matched_entries_new 
-                SELECT entry_id, feed_name, topic, title, link, summary, authors, 
-                       published_date, matched_date, raw_data
-                FROM matched_entries
-            ''')
-            
-            # Drop old table and rename new one
-            cursor.execute('DROP TABLE matched_entries')
-            cursor.execute('ALTER TABLE matched_entries_new RENAME TO matched_entries')
-            
-            logger.info("Migration completed successfully")
-        
-        # Create table if it doesn't exist
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS matched_entries (
-                entry_id TEXT PRIMARY KEY,
-                feed_name TEXT NOT NULL,
-                topics TEXT NOT NULL,
-                title TEXT NOT NULL,
-                link TEXT NOT NULL,
-                summary TEXT,
-                authors TEXT,
-                published_date TEXT,
-                matched_date TEXT DEFAULT (datetime('now')),
-                raw_data TEXT
-            )
-        ''')
         
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_matched_entries_topics 
@@ -232,93 +213,50 @@ class DatabaseManager:
         """Initialize the current run processing database.
 
         Uses a composite primary key on (id, topic) so the same entry can
-        exist once per topic. Includes a migration from the legacy schema
-        where `id` alone was the primary key.
+        exist once per topic.
+        Creates the `entries` table if missing. If present but missing
+        required columns (abstract, doi), it recreates the table for
+        testing simplicity.
         """
         conn = sqlite3.connect(self.db_paths['current'])
         cursor = conn.cursor()
+        
+        # Inspect existing table
+        cursor.execute("PRAGMA table_info(entries)")
+        info = cursor.fetchall()
+        columns = {row[1] for row in info}
 
-        # Detect if entries table exists and whether it uses legacy PK
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='entries'")
-        table_exists = cursor.fetchone() is not None
+        required_columns = {
+            'id', 'topic', 'feed_name', 'title', 'link', 'summary', 'authors',
+            'abstract', 'doi', 'published_date', 'discovered_date', 'status',
+            'rank_score', 'rank_reasoning', 'llm_summary', 'raw_data'
+        }
+        need_recreate = (len(columns) == 0) or (not required_columns.issubset(columns))
 
-        if table_exists:
-            # Inspect primary key columns
-            cursor.execute("PRAGMA table_info(entries)")
-            info = cursor.fetchall()  # columns: cid, name, type, notnull, dflt_value, pk
-            pk_cols = [row[1] for row in info if row[5] > 0]
-
-            # Legacy schema had only `id` as PRIMARY KEY
-            if pk_cols == ['id'] or (len(pk_cols) == 1 and pk_cols[0] == 'id'):
-                logger.info("Migrating papers.db entries table to composite PRIMARY KEY (id, topic)")
-
-                # Create new table with desired schema
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS entries_new (
-                        id TEXT NOT NULL,
-                        topic TEXT NOT NULL,
-                        feed_name TEXT NOT NULL,
-                        title TEXT NOT NULL,
-                        link TEXT NOT NULL,
-                        summary TEXT,
-                        authors TEXT,
-                        published_date TEXT,
-                        discovered_date TEXT DEFAULT (datetime('now')),
-                        status TEXT DEFAULT 'new' CHECK(status IN ('new', 'filtered', 'ranked', 'summarized')),
-                        rank_score REAL,
-                        rank_reasoning TEXT,
-                        llm_summary TEXT,
-                        raw_data TEXT,
-                        PRIMARY KEY (id, topic),
-                        UNIQUE(feed_name, topic, id)
-                    )
-                ''')
-
-                # Copy data from legacy table
-                cursor.execute('''
-                    INSERT OR REPLACE INTO entries_new
-                    (id, topic, feed_name, title, link, summary, authors, published_date,
-                     discovered_date, status, rank_score, rank_reasoning, llm_summary, raw_data)
-                    SELECT id, topic, feed_name, title, link, summary, authors, published_date,
-                           discovered_date, status, rank_score, rank_reasoning, llm_summary, raw_data
-                    FROM entries
-                ''')
-
-                # Replace old table
-                cursor.execute('DROP TABLE entries')
-                cursor.execute('ALTER TABLE entries_new RENAME TO entries')
-
-                # Recreate index
-                cursor.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_entries_topic_status 
-                    ON entries(topic, status)
-                ''')
-
-                conn.commit()
-                conn.close()
-                return
-
-        # Create table fresh (new deployments or already-migrated DBs)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS entries (
-                id TEXT NOT NULL,
-                topic TEXT NOT NULL,
-                feed_name TEXT NOT NULL,
-                title TEXT NOT NULL,
-                link TEXT NOT NULL,
-                summary TEXT,
-                authors TEXT,
-                published_date TEXT,
-                discovered_date TEXT DEFAULT (datetime('now')),
-                status TEXT DEFAULT 'new' CHECK(status IN ('new', 'filtered', 'ranked', 'summarized')),
-                rank_score REAL,
-                rank_reasoning TEXT,
-                llm_summary TEXT,
-                raw_data TEXT,
-                PRIMARY KEY (id, topic),
-                UNIQUE(feed_name, topic, id)
-            )
-        ''')
+        if need_recreate:
+            cursor.execute('DROP TABLE IF EXISTS entries')
+            cursor.execute('''
+                CREATE TABLE entries (
+                    id TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    feed_name TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    link TEXT NOT NULL,
+                    summary TEXT,
+                    authors TEXT,
+                    abstract TEXT,
+                    doi TEXT,
+                    published_date TEXT,
+                    discovered_date TEXT DEFAULT (datetime('now')),
+                    status TEXT DEFAULT 'new' CHECK(status IN ('new', 'filtered', 'ranked', 'summarized')),
+                    rank_score REAL,
+                    rank_reasoning TEXT,
+                    llm_summary TEXT,
+                    raw_data TEXT,
+                    PRIMARY KEY (id, topic),
+                    UNIQUE(feed_name, topic, id)
+                )
+            ''')
 
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_entries_topic_status 
@@ -428,18 +366,21 @@ class DatabaseManager:
             authors = self._extract_authors(entry)
             raw_data = json.dumps(entry, default=str)
             published_date = self._format_published_date(entry)
+            doi = self._extract_doi(entry)
             
             cursor.execute('''
                 INSERT INTO matched_entries 
-                (entry_id, feed_name, topics, title, link, summary, authors, 
+                (entry_id, feed_name, topics, title, link, summary, authors, abstract, doi,
                  published_date, matched_date, raw_data)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
             ''', (
                 entry_id, feed_name, topic,
                 entry.get('title', ''),
                 entry.get('link', ''),
                 entry.get('summary', entry.get('description', '')),
                 authors,
+                None,  # abstract to be populated later (Crossref)
+                doi,
                 published_date,
                 raw_data
             ))
@@ -457,18 +398,21 @@ class DatabaseManager:
         authors = self._extract_authors(entry)
         raw_data = json.dumps(entry, default=str)
         published_date = self._format_published_date(entry)
+        doi = self._extract_doi(entry)
         
         cursor.execute('''
             INSERT OR REPLACE INTO entries 
-            (id, topic, feed_name, title, link, summary, authors, 
+            (id, topic, feed_name, title, link, summary, authors, abstract, doi,
              published_date, discovered_date, status, raw_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'filtered', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'filtered', ?)
         ''', (
             entry_id, topic, feed_name,
             entry.get('title', ''),
             entry.get('link', ''),
             entry.get('summary', entry.get('description', '')),
             authors,
+            None,  # abstract to be populated later (Crossref)
+            doi,
             published_date,
             raw_data
         ))
@@ -635,6 +579,78 @@ class DatabaseManager:
         
         # Fallback to current date
         return datetime.date.today().isoformat()
+
+    def _extract_doi(self, entry: Dict[str, Any]) -> Optional[str]:
+        """Best-effort DOI extraction from common RSS fields.
+
+        Enhanced to also scan text-bearing fields often used by publishers,
+        including 'summary', 'summary_detail.value', and 'content[].value'.
+        Returns a DOI string if found, otherwise None.
+        """
+        import re
+
+        # DOI regex from Crossref guidelines (simplified)
+        doi_re = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", re.IGNORECASE)
+
+        def find_in_text(text: str | None) -> Optional[str]:
+            if not text:
+                return None
+            # Strip common prefixes like 'doi:'
+            text = str(text).strip()
+            if text.lower().startswith('doi:'):
+                text = text[4:].strip()
+            m = doi_re.search(text)
+            return m.group(0) if m else None
+
+        # Direct fields
+        for key in ['doi', 'dc_identifier', 'dc:identifier', 'dc.identifier', 'dcIdentifier', 'prism:doi', 'prism_doi', 'guid']:
+            doi = find_in_text(entry.get(key))
+            if doi:
+                return doi
+
+        # Check id and link fields
+        for key in ['id', 'link']:
+            doi = find_in_text(entry.get(key))
+            if doi:
+                return doi
+
+        # Check summary fields (plain and detailed)
+        doi = find_in_text(entry.get('summary'))
+        if doi:
+            return doi
+        summary_detail = entry.get('summary_detail') or {}
+        if isinstance(summary_detail, dict):
+            doi = find_in_text(summary_detail.get('value'))
+            if doi:
+                return doi
+        # Some feeds use 'description' instead of 'summary'
+        doi = find_in_text(entry.get('description'))
+        if doi:
+            return doi
+
+        # Check content list for embedded DOI text
+        contents = entry.get('content') or []
+        if isinstance(contents, list):
+            for c in contents:
+                if isinstance(c, dict):
+                    doi = find_in_text(c.get('value') or c.get('content'))
+                    if doi:
+                        return doi
+
+        # Check links array for hrefs
+        links = entry.get('links') or []
+        if isinstance(links, list):
+            for l in links:
+                href = None
+                if isinstance(l, dict):
+                    href = l.get('href')
+                else:
+                    href = str(l)
+                doi = find_in_text(href)
+                if doi:
+                    return doi
+
+        return None
     
     def close_all_connections(self):
         """Close any open database connections (placeholder for connection pooling)."""
