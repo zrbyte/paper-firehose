@@ -24,6 +24,7 @@ from typing import Optional, List, Dict, Any
 from core.config import ConfigManager
 from core.database import DatabaseManager
 from processors.st_ranker import STRanker
+from processors.html_generator import HTMLGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,20 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
                 logger.error("Failed to update rank for %s/%s: %s", eid[:8], tname, e)
 
         logger.info("Topic '%s': wrote rank_score for %d entries", topic_name, updated)
+
+        # After scoring, render ranked HTML (highest score first)
+        try:
+            output_cfg = (tcfg.get("output") or {}) if isinstance(tcfg, dict) else {}
+            ranked_filename = output_cfg.get("filename_ranked") or f"results_{topic_name}_ranked.html"
+            heading = (tcfg.get("name") or topic_name) if isinstance(tcfg, dict) else topic_name
+
+            # Use dedicated ranked template if present; fallback to default
+            ranked_template = "ranked_template.html"
+            html_gen = HTMLGenerator(template_path=ranked_template)
+            html_gen.generate_ranked_html_from_database(db, topic_name, ranked_filename, heading)
+            logger.info("Topic '%s': generated ranked HTML -> %s", topic_name, ranked_filename)
+        except Exception as e:
+            logger.error("Topic '%s': failed to generate ranked HTML: %s", topic_name, e)
 
     db.close_all_connections()
     logger.info("Rank command completed")

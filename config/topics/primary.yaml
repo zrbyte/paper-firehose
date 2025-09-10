@@ -1,4 +1,4 @@
-name: "Primary Research"
+name: "vdW materials & co"
 description: "Topological materials, graphene, and condensed matter physics"
 
 # Which feeds to process for this topic
@@ -68,5 +68,6 @@ ranking:
 # Output configuration
 output:
   filename: "results_primary.html"
+  filename_ranked: "results_primary_ranked.html"
   template: "topic_summary.html"
   archive: true # archive the output file to the "matched_entries_history.db" database

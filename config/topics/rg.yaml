@@ -65,4 +65,5 @@ ranking:
 
 output:
   filename: "rg_filtered_articles.html"
+  filename_ranked: "rg_filtered_articles_ranked.html"
   archive: true

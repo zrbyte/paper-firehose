@@ -61,6 +61,16 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
             )
 
             logger.info(f"Generated HTML for topic '{topic_name}': {output_filename}")
+
+            # Always generate ranked HTML from current DB state to avoid stale files
+            try:
+                ranked_filename = output_config.get('filename_ranked') or f'results_{topic_name}_ranked.html'
+                ranked_template = 'ranked_template.html'
+                ranked_gen = HTMLGenerator(template_path=ranked_template)
+                ranked_gen.generate_ranked_html_from_database(db_manager, topic_name, ranked_filename, heading)
+                logger.info(f"Generated ranked HTML for topic '{topic_name}': {ranked_filename}")
+            except Exception as e:
+                logger.error(f"Failed to generate ranked HTML for topic '{topic_name}': {e}")
         except Exception as e:
             logger.error(f"Error generating HTML for topic '{topic_name}': {e}")
             continue

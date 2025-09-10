@@ -1,5 +1,5 @@
-name: "Primary Research"
-description: "Topological materials, graphene, and condensed matter physics"
+name: "Perovskites"
+description: "Perovskite solar cells, photoelectrochemistry, stability and efficiency advances"
 
 # Which feeds to process for this topic
 feeds:
@@ -69,5 +69,6 @@ ranking:
 # Output configuration
 output:
   filename: "results_perovskites.html"
+  filename_ranked: "results_perovskites_ranked.html"
   template: "perovskites_summary.html"
   archive: true # archive the output file to the "matched_entries_history.db" database

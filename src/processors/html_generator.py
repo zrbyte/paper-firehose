@@ -86,6 +86,58 @@ class HTMLGenerator:
             f.write(updated_html)
         
         logger.info(f"Generated fresh HTML file from database: {output_path}")
+
+    def generate_ranked_html_from_database(self, db_manager, topic_name: str, output_path: str, heading: str = None) -> None:
+        """
+        Generate an HTML file with entries sorted by descending rank_score for a topic.
+
+        Displays the rank score truncated to two decimals next to each entry.
+        """
+        display_title = heading or f"Ranked Articles - {topic_name}"
+        self._create_new_html_file(output_path, display_title, display_title)
+
+        # Load entries from DB and sort by rank_score desc (only those with a score)
+        entries = db_manager.get_current_entries(topic=topic_name)
+        ranked = [e for e in entries if e.get('rank_score') is not None]
+        ranked.sort(key=lambda e: (e.get('rank_score') or 0.0), reverse=True)
+
+        # Build ranked entries HTML
+        html_parts: List[str] = []
+        if not ranked:
+            html_parts.append('<p class="no-entries">No ranked entries available.</p>')
+        else:
+            html_parts.append('<h2>Ranked Entries</h2>')
+            for idx, e in enumerate(ranked, 1):
+                title = self.process_text(e.get('title', 'No title'))
+                link = e.get('link', '#')
+                authors = self.process_text(e.get('authors', ''))
+                published = e.get('published_date', '')
+                summary = self.process_text(e.get('summary', ''))
+                score = float(e.get('rank_score') or 0.0)
+                # Truncate to two decimals (not round)
+                score_trunc = int(score * 100) / 100.0
+                score_str = f"{score_trunc:.2f}"
+                html_parts.append(
+                    (
+                        '<div class="entry">\n'
+                        f'  <h3><a href="{link}">{title}</a> <span class="badge">Score {score_str}</span></h3>\n'
+                        f'  <p><strong>Authors:</strong> {authors}</p>\n'
+                        f'  <p><em>Published: {published}</em></p>\n'
+                        f'  <p>{summary}</p>\n'
+                        '</div>\n<hr>'
+                    )
+                )
+
+        # Insert into template
+        with open(output_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        insert_position = html_content.rfind('</body>')
+        if insert_position == -1:
+            insert_position = len(html_content)
+        updated_html = html_content[:insert_position] + '\n'.join(html_parts) + html_content[insert_position:]
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(updated_html)
+        logger.info(f"Generated ranked HTML file from database: {output_path}")
     
     # Note: legacy `generate_html` method removed; the system now renders
     # exclusively from papers.db via `generate_html_from_database`.

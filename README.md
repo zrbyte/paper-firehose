@@ -339,10 +339,14 @@ python cli/main.py rank               # rank all topics
 python cli/main.py rank --topic primary
 ```
 
+Output:
+- For each topic, writes per-entry `rank_score` into `papers.db`.
+- Also generates a ranked HTML page (highest score first). The output filename is taken from the topic YAML under `output.filename_ranked` (falls back to `results_<topic>_ranked.html`).
+
 Notes:
 - Install `sentence-transformers` to enable scoring: `pip install sentence-transformers`.
 - If the model cannot be loaded, the command logs a warning and skips scoring gracefully.
-- The command writes scores only to the DB.
+ - The command writes scores only to the DB.
 
   
 
@@ -362,6 +366,26 @@ Notes:
 
 The system now features an improved HTML generation system that works directly from the database:
   
+### CLI Overview (Filter, Rank, HTML)
+
+- Filter: `python cli/main.py filter [--topic <name>]`
+  - Backs up important DBs, clears `assets/papers.db` (current run), fetches feeds and applies regex filters per topic.
+  - Writes matched entries into `papers.db` with `status='filtered'` and updates dedup/history DBs.
+  - Regenerates both the standard topic HTML and the ranked HTML for all topics from the current DB state.
+
+- Rank: `python cli/main.py rank [--topic <name>]`
+  - Reads each topic's `ranking.query` (and optional `ranking.model`) from `config/topics/*.yaml`.
+  - Computes Sentence-Transformers cosine similarity and writes per-entry `rank_score` into `papers.db` (no status change).
+  - Generates a ranked HTML per topic, ordered by highest score first, showing scores truncated to two decimals.
+  - Ranked output filename comes from `output.filename_ranked` in the topic YAML; falls back to `results_<topic>_ranked.html`.
+
+- HTML: `python cli/main.py html [--topic <name>]`
+  - Renders HTML directly from `papers.db` without fetching.
+  - Produces the standard topic HTML (`output.filename`) and a ranked page (`output.filename_ranked`).
+  - Ranked pages are always regenerated from the current DB; if no scores exist they display “No ranked entries available.”
+  
+Requirements: install `sentence-transformers` to enable ranking: `pip install sentence-transformers`.
+
 
 ### **Usage Examples**
 
