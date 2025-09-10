@@ -17,8 +17,6 @@ Focus: add LLM summarization, keep pipeline minimal and robust.
 
 ## Near term
 - LLM summarization
-  - Entries from specified authors are given a rank of 1.
-  - Entries from priority journals are given a rank of 1.
   - Add processor to generate concise expert summaries per entry.
   - Persist to `papers.db.entries.llm_summary`.
   - New CLI: `python cli/main.py summarize [--topic TOPIC]` (or integrate into the filter/rank flow with a flag).
