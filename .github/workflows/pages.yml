@@ -42,13 +42,36 @@ jobs:
             all-feed-entries-db-
 
       # Cache the matched_entries_history.db to persist historical matches between runs
-      - name: Restore history database cache
-        uses: actions/cache@v3
-        with:
-          path: assets/matched_entries_history.db
-          key: matched-entries-history-db-${{ github.ref_name }}
-          restore-keys: |
-            matched-entries-history-db-
+      # TEMPORARILY DISABLED - will re-enable after bootstrap run
+      # - name: Restore history database cache
+      #   uses: actions/cache@v3
+      #   with:
+      #     path: assets/matched_entries_history.db
+      #     key: matched-entries-history-db-${{ github.ref_name }}
+      #     restore-keys: |
+      #       matched-entries-history-db-
+
+      # Debug database state (BOOTSTRAP MODE - using main branch database)
+      - name: Debug database state
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          
+          echo "=== BOOTSTRAP MODE: Using Main Branch Database ==="
+          echo "Current working directory: $(pwd)"
+          echo "Assets directory contents:"
+          ls -la assets/ || echo "Assets directory does not exist"
+          
+          if [ -f "assets/matched_entries_history.db" ]; then
+            echo "✅ Found matched_entries_history.db from main branch"
+            echo "File size: $(ls -lh assets/matched_entries_history.db | awk '{print $5}')"
+            echo "File date: $(ls -l assets/matched_entries_history.db | awk '{print $6, $7, $8}')"
+            echo "Database source: MAIN BRANCH (cache disabled for bootstrap)"
+          else
+            echo "❌ No matched_entries_history.db found in main branch"
+          fi
+          
+          echo "=== End Bootstrap Debug ==="
 
       # Ensure assets dir exists and initialize DBs if cache did not restore them
       - name: Ensure assets dir & init DBs if missing
@@ -135,6 +158,26 @@ jobs:
           conda run -n paper-firehose-p311 python cli/main.py summarize
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      # Save updated databases to cache for next run (BOOTSTRAP MODE)
+      - name: Save updated databases to cache
+        run: |
+          set -euo pipefail
+          
+          echo "=== BOOTSTRAP RUN: Preparing for cache population ==="
+          
+          # Only all_feed_entries.db will be cached (history cache is disabled)
+          if [ -f "assets/all_feed_entries.db" ]; then
+            echo "✅ Updated all_feed_entries.db will be cached for next run"
+            ls -lh assets/all_feed_entries.db
+          fi
+          
+          if [ -f "assets/matched_entries_history.db" ]; then
+            echo "ℹ️  Updated matched_entries_history.db (cache disabled - will be enabled after this run)"
+            ls -lh assets/matched_entries_history.db
+          fi
+          
+          echo "=== After this run, re-enable history database caching ==="
 
       # DATABASE SNAPSHOTTING STEP
       - name: Snapshot DBs to data branch with retention (worktree)
