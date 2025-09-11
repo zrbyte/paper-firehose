@@ -62,20 +62,11 @@ jobs:
           
           echo "=== Database loading complete ==="
 
-      - uses: conda-incubator/setup-miniconda@v3
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          use-only-tar-bz2: true
 
-      - run: conda create -n paper-firehose-p311 python=3.11 -y
-      - run: conda install -c conda-forge pip -y
-      - run: conda run -n paper-firehose-p311 pip install -r requirements.txt
-
-      # Activate conda environment for the pipeline
-      - name: Activate conda environment
-        run: |
-          echo "source /usr/share/miniconda/etc/profile.d/conda.sh" >> $GITHUB_ENV
-          echo "conda activate paper-firehose-p311" >> $GITHUB_ENV
+      - run: pip install -r requirements.txt
 
       # Run the paper firehose pipeline
       - name: Run paper firehose pipeline
@@ -95,7 +86,7 @@ jobs:
           echo "Pre-pipeline database check:"
           ls -la assets/*.db 2>/dev/null || echo "No database files found"
           
-          # Run the complete pipeline (no timeouts needed - commands should complete normally)
+          # Run the complete pipeline
           echo "Step 1: Running filter command..."
           python cli/main.py filter
           
