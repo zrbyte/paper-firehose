@@ -13,4 +13,5 @@ archive/
 *.env
 .DS_Store
 assets/*  # ignore all files in assets dir. Actions will commit the DB files to GitHub. Will not be downloaded so as to not create conflicts with test runs.
-paperqa_downloads/*
+models/*
+.cursor/rules/python-environment.mdc
