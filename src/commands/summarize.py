@@ -133,7 +133,7 @@ def _call_gpt5_direct(api_key: str, model: str, system: str, user_text: str, cha
             data = response.json()
             content = data["choices"][0]["message"]["content"]
             if content:
-                return content[:char_limit]
+                return content
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
@@ -148,7 +148,7 @@ def _call_gpt5_direct(api_key: str, model: str, system: str, user_text: str, cha
             data = response.json()
             content = data["choices"][0]["message"]["content"]
             if content:
-                return content[:char_limit]
+                return content
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
@@ -208,7 +208,7 @@ def _call_openai(api_key: str, models: List[str], prompt: str, title: str, abstr
                 )
                 content = (resp.choices[0].message.content or "").strip()
                 if content:
-                    return content[:char_limit]
+                    return content
             except Exception as e_json:
                 es = str(e_json).lower()
                 # If JSON format unsupported -> try plain text
@@ -288,6 +288,14 @@ def run(config_path: str, topic: Optional[str] = None, *, rps: Optional[float] =
         if not prompt:
             logger.info("Topic '%s': no llm_summary.prompt; skipping", t)
             continue
+        
+        # Get ranking query to inject into prompt
+        ranking_cfg = (tcfg.get('ranking') or {})
+        ranking_query = ranking_cfg.get('query', '').strip()
+        
+        # Replace placeholder in prompt with actual ranking query
+        if ranking_query and '{ranking_query}' in prompt:
+            prompt = prompt.replace('{ranking_query}', ranking_query)
 
         candidates = _iter_candidates(db, t, score_cutoff, top_n)
         if not candidates:
@@ -307,8 +315,7 @@ def run(config_path: str, topic: Optional[str] = None, *, rps: Optional[float] =
             time.sleep(min_interval)
             if not summary:
                 continue
-            # Enforce hard cap
-            summary = summary[:char_limit]
+            # Note: Removed hard truncation to preserve JSON structure integrity
 
             # Write to current DB and history DB (best-effort for history)
             import sqlite3
@@ -332,6 +339,32 @@ def run(config_path: str, topic: Optional[str] = None, *, rps: Optional[float] =
                 continue
         total_updated += updated
         logger.info("Topic '%s': wrote llm_summary for %d entries", t, updated)
+
+    # Generate summarized HTML for each topic that has summaries
+    if total_updated > 0:
+        try:
+            from processors.html_generator import HTMLGenerator
+            html_gen = HTMLGenerator(template_path="llmsummary_template.html")
+            
+            for t in topics:
+                try:
+                    tcfg = cfg_mgr.load_topic_config(t)
+                    output_config = tcfg.get('output', {})
+                    summary_filename = output_config.get('filename_summary')
+                    
+                    if summary_filename:
+                        # Check if this topic has any summaries
+                        topic_entries = db.get_current_entries(topic=t)
+                        has_summaries = any(e.get('llm_summary') and e.get('llm_summary').strip() for e in topic_entries)
+                        
+                        if has_summaries:
+                            topic_name = tcfg.get('name', t)
+                            html_gen.generate_summarized_html_from_database(db, t, summary_filename, f"LLM Summaries - {topic_name}")
+                            logger.info("Generated summarized HTML for topic '%s': %s", t, summary_filename)
+                except Exception as e:
+                    logger.error("Failed to generate summarized HTML for topic '%s': %s", t, e)
+        except Exception as e:
+            logger.error("Failed to generate summarized HTML: %s", e)
 
     db.close_all_connections()
     logger.info("LLM summarization completed; total updated=%d", total_updated)

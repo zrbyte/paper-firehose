@@ -139,6 +139,156 @@ class HTMLGenerator:
             f.write(updated_html)
         logger.info(f"Generated ranked HTML file from database: {output_path}")
     
+    def generate_summarized_html_from_database(self, db_manager, topic_name: str, output_path: str, title: str = None) -> None:
+        """
+        Generate an HTML file with entries that have LLM summaries for a specific topic.
+        
+        Shows entry title (as link), authors, LLM summary, and original abstract in dropdown.
+        """
+        if title is None:
+            title = f"LLM Summaries - {topic_name}"
+        
+        self._create_new_html_file(output_path, title)
+        
+        # Get entries with non-empty llm_summary for this specific topic
+        entries = db_manager.get_current_entries(topic=topic_name)
+        summarized_entries = [e for e in entries if e.get('llm_summary') and e.get('llm_summary').strip()]
+        
+        if not summarized_entries:
+            html_parts = ['<p class="no-entries">No LLM summaries available for this topic.</p>']
+        else:
+            # Sort entries by rank_score in descending order (highest scores first)
+            summarized_entries.sort(key=lambda e: (e.get('rank_score') or 0.0), reverse=True)
+            
+            html_parts = []
+            html_parts.append(f'<div class="entry-count">{len(summarized_entries)} summarized entries (sorted by rank score)</div>')
+            
+            # Entries for this topic
+            for idx, entry in enumerate(summarized_entries):
+                title_text = self.process_text(entry.get('title', 'No title'))
+                link = entry.get('link', '#')
+                authors = self.process_text(entry.get('authors', ''))
+                published = entry.get('published_date', '')
+                llm_summary_raw = entry.get('llm_summary', '')
+                abstract = self.process_text(entry.get('abstract', ''))
+                rank_score = entry.get('rank_score')
+                
+                # Create unique ID for dropdown
+                dropdown_id = f"abstract_{topic_name}_{idx}".replace(' ', '_').replace('-', '_')
+                
+                # Format rank score if available
+                score_badge = ""
+                if rank_score is not None:
+                    score = float(rank_score)
+                    # Truncate to two decimals (not round)
+                    score_trunc = int(score * 100) / 100.0
+                    score_str = f"{score_trunc:.2f}"
+                    score_badge = f' <span class="badge">Score {score_str}</span>'
+                
+                # Parse LLM summary JSON if possible, otherwise display as plain text
+                llm_summary_html = self._format_llm_summary(llm_summary_raw)
+                
+                entry_html = f'''
+<div class="entry">
+    <div class="entry-title">
+        <h3><a href="{link}" target="_blank">{title_text}</a>{score_badge}</h3>
+    </div>
+    <div class="entry-authors"><strong>Authors:</strong> {authors}</div>
+    <div class="entry-published"><em>Published:</em> {published}</div>
+    <div class="llm-summary">
+        {llm_summary_html}
+    </div>'''
+                
+                if abstract:
+                    entry_html += f'''
+    <div class="abstract-toggle">
+        <button onclick="toggleAbstract('{dropdown_id}')">Show/Hide Original Abstract</button>
+    </div>
+    <div id="{dropdown_id}" class="abstract-content">
+        <strong>Original Abstract:</strong><br>
+        {abstract}
+    </div>'''
+                
+                entry_html += '</div>'
+                html_parts.append(entry_html)
+        
+        # Add JavaScript for dropdown functionality
+        js_script = '''
+<script>
+function toggleAbstract(id) {
+    var element = document.getElementById(id);
+    element.classList.toggle('show');
+}
+</script>'''
+        
+        # Insert content into template
+        with open(output_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        # Find insertion point (before </body>)
+        insert_position = html_content.rfind('</body>')
+        if insert_position == -1:
+            insert_position = len(html_content)
+        
+        # Insert entries content and JavaScript
+        updated_html = (
+            html_content[:insert_position]
+            + '\n'.join(html_parts)
+            + js_script
+            + html_content[insert_position:]
+        )
+        
+        # Write the complete content
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(updated_html)
+        
+        logger.info(f"Generated summarized HTML file for topic '{topic_name}': {output_path}")
+    
+    def _format_llm_summary(self, llm_summary_raw: str) -> str:
+        """
+        Parse LLM summary JSON and format it with proper subheadings.
+        Falls back to plain text if JSON parsing fails.
+        """
+        if not llm_summary_raw:
+            return '<p class="no-summary">No summary available.</p>'
+        
+        try:
+            import json
+            # Try to parse as JSON
+            summary_data = json.loads(llm_summary_raw)
+            
+            # Extract fields with fallbacks
+            summary_text = summary_data.get('summary', 'No summary provided')
+            topical_relevance = summary_data.get('topical_relevance', 'No relevance assessment provided')
+            novelty_impact = summary_data.get('novelty_impact', 'No impact assessment provided')
+            
+            # Process text to escape HTML
+            summary_text = self.process_text(summary_text)
+            topical_relevance = self.process_text(topical_relevance)
+            novelty_impact = self.process_text(novelty_impact)
+            
+            # Format with subheadings
+            return f'''
+        <div class="summary-section">
+            <h4>Summary</h4>
+            <p>{summary_text}</p>
+        </div>
+        <div class="summary-section">
+            <h4>Topical Relevance</h4>
+            <p>{topical_relevance}</p>
+        </div>
+        <div class="summary-section">
+            <h4>Novelty & Impact</h4>
+            <p>{novelty_impact}</p>
+        </div>'''
+            
+        except (json.JSONDecodeError, TypeError, AttributeError) as e:
+            # Debug: log the error and first 200 chars of the raw text
+            logger.debug(f"JSON parsing failed: {e}. Raw text (first 200 chars): {llm_summary_raw[:200]}")
+            # Fall back to plain text if JSON parsing fails
+            processed_text = self.process_text(llm_summary_raw)
+            return f'<p><strong>LLM Summary:</strong><br>{processed_text}</p>'
+    
     # Note: legacy `generate_html` method removed; the system now renders
     # exclusively from papers.db via `generate_html_from_database`.
     

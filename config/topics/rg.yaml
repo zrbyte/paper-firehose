@@ -73,11 +73,21 @@ abstract_fetch:
 # LLM summary configuration
 llm_summary:
   enabled: true
-  prompt: >
+  prompt: > # Uses ranking_query from the ranking configuration to assess topical relevance
     You are a world-class condensed-matter researcher with deep expertise in rhombohedral graphite
     (ABC-stacked graphene multilayers) and related STM/transport phenomena. 
     Prioritize entries that directly concern ABC/rhombohedral stacking, few-layer graphene
     with rhombohedral domains, or unambiguous experimental/theory advances in this subfield.
+    Be concise and expert-focused. Keep text concise and information-dense.
+    Avoid using superlatives and other over-the-top language.
+    CRITICAL: Return ONLY valid JSON with the exact structure specified.
+    No markdown formatting, no explanations, no text before or after the JSON object.
+    Required JSON structure:
+    {
+      "summary": "Brief technical summary of the paper",
+      "topical_relevance": "Assessment of relevance to: {ranking_query}, in one sentence",
+      "novelty_impact": "Evaluation of novelty and potential impact"
+    }
   # Cutoffs: strongest cutoff applies (the one returning the fewest entries)
   # - score_cutoff: minimum cosine similarity (0.0–1.0)
   score_cutoff: 0.3
