@@ -39,128 +39,141 @@ jobs:
           path: assets/all_feed_entries.db
           key: all-feed-entries-db-${{ github.ref_name }}
           restore-keys: |
-            all-feed-entries-db-                # Fallback to most recent cache
+            all-feed-entries-db-
 
-      # Create assets dir & download latest all_feed_entries.db from data branch if missing
-      - name: Ensure assets dir & restore latest all_feed_entries.db
+      # Ensure assets dir exists and initialize DB if cache did not restore it
+      - name: Ensure assets dir & init DB if missing
         run: |
           set -euo pipefail
           mkdir -p assets
           
-          # If all_feed_entries.db doesn't exist, try to download from data branch
+          # If DB not present from cache, create an empty one with minimal schema
           if [ ! -f "assets/all_feed_entries.db" ]; then
-            echo "all_feed_entries.db not found, attempting to download from data branch..."
-            if git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
-              # Try to download the latest all_feed_entries.db from data branch
-              curl -s -L "https://raw.githubusercontent.com/${{ github.repository }}/data/assets/all_feed_entries.latest.db" -o "assets/all_feed_entries.db" || true
-            fi
-            
-            # If still doesn't exist, create empty DB
-            if [ ! -f "assets/all_feed_entries.db" ]; then
-              echo "Creating new empty all_feed_entries.db"
-              python -c "import sqlite3, os; p = 'assets/all_feed_entries.db'; con = sqlite3.connect(p); con.execute('PRAGMA user_version=1;'); con.close()"
-            fi
-          fi
+            echo "Cache miss: initializing assets/all_feed_entries.db"
+            python - <<'PY'
+          import sqlite3
+          import os
+          p = 'assets/all_feed_entries.db'
+          os.makedirs(os.path.dirname(p), exist_ok=True)
+          con = sqlite3.connect(p)
+          con.execute('''
+          CREATE TABLE IF NOT EXISTS feed_entries (
+            entry_id TEXT PRIMARY KEY,
+            feed_name TEXT NOT NULL,
+            title TEXT NOT NULL,
+            link TEXT NOT NULL,
+            summary TEXT,
+            authors TEXT,
+            published_date TEXT,
+            first_seen TEXT,
+            last_seen TEXT,
+            raw_data TEXT
+          )''')
+          con.commit()
+          con.close()
+          print('Initialized new all_feed_entries.db')
+          PY
+                    fi
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+                - uses: actions/setup-python@v5
+                  with:
+                    python-version: '3.11'
 
-      - run: pip install -r requirements.txt
+                - run: pip install -r requirements.txt
 
-      # Run the new CLI system instead of old rssparser.py
-      - name: Run paper firehose pipeline
-        run: |
-          # Run the complete pipeline
-          python cli/main.py filter
-          python cli/main.py rank
-          python cli/main.py abstracts --mailto "github-actions@paper-firehose.com"
-          python cli/main.py summarize
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+                # Run the new CLI system instead of old rssparser.py
+                - name: Run paper firehose pipeline
+                  run: |
+                    # Run the complete pipeline
+                    python cli/main.py filter
+                    python cli/main.py rank
+                    python cli/main.py abstracts --mailto "github-actions@paper-firehose.com"
+                    python cli/main.py summarize
+                  env:
+                    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      # DATABASE SNAPSHOTTING STEP
-      - name: Snapshot DBs to data branch with retention (worktree)
-        env:
-          KEEP_SNAPSHOTS: "10"
-          SNAP_DIR: "assets/db_history"
-          DB_HISTORY: "assets/matched_entries_history.db"
-          DB_SEEN: "assets/all_feed_entries.db"
-          DB_CURRENT: "assets/papers.db"
-        run: |
-          set -euo pipefail
+                # DATABASE SNAPSHOTTING STEP
+                - name: Snapshot DBs to data branch with retention (worktree)
+                  env:
+                    KEEP_SNAPSHOTS: "10"
+                    SNAP_DIR: "assets/db_history"
+                    DB_HISTORY: "assets/matched_entries_history.db"
+                    DB_SEEN: "assets/all_feed_entries.db"
+                    DB_CURRENT: "assets/papers.db"
+                  run: |
+                    set -euo pipefail
 
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin --prune
+                    git config user.name  "github-actions[bot]"
+                    git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                    git fetch origin --prune
 
-          # Ensure remote data branch exists; create from current HEAD if missing
-          if ! git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
-            git branch -f data HEAD
-            git push -u origin data || true
-          fi
+                    # Ensure remote data branch exists; create from current HEAD if missing
+                    if ! git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
+                      git branch -f data HEAD
+                      git push -u origin data || true
+                    fi
 
-          # Worktree on data branch (create/reset local branch to origin/data)
-          WT=/tmp/data-wt
-          mkdir -p "$WT"
-          git worktree add -B data "$WT" origin/data
-          cleanup() { git worktree remove -f "$WT" || true; }
-          trap cleanup EXIT
+                    # Worktree on data branch (create/reset local branch to origin/data)
+                    WT=/tmp/data-wt
+                    mkdir -p "$WT"
+                    git worktree add -B data "$WT" origin/data
+                    cleanup() { git worktree remove -f "$WT" || true; }
+                    trap cleanup EXIT
 
-          pushd "$WT" >/dev/null
-            mkdir -p "$SNAP_DIR" assets
-            TS="$(date -u +%Y%m%dT%H%M%SZ)"
+                    pushd "$WT" >/dev/null
+                      mkdir -p "$SNAP_DIR" assets
+                      TS="$(date -u +%Y%m%dT%H%M%SZ)"
 
-            snapshot_one() {
-              local src="$1"; local stem="$2"
-              if [ -f "$GITHUB_WORKSPACE/$src" ]; then
-                local snap="$SNAP_DIR/${stem}_${TS}.db"
-                cp "$GITHUB_WORKSPACE/$src" "$snap"
-                cp "$GITHUB_WORKSPACE/$src" "assets/${stem}.latest.db"
-                git add -f "$snap" "assets/${stem}.latest.db"
-              else
-                echo "Skip: $src not found"
-              fi
-            }
+                      snapshot_one() {
+                        local src="$1"; local stem="$2"
+                        if [ -f "$GITHUB_WORKSPACE/$src" ]; then
+                          local snap="$SNAP_DIR/${stem}_${TS}.db"
+                          cp "$GITHUB_WORKSPACE/$src" "$snap"
+                          cp "$GITHUB_WORKSPACE/$src" "assets/${stem}.latest.db"
+                          git add -f "$snap" "assets/${stem}.latest.db"
+                        else
+                          echo "Skip: $src not found"
+                        fi
+                      }
 
-            # All three DBs
-            snapshot_one "$DB_HISTORY" "matched_entries_history"
-            snapshot_one "$DB_SEEN" "all_feed_entries"
-            snapshot_one "$DB_CURRENT" "papers"
+                      # All three DBs
+                      snapshot_one "$DB_HISTORY" "matched_entries_history"
+                      snapshot_one "$DB_SEEN" "all_feed_entries"
+                      snapshot_one "$DB_CURRENT" "papers"
 
-            # Retention per DB
-            retain() {
-              local stem="$1"
-              mapfile -t FILES < <(ls -1t "$SNAP_DIR"/${stem}_*.db 2>/dev/null || true)
-              if [ "${#FILES[@]}" -gt "${KEEP_SNAPSHOTS}" ]; then
-                for f in "${FILES[@]:${KEEP_SNAPSHOTS}}"; do rm -f "$f"; done
-              fi
-            }
-            retain "matched_entries_history"
-            retain "all_feed_entries"
-            retain "papers"
+                      # Retention per DB
+                      retain() {
+                        local stem="$1"
+                        mapfile -t FILES < <(ls -1t "$SNAP_DIR"/${stem}_*.db 2>/dev/null || true)
+                        if [ "${#FILES[@]}" -gt "${KEEP_SNAPSHOTS}" ]; then
+                          for f in "${FILES[@]:${KEEP_SNAPSHOTS}}"; do rm -f "$f"; done
+                        fi
+                      }
+                      retain "matched_entries_history"
+                      retain "all_feed_entries"
+                      retain "papers"
 
-            # Stage deletions from retention
-            git add -A "$SNAP_DIR" || true
+                      # Stage deletions from retention
+                      git add -A "$SNAP_DIR" || true
 
-            if ! git diff --cached --quiet; then
-              git commit -m "Snapshot DBs @ ${TS} [skip ci]"
-              git push origin data
-            else
-              echo "No changes to commit."
-            fi
-          popd >/dev/null
+                      if ! git diff --cached --quiet; then
+                        git commit -m "Snapshot DBs @ ${TS} [skip ci]"
+                        git push origin data
+                      else
+                        echo "No changes to commit."
+                      fi
+                    popd >/dev/null
 
-      # Prepare files for GitHub Pages deployment
-      - name: Prepare site
-        run: |
-          mkdir site
-          cp -r archive site/ || true
-          cp *.html site/ || true
+                # Prepare files for GitHub Pages deployment
+                - name: Prepare site
+                  run: |
+                    mkdir site
+                    cp -r archive site/ || true
+                    cp *.html site/ || true
 
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./site
+                - uses: actions/upload-pages-artifact@v3
+                  with:
+                    path: ./site
 
   deploy:
     needs: build
