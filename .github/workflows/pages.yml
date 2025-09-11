@@ -32,87 +32,35 @@ jobs:
           restore-keys: |
             huggingface-models-
 
-      # Cache the all_feed_entries.db to persist article tracking between runs
-      - name: Restore database cache
-        uses: actions/cache@v3
-        with:
-          path: assets/all_feed_entries.db
-          key: all-feed-entries-db-${{ github.ref_name }}
-          restore-keys: |
-            all-feed-entries-db-
-
-      # Cache the matched_entries_history.db to persist historical matches between runs
-      # TEMPORARILY DISABLED - will re-enable after bootstrap run
-      # - name: Restore history database cache
-      #   uses: actions/cache@v3
-      #   with:
-      #     path: assets/matched_entries_history.db
-      #     key: matched-entries-history-db-${{ github.ref_name }}
-      #     restore-keys: |
-      #       matched-entries-history-db-
-
-      # Debug database state (BOOTSTRAP MODE - using main branch database)
-      - name: Debug database state
+      # Load databases from data branch
+      - name: Load databases from data branch
         run: |
           set -euo pipefail
           mkdir -p assets
           
-          echo "=== BOOTSTRAP MODE: Using Main Branch Database ==="
-          echo "Current working directory: $(pwd)"
-          echo "Assets directory contents:"
-          ls -la assets/ || echo "Assets directory does not exist"
+          echo "=== Loading databases from data branch ==="
+          echo "Current branch: $(git branch --show-current)"
           
-          if [ -f "assets/matched_entries_history.db" ]; then
-            echo "✅ Found matched_entries_history.db from main branch"
-            echo "File size: $(ls -lh assets/matched_entries_history.db | awk '{print $5}')"
-            echo "File date: $(ls -l assets/matched_entries_history.db | awk '{print $6, $7, $8}')"
-            echo "Database source: MAIN BRANCH (cache disabled for bootstrap)"
+          # Fetch the data branch
+          git fetch origin data
+          
+          # Load all_feed_entries.db from data branch
+          if git show origin/data:assets/all_feed_entries.latest.db > assets/all_feed_entries.db 2>/dev/null; then
+            echo "✅ Loaded all_feed_entries.db from data branch"
+            ls -lh assets/all_feed_entries.db
           else
-            echo "❌ No matched_entries_history.db found in main branch"
+            echo "ℹ️  No all_feed_entries.db found in data branch, will initialize fresh"
           fi
           
-          echo "=== End Bootstrap Debug ==="
-
-      # Ensure assets dir exists and initialize DBs if cache did not restore them
-      - name: Ensure assets dir & init DBs if missing
-        run: |
-          set -euo pipefail
-          mkdir -p assets
-          
-          # If all_feed_entries.db not present from cache, create an empty one with minimal schema
-          if [ ! -f "assets/all_feed_entries.db" ]; then
-            echo "Cache miss: initializing assets/all_feed_entries.db"
-            python - <<'PY'
-          import sqlite3
-          import os
-          p = 'assets/all_feed_entries.db'
-          os.makedirs(os.path.dirname(p), exist_ok=True)
-          con = sqlite3.connect(p)
-          con.execute('''
-          CREATE TABLE IF NOT EXISTS feed_entries (
-            entry_id TEXT PRIMARY KEY,
-            feed_name TEXT NOT NULL,
-            title TEXT NOT NULL,
-            link TEXT NOT NULL,
-            summary TEXT,
-            authors TEXT,
-            published_date TEXT,
-            first_seen TEXT,
-            last_seen TEXT,
-            raw_data TEXT
-          )''')
-          con.commit()
-          con.close()
-          print('Initialized new all_feed_entries.db')
-          PY
+          # Load matched_entries_history.db from data branch
+          if git show origin/data:assets/matched_entries_history.latest.db > assets/matched_entries_history.db 2>/dev/null; then
+            echo "✅ Loaded matched_entries_history.db from data branch"
+            ls -lh assets/matched_entries_history.db
+          else
+            echo "ℹ️  No matched_entries_history.db found in data branch, will initialize fresh"
           fi
           
-          # If matched_entries_history.db not present from cache, create an empty one with minimal schema
-          if [ ! -f "assets/matched_entries_history.db" ]; then
-            echo "Cache miss: initializing assets/matched_entries_history.db"
-            # Use a simpler approach - let the CLI system handle database initialization
-            echo "Will let CLI system initialize database if needed"
-          fi
+          echo "=== Database loading complete ==="
 
       - uses: conda-incubator/setup-miniconda@v3
         with:
@@ -123,72 +71,47 @@ jobs:
       - run: conda install -c conda-forge pip -y
       - run: conda run -n paper-firehose-p311 pip install -r requirements.txt
 
-      # Run the new CLI system instead of old rssparser.py
+      # Run the paper firehose pipeline
       - name: Run paper firehose pipeline
         run: |
           set -euo pipefail
           
           echo "=== Starting Paper Firehose Pipeline ==="
+          echo "Current branch: $(git branch --show-current)"
+          
+          # Ensure we're on main branch (should be by default from checkout)
+          if [ "$(git branch --show-current)" != "main" ]; then
+            echo "⚠️  Not on main branch, switching to main"
+            git checkout main
+          fi
           
           # Check database state before starting
           echo "Pre-pipeline database check:"
           ls -la assets/*.db 2>/dev/null || echo "No database files found"
           
-          # Run the complete pipeline with timeouts and debugging
+          # Run the complete pipeline (no timeouts needed - commands should complete normally)
           echo "Step 1: Running filter command..."
-          timeout 1800 conda run -n paper-firehose-p311 python cli/main.py filter --verbose || {
-            echo "❌ Filter command timed out or failed after 30 minutes"
-            echo "Checking database state..."
-            ls -la assets/*.db || echo "No database files found"
-            echo "Checking for any running processes..."
-            ps aux | grep python || echo "No python processes found"
-            exit 1
-          }
+          conda run -n paper-firehose-p311 python cli/main.py filter --verbose
           
           echo "Step 2: Running rank command..."
-          timeout 600 conda run -n paper-firehose-p311 python cli/main.py rank || {
-            echo "❌ Rank command timed out or failed after 10 minutes"
-            exit 1
-          }
+          conda run -n paper-firehose-p311 python cli/main.py rank
           
           echo "Step 3: Running abstracts command..."
-          timeout 1200 conda run -n paper-firehose-p311 python cli/main.py abstracts --mailto "github-actions@paper-firehose.com" || {
-            echo "❌ Abstracts command timed out or failed after 20 minutes"
-            exit 1
-          }
+          conda run -n paper-firehose-p311 python cli/main.py abstracts --mailto "github-actions@paper-firehose.com"
           
           echo "Step 4: Running summarize command..."
-          timeout 1800 conda run -n paper-firehose-p311 python cli/main.py summarize || {
-            echo "❌ Summarize command timed out or failed after 30 minutes"
-            exit 1
-          }
+          conda run -n paper-firehose-p311 python cli/main.py summarize
           
           echo "✅ Pipeline completed successfully"
+          
+          # Show final database state
+          echo "Post-pipeline database check:"
+          ls -la assets/*.db 2>/dev/null || echo "No database files found"
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      # Save updated databases to cache for next run (BOOTSTRAP MODE)
-      - name: Save updated databases to cache
-        run: |
-          set -euo pipefail
-          
-          echo "=== BOOTSTRAP RUN: Preparing for cache population ==="
-          
-          # Only all_feed_entries.db will be cached (history cache is disabled)
-          if [ -f "assets/all_feed_entries.db" ]; then
-            echo "✅ Updated all_feed_entries.db will be cached for next run"
-            ls -lh assets/all_feed_entries.db
-          fi
-          
-          if [ -f "assets/matched_entries_history.db" ]; then
-            echo "ℹ️  Updated matched_entries_history.db (cache disabled - will be enabled after this run)"
-            ls -lh assets/matched_entries_history.db
-          fi
-          
-          echo "=== After this run, re-enable history database caching ==="
-
-      # DATABASE SNAPSHOTTING STEP
-      - name: Snapshot DBs to data branch with retention (worktree)
+      # Commit updated databases to data branch
+      - name: Commit updated databases to data branch
         env:
           KEEP_SNAPSHOTS: "10"
           SNAP_DIR: "assets/db_history"
@@ -226,6 +149,7 @@ jobs:
                 cp "$GITHUB_WORKSPACE/$src" "$snap"
                 cp "$GITHUB_WORKSPACE/$src" "assets/${stem}.latest.db"
                 git add -f "$snap" "assets/${stem}.latest.db"
+                echo "✅ Snapshot created: $snap and assets/${stem}.latest.db"
               else
                 echo "Skip: $src not found"
               fi
@@ -242,6 +166,7 @@ jobs:
               mapfile -t FILES < <(ls -1t "$SNAP_DIR"/${stem}_*.db 2>/dev/null || true)
               if [ "${#FILES[@]}" -gt "${KEEP_SNAPSHOTS}" ]; then
                 for f in "${FILES[@]:${KEEP_SNAPSHOTS}}"; do rm -f "$f"; done
+                echo "🗑️  Retained ${KEEP_SNAPSHOTS} most recent snapshots for $stem"
               fi
             }
             retain "matched_entries_history"
@@ -252,10 +177,11 @@ jobs:
             git add -A "$SNAP_DIR" || true
 
             if ! git diff --cached --quiet; then
-              git commit -m "Snapshot DBs @ ${TS} [skip ci]"
+              git commit -m "Update database snapshots @ ${TS} [skip ci] - Updated all database snapshots with latest data - Retained ${KEEP_SNAPSHOTS} most recent snapshots per database - Generated timestamped snapshots in assets/db_history/ - Updated latest database references in assets/"
               git push origin data
+              echo "✅ Database snapshots committed and pushed to data branch"
             else
-              echo "No changes to commit."
+              echo "ℹ️  No changes to commit."
             fi
           popd >/dev/null
 
