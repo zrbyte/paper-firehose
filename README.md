@@ -1,6 +1,6 @@
 # Paper Firehose
 
-Fetches academic RSS feeds, filters entries with per-topic regex, and writes results into SQLite databases. HTML is rendered directly from the database. Ranking exists; LLM summarization is the next step.
+Fetches academic RSS feeds, filters entries with per-topic regex, and writes results into SQLite databases. HTML is rendered directly from the database. Ranking and LLM summarization are implemented.
 
 ## Overview
 
@@ -10,6 +10,7 @@ Fetches academic RSS feeds, filters entries with per-topic regex, and writes res
   - `assets/papers.db`: Current-run working set (filtered → ranked → summarized).
 - YAML-driven configuration for feeds and topics.
 - HTML generated from `papers.db` so you can re-render without refetching.
+- Optional LLM summarization writes JSON summaries to DB and renders dedicated summary pages.
 
 ## Databases
 
@@ -20,7 +21,7 @@ Fetches academic RSS feeds, filters entries with per-topic regex, and writes res
 
 - `matched_entries_history.db` (table `matched_entries`)
   - Keys: `entry_id` (pk), `feed_name`, `topics` (CSV of topic names).
-  - Metadata: `title`, `link`, `summary`, `authors`, `abstract` (nullable), `doi` (nullable), `published_date`, `matched_date`, `raw_data` (JSON).
+  - Metadata: `title`, `link`, `summary`, `authors`, `abstract` (nullable), `doi` (nullable), `published_date`, `matched_date`, `raw_data` (JSON), `llm_summary` (nullable), `paper_qa_summary` (nullable).
   - Written only when a topic’s `output.archive: true`.
 
 - `papers.db` (table `entries`)
@@ -61,10 +62,18 @@ Run with Python 3.11+.
   - Populates the `entries.abstract` column; leaves other fields unchanged.
   - Contact email: if `--mailto` is not provided, the command reads `$MAILTO` from the environment; if unset, it uses a safe default.
 
+- Summarize (optional)
+  - `python cli/main.py summarize [--topic TOPIC] [--rps 0.5]`
+  - Selects top entries per topic based on `llm_summary.score_cutoff` and `llm_summary.top_n`, builds input from `title + abstract` (or `summary` fallback), and calls the configured OpenAI chat model.
+  - Writes summaries to `papers.db.entries.llm_summary` and, when present, `matched_entries_history.db.matched_entries.llm_summary`.
+  - If `output.filename_summary` is set for a topic and summaries exist, generates an LLM summary HTML page using `llmsummary_template.html`.
+  - API key resolution: reads from `openaikulcs.env` at repo root (raw key or `OPENAI_API_KEY=...` line), otherwise from `$OPENAI_API_KEY`.
+  - Models: uses `config.llm.model` with fallback to `config.llm.model_fallback`. Supports JSON or plain-text responses; JSON is preferred and rendered with headings.
+
 - HTML (re-render only; no fetching)
   - `python cli/main.py html [--topic TOPIC]`
   - Reads from `papers.db` to generate filtered and ranked HTML pages.
-  - If the entries in `papers.db` have been ranked it generates in addition to the list of matches the ranked list of entries.
+  - If entries are ranked, also generates a ranked page; if entries have `llm_summary` and `output.filename_summary` is configured, also generates a summary page.
 
 
 - Purge
@@ -85,11 +94,25 @@ Run with Python 3.11+.
   - `ranking`: optional `query`, `model`, cutoffs, etc. (for the rank command).
     - Optional: `negative_queries` (list), `preferred_authors` (list of names), `priority_author_boost` (float, e.g., 0.1).
   - `output.filename` and `output.filename_ranked`: HTML output; `archive: true` enables history DB writes.
+  - `llm_summary`: topic-level controls for LLM summarization.
+    - `enabled: true|false`
+    - `prompt`: instruction given to the model. You can reference `{ranking_query}` and it will be replaced with the topic’s `ranking.query`.
+    - `score_cutoff`: minimum `rank_score` to consider (0.0–1.0)
+    - `top_n`: hard cap on the number of entries considered (after filtering by score)
+    - Works together with global `config.llm` below.
+
+- `config.llm` (global model settings)
+  - `model`: preferred chat model id
+  - `model_fallback`: secondary model if the primary is unsupported/unavailable
+  - `api_key_env`: environment variable name to read if `openaikulcs.env` is missing
+  - `rps`: default requests/second throttle for summarization
+  - `max_retries`: retry attempts per item on transient errors
+  - Optional GPT‑5 parameters: `verbosity`, `reasoning_effort` (used when the model starts with `gpt-5`)
 
 ## Data Flow
 
 1) Fetch feeds per topic → 2) Dedup against `all_feed_entries.db` → 3) Regex match →
-4) Write matches to `papers.db` (and optionally to history) → 5) Write all processed to `all_feed_entries.db` → 6) Generate HTML.
+4) Write matches to `papers.db` (and optionally to history) → 5) Optional: rank and fetch abstracts → 6) Optional: LLM summarization → 7) Generate HTML (filtered, ranked, and summarized views).
 
 ## Development Notes
 
@@ -98,7 +121,31 @@ Run with Python 3.11+.
 
 ## Next
 
-- Implement LLM summarization of filtered and ranked entries, writing into `entries.llm_summary` and updating HTML rendering.
+- Paper QA/extraction experiments for full‑text PDFs (e.g., methods/metrics tables).
+
+## Python API
+
+You can call the main steps programmatically via `paper_firehose`.
+
+Basics
+- `import paper_firehose as pf`
+- All functions default to `config/config.yaml`; override with `config_path="..."`.
+
+Functions
+- `pf.filter(topic=None, config_path=None)`: Runs the filter step for one topic or all.
+- `pf.rank(topic=None, config_path=None)`: Computes and writes `rank_score` for entries.
+- `pf.abstracts(topic=None, *, mailto=None, limit=None, rps=None, config_path=None)`: Fetches abstracts for above‑threshold entries and writes to DBs.
+- `pf.summarize(topic=None, *, rps=None, config_path=None)`: Runs LLM summarization for top‐ranked entries per topic, writing JSON (or text) to `llm_summary`. Generates summary HTML if configured.
+- `pf.generate_html(topic, output_path=None, config_path=None)`: Regenerates the filtered list HTML directly from `papers.db` for the given topic (uses topic description, and defaults to the topic’s configured `output.filename` if `output_path` is omitted).
+- `pf.purge(days=None, all_data=False, config_path=None)`: Purges entries based on publication date. When `days` is provided, removes entries from the most recent N days (including today) across all DBs; when `all_data=True`, reinitializes all DBs.
+- `pf.status(config_path=None) -> dict`: Returns a dict with config validity, topics, feed count, and DB paths.
+
+LLM summarization via API
+- Ensure API key is available in `openaikulcs.env` (raw key or `OPENAI_API_KEY=...`) at repo root, or export `OPENAI_API_KEY`.
+- Configure `config.llm.model` (and optional `model_fallback`, rate limits). Per‐topic control is under `<topic>.yaml -> llm_summary`.
+- Example:
+  - `pf.summarize("primary")`
+  - Regenerates a summary HTML page if `output.filename_summary` is set and summaries exist.
 
 ## History Viewer
 
