@@ -97,16 +97,16 @@ jobs:
           
           # Run the complete pipeline (no timeouts needed - commands should complete normally)
           echo "Step 1: Running filter command..."
-          python cli/main.py --verbose filter
+          python cli/main.py filter
           
           echo "Step 2: Running rank command..."
-          python cli/main.py --verbose rank
+          python cli/main.py rank
           
           echo "Step 3: Running abstracts command..."
-          python cli/main.py --verbose abstracts --mailto "github-actions@paper-firehose.com"
+          python cli/main.py abstracts --mailto "github-actions@paper-firehose.com"
           
           echo "Step 4: Running summarize command..."
-          python cli/main.py --verbose summarize
+          python cli/main.py summarize
           
           echo "✅ Pipeline completed successfully"
           
