@@ -156,4 +156,3 @@ LLM summarization via API
 - You can override with a query param or local file:
   - `history_viewer.html?db=<url>` to load a specific remote DB
   - Use the file input or drag-and-drop a local `matched_entries_history.db`
-- The viewer uses `sql.js` (WASM SQLite) from a CDN and includes a runtime fallback. If you encounter `initSqlJs is not defined`, verify network access; for fully offline usage, vendor `sql-wasm.js` and `sql-wasm.wasm` locally and update the script path.
