@@ -81,9 +81,8 @@ jobs:
           use-only-tar-bz2: true
 
       - run: conda create -n paper-firehose-p311 python=3.11 -y
-      - run: conda activate paper-firehose-p311
       - run: conda install -c conda-forge pip -y
-      - run: pip install -r requirements.txt
+      - run: conda run -n paper-firehose-p311 pip install -r requirements.txt
 
       # Run the new CLI system instead of old rssparser.py
       - name: Run paper firehose pipeline
