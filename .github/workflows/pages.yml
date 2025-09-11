@@ -23,21 +23,44 @@ jobs:
         with:
           fetch-depth: 0    # ensure all branches/refs available
 
-      # Cache the seen_entries.db to persist article tracking between runs
+      # Cache the sentence transformer models
+      - name: Cache sentence transformer models
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/huggingface/hub
+          key: huggingface-models-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            huggingface-models-
+
+      # Cache the all_feed_entries.db to persist article tracking between runs
       - name: Restore database cache
         uses: actions/cache@v3
         with:
-          path: assets/seen_entries.db
-          key: seen-db-${{ github.run_id }}     # Unique cache key per run
+          path: assets/all_feed_entries.db
+          key: all-feed-entries-db-${{ github.ref_name }}
           restore-keys: |
-            seen-db-                            # Fallback to most recent cache
+            all-feed-entries-db-                # Fallback to most recent cache
 
-      # Create assets dir & empty DB if missing (no sqlite3 CLI dependency)
-      - name: Ensure assets dir & empty DB if missing
+      # Create assets dir & download latest all_feed_entries.db from data branch if missing
+      - name: Ensure assets dir & restore latest all_feed_entries.db
         run: |
           set -euo pipefail
           mkdir -p assets
-          python -c "import sqlite3, os; p = 'assets/seen_entries.db'; con = sqlite3.connect(p) if not os.path.exists(p) else None; con.execute('PRAGMA user_version=1;') if con else None; con.close() if con else None"
+          
+          # If all_feed_entries.db doesn't exist, try to download from data branch
+          if [ ! -f "assets/all_feed_entries.db" ]; then
+            echo "all_feed_entries.db not found, attempting to download from data branch..."
+            if git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
+              # Try to download the latest all_feed_entries.db from data branch
+              curl -s -L "https://raw.githubusercontent.com/${{ github.repository }}/data/assets/all_feed_entries.latest.db" -o "assets/all_feed_entries.db" || true
+            fi
+            
+            # If still doesn't exist, create empty DB
+            if [ ! -f "assets/all_feed_entries.db" ]; then
+              echo "Creating new empty all_feed_entries.db"
+              python -c "import sqlite3, os; p = 'assets/all_feed_entries.db'; con = sqlite3.connect(p); con.execute('PRAGMA user_version=1;'); con.close()"
+            fi
+          fi
 
       - uses: actions/setup-python@v5
         with:
@@ -45,18 +68,25 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # Run the main RSS parser
-      - run: python rssparser.py --no-upload
+      # Run the new CLI system instead of old rssparser.py
+      - name: Run paper firehose pipeline
+        run: |
+          # Run the complete pipeline
+          python cli/main.py filter
+          python cli/main.py rank
+          python cli/main.py abstracts --mailto "github-actions@paper-firehose.com"
+          python cli/main.py summarize
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       # DATABASE SNAPSHOTTING STEP
       - name: Snapshot DBs to data branch with retention (worktree)
         env:
-          KEEP_SNAPSHOTS: "30"
+          KEEP_SNAPSHOTS: "10"
           SNAP_DIR: "assets/db_history"
           DB_HISTORY: "assets/matched_entries_history.db"
-          DB_SEEN: "assets/seen_entries.db"
+          DB_SEEN: "assets/all_feed_entries.db"
+          DB_CURRENT: "assets/papers.db"
         run: |
           set -euo pipefail
 
@@ -93,9 +123,10 @@ jobs:
               fi
             }
 
-            # Both DBs
+            # All three DBs
             snapshot_one "$DB_HISTORY" "matched_entries_history"
-            snapshot_one "$DB_SEEN" "seen_entries"
+            snapshot_one "$DB_SEEN" "all_feed_entries"
+            snapshot_one "$DB_CURRENT" "papers"
 
             # Retention per DB
             retain() {
@@ -106,7 +137,8 @@ jobs:
               fi
             }
             retain "matched_entries_history"
-            retain "seen_entries"
+            retain "all_feed_entries"
+            retain "papers"
 
             # Stage deletions from retention
             git add -A "$SNAP_DIR" || true
