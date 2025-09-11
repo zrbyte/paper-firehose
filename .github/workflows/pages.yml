@@ -110,33 +110,8 @@ jobs:
           # If matched_entries_history.db not present from cache, create an empty one with minimal schema
           if [ ! -f "assets/matched_entries_history.db" ]; then
             echo "Cache miss: initializing assets/matched_entries_history.db"
-            python - <<'PY'
-          import sqlite3
-          import os
-          p = 'assets/matched_entries_history.db'
-          os.makedirs(os.path.dirname(p), exist_ok=True)
-          con = sqlite3.connect(p)
-          con.execute('''
-          CREATE TABLE IF NOT EXISTS matched_entries (
-            entry_id TEXT PRIMARY KEY,
-            feed_name TEXT NOT NULL,
-            topics TEXT NOT NULL,
-            title TEXT NOT NULL,
-            link TEXT NOT NULL,
-            summary TEXT,
-            authors TEXT,
-            abstract TEXT,
-            doi TEXT,
-            published_date TEXT,
-            matched_date TEXT DEFAULT (datetime('now')),
-            raw_data TEXT,
-            llm_summary TEXT,
-            paper_qa_summary TEXT
-          )''')
-          con.commit()
-          con.close()
-          print('Initialized new matched_entries_history.db')
-          PY
+            # Use a simpler approach - let the CLI system handle database initialization
+            echo "Will let CLI system initialize database if needed"
           fi
 
       - uses: conda-incubator/setup-miniconda@v3
@@ -151,11 +126,44 @@ jobs:
       # Run the new CLI system instead of old rssparser.py
       - name: Run paper firehose pipeline
         run: |
-          # Run the complete pipeline
-          conda run -n paper-firehose-p311 python cli/main.py filter
-          conda run -n paper-firehose-p311 python cli/main.py rank
-          conda run -n paper-firehose-p311 python cli/main.py abstracts --mailto "github-actions@paper-firehose.com"
-          conda run -n paper-firehose-p311 python cli/main.py summarize
+          set -euo pipefail
+          
+          echo "=== Starting Paper Firehose Pipeline ==="
+          
+          # Check database state before starting
+          echo "Pre-pipeline database check:"
+          ls -la assets/*.db 2>/dev/null || echo "No database files found"
+          
+          # Run the complete pipeline with timeouts and debugging
+          echo "Step 1: Running filter command..."
+          timeout 1800 conda run -n paper-firehose-p311 python cli/main.py filter --verbose || {
+            echo "❌ Filter command timed out or failed after 30 minutes"
+            echo "Checking database state..."
+            ls -la assets/*.db || echo "No database files found"
+            echo "Checking for any running processes..."
+            ps aux | grep python || echo "No python processes found"
+            exit 1
+          }
+          
+          echo "Step 2: Running rank command..."
+          timeout 600 conda run -n paper-firehose-p311 python cli/main.py rank || {
+            echo "❌ Rank command timed out or failed after 10 minutes"
+            exit 1
+          }
+          
+          echo "Step 3: Running abstracts command..."
+          timeout 1200 conda run -n paper-firehose-p311 python cli/main.py abstracts --mailto "github-actions@paper-firehose.com" || {
+            echo "❌ Abstracts command timed out or failed after 20 minutes"
+            exit 1
+          }
+          
+          echo "Step 4: Running summarize command..."
+          timeout 1800 conda run -n paper-firehose-p311 python cli/main.py summarize || {
+            echo "❌ Summarize command timed out or failed after 30 minutes"
+            exit 1
+          }
+          
+          echo "✅ Pipeline completed successfully"
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
