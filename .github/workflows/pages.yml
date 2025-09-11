@@ -71,6 +71,12 @@ jobs:
       - run: conda install -c conda-forge pip -y
       - run: conda run -n paper-firehose-p311 pip install -r requirements.txt
 
+      # Activate conda environment for the pipeline
+      - name: Activate conda environment
+        run: |
+          echo "source /usr/share/miniconda/etc/profile.d/conda.sh" >> $GITHUB_ENV
+          echo "conda activate paper-firehose-p311" >> $GITHUB_ENV
+
       # Run the paper firehose pipeline
       - name: Run paper firehose pipeline
         run: |
@@ -91,16 +97,16 @@ jobs:
           
           # Run the complete pipeline (no timeouts needed - commands should complete normally)
           echo "Step 1: Running filter command..."
-          conda run -n paper-firehose-p311 python cli/main.py filter --verbose
+          python cli/main.py --verbose filter
           
           echo "Step 2: Running rank command..."
-          conda run -n paper-firehose-p311 python cli/main.py rank
+          python cli/main.py --verbose rank
           
           echo "Step 3: Running abstracts command..."
-          conda run -n paper-firehose-p311 python cli/main.py abstracts --mailto "github-actions@paper-firehose.com"
+          python cli/main.py --verbose abstracts --mailto "github-actions@paper-firehose.com"
           
           echo "Step 4: Running summarize command..."
-          conda run -n paper-firehose-p311 python cli/main.py summarize
+          python cli/main.py --verbose summarize
           
           echo "✅ Pipeline completed successfully"
           
