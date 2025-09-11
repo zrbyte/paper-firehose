@@ -13,7 +13,6 @@ import hashlib
 import urllib.parse
 from typing import Dict, List, Any, Optional
 import logging
-import shutil
 import glob
 
 logger = logging.getLogger(__name__)
