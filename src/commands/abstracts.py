@@ -1,13 +1,16 @@
 """
-Fetch abstracts from Crossref for high-ranked entries in papers.db.
+Fetch abstracts and populate both papers.db (entries.abstract) and
+matched_entries_history.db (matched_entries.abstract).
 
 Rules:
-- Only process topics where topic yaml has abstract_fetch.enabled: true
+- First pass fills arXiv/cond-mat abstracts from summary (no threshold).
+- Then for rows with rank_score >= threshold: Crossref (DOI → title) and
+  aggregator fallbacks (Semantic Scholar, OpenAlex, PubMed).
+- Only process topics where topic yaml has abstract_fetch.enabled: true.
 - Use per-topic abstract_fetch.rank_threshold if set; otherwise fall back to
   global defaults.rank_threshold in config.yaml.
-- Only fetch for rows with rank_score >= threshold and empty abstract.
-- Respect Crossref rate limits: include a descriptive User-Agent with contact
-  email and obey Retry-After on 429/503. Default to ~1 request/second.
+- Respect API rate limits; include a descriptive User-Agent with contact email
+  and obey Retry-After on 429/503. Default to ~1 request/second.
 """
 
 from __future__ import annotations
@@ -322,6 +325,16 @@ def _fill_arxiv_summaries(db: DatabaseManager, topics: Optional[list[str]] = Non
         if cleaned:
             cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (cleaned, id_, tpc))
             updated += 1
+            # Also update history DB (best-effort)
+            try:
+                import sqlite3 as _sqlite3
+                hconn = _sqlite3.connect(db.db_paths['history'])
+                hcur = hconn.cursor()
+                hcur.execute("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", (cleaned, id_))
+                hconn.commit()
+                hconn.close()
+            except Exception:
+                pass
     conn.commit()
     conn.close()
     return updated
@@ -354,6 +367,26 @@ def _crossref_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto:
             cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (abstract, row['id'], topic))
             conn.commit()
             conn.close()
+            # Also update history DB (best-effort)
+            try:
+                import sqlite3 as _sqlite3
+                hconn = _sqlite3.connect(db.db_paths['history'])
+                hcur = hconn.cursor()
+                hcur.execute("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", (abstract, row['id']))
+                hconn.commit()
+                hconn.close()
+            except Exception:
+                pass
+            # Also update history DB (best-effort)
+            try:
+                import sqlite3 as _sqlite3
+                hconn = _sqlite3.connect(db.db_paths['history'])
+                hcur = hconn.cursor()
+                hcur.execute("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", (abstract, row['id']))
+                hconn.commit()
+                hconn.close()
+            except Exception:
+                pass
             fetched += 1
             if max_per_topic is not None and fetched >= max_per_topic:
                 break

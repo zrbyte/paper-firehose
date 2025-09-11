@@ -3,22 +3,9 @@
 Focus: add LLM summarization, keep pipeline minimal and robust.
 
 ## Now (Next Step)
-- Abstract population via Crossref
-  - Fetch and store abstracts into `entries.abstract` and `matched_entries_history.abstract`.
-  - Respect rate limits and add retry/backoff.
-- Ranking polish
-  - Honor cutoffs (`score_cutoff`, `top_n`), negative queries, and configurable model per topic.
-  - Display top-N ranked in HTML with score badges.
-- Robustness
-  - Improve network timeouts and error handling for feeds.
-  - Optional caching for repeated runs.
- - CI caching for models
-   - Use `actions/cache` to restore/persist `models/` and HF caches to avoid re-downloading models on each run.
-
-## Near term
 - LLM summarization
   - Add processor to generate concise expert summaries per entry.
-  - Persist to `papers.db.entries.llm_summary`.
+  - Persist to `papers.db.entries.llm_summary` and `matched_entries_history.db.entries.llm_summary`
   - New CLI: `python cli/main.py summarize [--topic TOPIC]` (or integrate into the filter/rank flow with a flag).
   - Generate HTML files for summaries, similar to the old summarizer.
   - PaperQA Top-Paper Summaries (plan)

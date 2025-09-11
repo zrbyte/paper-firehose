@@ -56,6 +56,7 @@ Run with Python 3.11+.
   - Order: 1) Fill arXiv/cond-mat abstracts from `summary` (no threshold)  2) Above-threshold: Crossref (DOI, then title)  3) Above-threshold: Semantic Scholar → OpenAlex → PubMed
   - Threshold: topic `abstract_fetch.rank_threshold` else global `defaults.rank_threshold`.
   - Only topics with `abstract_fetch.enabled: true` are processed.
+  - Writes to both `papers.db.entries.abstract` and `matched_entries_history.db.matched_entries.abstract`.
   - Rate limiting: descriptive User-Agent (includes `--mailto` or `$MAILTO`), respects Retry-After; default ~1 req/sec via `--rps`.
   - Populates the `entries.abstract` column; leaves other fields unchanged.
   - Contact email: if `--mailto` is not provided, the command reads `$MAILTO` from the environment; if unset, it uses a safe default.
