@@ -41,13 +41,22 @@ jobs:
           restore-keys: |
             all-feed-entries-db-
 
-      # Ensure assets dir exists and initialize DB if cache did not restore it
-      - name: Ensure assets dir & init DB if missing
+      # Cache the matched_entries_history.db to persist historical matches between runs
+      - name: Restore history database cache
+        uses: actions/cache@v3
+        with:
+          path: assets/matched_entries_history.db
+          key: matched-entries-history-db-${{ github.ref_name }}
+          restore-keys: |
+            matched-entries-history-db-
+
+      # Ensure assets dir exists and initialize DBs if cache did not restore them
+      - name: Ensure assets dir & init DBs if missing
         run: |
           set -euo pipefail
           mkdir -p assets
           
-          # If DB not present from cache, create an empty one with minimal schema
+          # If all_feed_entries.db not present from cache, create an empty one with minimal schema
           if [ ! -f "assets/all_feed_entries.db" ]; then
             echo "Cache miss: initializing assets/all_feed_entries.db"
             python - <<'PY'
@@ -72,6 +81,38 @@ jobs:
           con.commit()
           con.close()
           print('Initialized new all_feed_entries.db')
+          PY
+          fi
+          
+          # If matched_entries_history.db not present from cache, create an empty one with minimal schema
+          if [ ! -f "assets/matched_entries_history.db" ]; then
+            echo "Cache miss: initializing assets/matched_entries_history.db"
+            python - <<'PY'
+          import sqlite3
+          import os
+          p = 'assets/matched_entries_history.db'
+          os.makedirs(os.path.dirname(p), exist_ok=True)
+          con = sqlite3.connect(p)
+          con.execute('''
+          CREATE TABLE IF NOT EXISTS matched_entries (
+            entry_id TEXT PRIMARY KEY,
+            feed_name TEXT NOT NULL,
+            topics TEXT NOT NULL,
+            title TEXT NOT NULL,
+            link TEXT NOT NULL,
+            summary TEXT,
+            authors TEXT,
+            abstract TEXT,
+            doi TEXT,
+            published_date TEXT,
+            matched_date TEXT DEFAULT (datetime('now')),
+            raw_data TEXT,
+            llm_summary TEXT,
+            paper_qa_summary TEXT
+          )''')
+          con.commit()
+          con.close()
+          print('Initialized new matched_entries_history.db')
           PY
           fi
 
