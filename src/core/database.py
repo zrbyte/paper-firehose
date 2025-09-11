@@ -167,8 +167,25 @@ class DatabaseManager:
 
         required_columns = {
             'entry_id', 'feed_name', 'topics', 'title', 'link', 'summary',
-            'authors', 'abstract', 'doi', 'published_date', 'matched_date', 'raw_data'
+            'authors', 'abstract', 'doi', 'published_date', 'matched_date', 'raw_data',
+            'llm_summary', 'paper_qa_summary'
         }
+
+        # If table exists, try lightweight migrations for new columns; otherwise recreate
+        if len(columns) > 0:
+            # Add new optional columns if missing (non-destructive)
+            if 'llm_summary' not in columns:
+                try:
+                    cursor.execute("ALTER TABLE matched_entries ADD COLUMN llm_summary TEXT")
+                    columns.add('llm_summary')
+                except Exception:
+                    pass
+            if 'paper_qa_summary' not in columns:
+                try:
+                    cursor.execute("ALTER TABLE matched_entries ADD COLUMN paper_qa_summary TEXT")
+                    columns.add('paper_qa_summary')
+                except Exception:
+                    pass
 
         need_recreate = (len(columns) == 0) or (not required_columns.issubset(columns))
 
@@ -187,7 +204,9 @@ class DatabaseManager:
                     doi TEXT,
                     published_date TEXT,
                     matched_date TEXT DEFAULT (datetime('now')),
-                    raw_data TEXT
+                    raw_data TEXT,
+                    llm_summary TEXT,
+                    paper_qa_summary TEXT
                 )
             ''')
         
