@@ -88,22 +88,33 @@ def _extract_doi_from_raw(raw: Optional[str]) -> Optional[str]:
 
 
 def get_crossref_abstract(doi: str, *, mailto: str, max_retries: int = 3, session: Optional[requests.Session] = None) -> Optional[str]:
-    """Return the plain-text abstract for DOI or None if not available."""
+    """Return the plain-text abstract for DOI or None if not available.
+
+    Implements exponential backoff on 429/5xx and honors Retry-After when present.
+    Also sends Crossref the mailto parameter.
+    """
     sess = session or requests.Session()
-    url = CROSSREF_API + quote(doi)
+    url = f"{CROSSREF_API}{quote(doi)}?mailto={quote(mailto)}"
     headers = {
         # Crossref asks for a descriptive UA with a contact email
         "User-Agent": f"paper-firehose/abstract-fetcher (mailto:{mailto})"
     }
     for attempt in range(max_retries):
         r = sess.get(url, headers=headers, timeout=15)
-        # Respect Retry-After on 429/503
-        if r.status_code in (429, 503):
-            wait = int(r.headers.get("Retry-After", "1"))
-            time.sleep(wait if wait > 0 else 1)
-            continue
+        # Exponential backoff on throttling/server errors, prefer Retry-After
         if r.status_code == 404:
             return None
+        if r.status_code in (429, 500, 502, 503, 504):
+            ra = r.headers.get("Retry-After")
+            if ra:
+                try:
+                    wait = float(ra)
+                except Exception:
+                    wait = 1.0
+            else:
+                wait = min(8.0, 2.0 ** attempt)
+            time.sleep(wait if wait > 0 else 1.0)
+            continue
         r.raise_for_status()
         data = r.json()
         msg = data.get("message", {})
@@ -124,19 +135,26 @@ def search_crossref_abstract_by_title(title: str, *, mailto: str, max_retries: i
         return None
     sess = session or requests.Session()
     base = "https://api.crossref.org/works"
-    params = f"?query.bibliographic={quote(title)}&rows=1"
+    params = f"?query.bibliographic={quote(title)}&rows=1&mailto={quote(mailto)}"
     url = base + params
     headers = {
         "User-Agent": f"paper-firehose/abstract-fetcher (mailto:{mailto})"
     }
     for attempt in range(max_retries):
         r = sess.get(url, headers=headers, timeout=15)
-        if r.status_code in (429, 503):
-            wait = int(r.headers.get("Retry-After", "1"))
-            time.sleep(wait if wait > 0 else 1)
-            continue
         if r.status_code == 404:
             return None
+        if r.status_code in (429, 500, 502, 503, 504):
+            ra = r.headers.get("Retry-After")
+            if ra:
+                try:
+                    wait = float(ra)
+                except Exception:
+                    wait = 1.0
+            else:
+                wait = min(8.0, 2.0 ** attempt)
+            time.sleep(wait if wait > 0 else 1.0)
+            continue
         r.raise_for_status()
         data = r.json()
         items = (data.get('message') or {}).get('items') or []
