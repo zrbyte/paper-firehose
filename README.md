@@ -51,12 +51,12 @@ Run with Python 3.11+.
   - Model selection: if `models/all-MiniLM-L6-v2` exists, it is used; otherwise it falls back to the Hugging Face repo id `all-MiniLM-L6-v2` and downloads once into cache. You can vendor the model with `python scripts/vendor_model.py`.
   - Scoring details: applies a small penalty for `ranking.negative_queries` matches (title/summary). Optional boosts: per-topic `ranking.preferred_authors` with `ranking.priority_author_boost`, and global `priority_journal_boost` for feeds listed in `priority_journals`.
 
-- Abstracts (Crossref)
+- Abstracts
   - `python cli/main.py abstracts [--topic TOPIC] [--mailto you@example.com] [--limit N] [--rps 1.0]`
-  - Fetches abstracts from Crossref for entries in `papers.db` whose `rank_score` is at or above a threshold.
-  - Threshold selection: topic `abstract_fetch.rank_threshold` if set; otherwise global `defaults.rank_threshold` from `config.yaml`.
+  - Order: 1) Fill arXiv/cond-mat abstracts from `summary` (no threshold)  2) Above-threshold: Crossref (DOI, then title)  3) Above-threshold: Semantic Scholar → OpenAlex → PubMed
+  - Threshold: topic `abstract_fetch.rank_threshold` else global `defaults.rank_threshold`.
   - Only topics with `abstract_fetch.enabled: true` are processed.
-  - Rate limiting: uses a descriptive User-Agent with contact email and respects `Retry-After` on 429/503. Defaults to ~1 request/second via `--rps`.
+  - Rate limiting: descriptive User-Agent (includes `--mailto` or `$MAILTO`), respects Retry-After; default ~1 req/sec via `--rps`.
   - Populates the `entries.abstract` column; leaves other fields unchanged.
   - Contact email: if `--mailto` is not provided, the command reads `$MAILTO` from the environment; if unset, it uses a safe default.
 

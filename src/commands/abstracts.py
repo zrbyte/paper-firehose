@@ -285,6 +285,111 @@ def _iter_targets(db: DatabaseManager, topic: str, threshold: float) -> Iterable
     conn.close()
 
 
+def _fill_arxiv_summaries(db: DatabaseManager, topics: Optional[list[str]] = None) -> int:
+    """First pass: fill abstracts from summary for arXiv/cond-mat entries, no threshold.
+
+    Returns number of rows updated.
+    """
+    import sqlite3
+    conn = sqlite3.connect(db.db_paths['current'])
+    cur = conn.cursor()
+    params: list = []
+    topic_filter = ""
+    if topics:
+        placeholders = ",".join(["?"] * len(topics))
+        topic_filter = f" AND topic IN ({placeholders})"
+        params.extend(topics)
+    cur.execute(
+        f"""
+        SELECT id, topic, feed_name, link, summary
+        FROM entries
+        WHERE (abstract IS NULL OR TRIM(abstract) = '')
+          AND (
+                LOWER(COALESCE(feed_name, '')) LIKE '%cond-mat%'
+             OR LOWER(COALESCE(feed_name, '')) LIKE '%arxiv%'
+             OR LOWER(COALESCE(link, '')) LIKE '%arxiv.org%'
+          )
+          {topic_filter}
+        """,
+        params,
+    )
+    rows = cur.fetchall()
+    updated = 0
+    for id_, tpc, feed, link, summary in rows:
+        if not summary:
+            continue
+        cleaned = _strip_jats(summary)
+        if cleaned:
+            cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (cleaned, id_, tpc))
+            updated += 1
+    conn.commit()
+    conn.close()
+    return updated
+
+
+def _crossref_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto: str, session: requests.Session, min_interval: float, max_per_topic: Optional[int]) -> int:
+    """Second pass: Crossref only (DOI first, then title) for entries above threshold."""
+    fetched = 0
+    for row in _iter_targets(db, topic, threshold):
+        doi = row.get('doi') or _extract_doi_from_raw(row.get('raw_data'))
+        if not doi:
+            try:
+                raw = row.get('raw_data')
+                if raw:
+                    obj = json.loads(raw)
+                    doi = obj.get('arxiv_doi') or obj.get('arXiv_doi')
+            except Exception:
+                pass
+        abstract: Optional[str] = None
+        if doi:
+            abstract = get_crossref_abstract(doi, mailto=mailto, session=session)
+        time.sleep(min_interval)
+        if not abstract:
+            abstract = search_crossref_abstract_by_title(row.get('title') or '', mailto=mailto, session=session)
+            time.sleep(min_interval)
+        if abstract:
+            import sqlite3
+            conn = sqlite3.connect(db.db_paths['current'])
+            cur = conn.cursor()
+            cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (abstract, row['id'], topic))
+            conn.commit()
+            conn.close()
+            fetched += 1
+            if max_per_topic is not None and fetched >= max_per_topic:
+                break
+    return fetched
+
+
+def _fallback_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto: str, session: requests.Session, min_interval: float, max_per_topic: Optional[int]) -> int:
+    """Third pass: remaining above-threshold entries → Semantic Scholar / OpenAlex / PubMed."""
+    fetched = 0
+    for row in _iter_targets(db, topic, threshold):
+        # Skip rows already filled by previous passes
+        # _iter_targets already filters abstract IS NULL or empty
+        doi = row.get('doi') or _extract_doi_from_raw(row.get('raw_data'))
+        if not doi:
+            try:
+                raw = row.get('raw_data')
+                if raw:
+                    obj = json.loads(raw)
+                    doi = obj.get('arxiv_doi') or obj.get('arXiv_doi')
+            except Exception:
+                pass
+        abstract = try_publisher_apis(doi, row.get('feed_name') or '', row.get('link') or '', mailto=mailto, session=session)
+        if abstract:
+            import sqlite3
+            conn = sqlite3.connect(db.db_paths['current'])
+            cur = conn.cursor()
+            cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (abstract, row['id'], topic))
+            conn.commit()
+            conn.close()
+            fetched += 1
+            time.sleep(min_interval)
+            if max_per_topic is not None and fetched >= max_per_topic:
+                break
+    return fetched
+
+
 def run(config_path: str, topic: Optional[str] = None, *, mailto: Optional[str] = None, max_per_topic: Optional[int] = None, rps: float = 1.0) -> None:
     """Fetch and write abstracts into papers.db for ranked entries.
 
@@ -311,6 +416,10 @@ def run(config_path: str, topic: Optional[str] = None, *, mailto: Optional[str] 
     sess = requests.Session()
     min_interval = 1.0 / max(rps, 0.01)
 
+    # Step 1: First pass — fill arXiv/cond-mat abstracts from summaries (no threshold)
+    filled = _fill_arxiv_summaries(db, topics)
+    logger.info(f"Abstracts: arXiv/cond-mat summary fill updated={filled}")
+
     for t in topics:
         tcfg = cfg.load_topic_config(t)
         af_cfg = tcfg.get('abstract_fetch') or {}
@@ -319,66 +428,10 @@ def run(config_path: str, topic: Optional[str] = None, *, mailto: Optional[str] 
             continue
         thr = float(af_cfg.get('rank_threshold', global_thresh))
 
-        total = 0
-        with_doi = 0
-        fetched = 0
-        for row in _iter_targets(db, t, thr):
-            total += 1
-            # If this is an arXiv cond-mat entry, use the summary as abstract
-            feed_name = (row.get('feed_name') or '').lower()
-            link = (row.get('link') or '').lower()
-            if 'cond-mat' in feed_name or 'arxiv' in feed_name or 'arxiv.org' in link:
-                summary = row.get('summary') or ''
-                abstract_from_summary = _strip_jats(summary) if summary else ''
-                if abstract_from_summary:
-                    import sqlite3
-                    conn = sqlite3.connect(db.db_paths['current'])
-                    cur = conn.cursor()
-                    cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (abstract_from_summary, row['id'], t))
-                    conn.commit()
-                    conn.close()
-                    fetched += 1
-                    # Skip network sources for this row
-                    if max_per_topic is not None and fetched >= max_per_topic:
-                        break
-                    else:
-                        continue
-            doi = row.get('doi') or _extract_doi_from_raw(row.get('raw_data'))
-            # Also check arXiv-specific DOI field in raw JSON
-            if not doi:
-                try:
-                    raw = row.get('raw_data')
-                    if raw:
-                        obj = json.loads(raw)
-                        doi = obj.get('arxiv_doi') or obj.get('arXiv_doi')
-                except Exception:
-                    pass
-            abstract: Optional[str] = None
-            if doi:
-                with_doi += 1
-                abstract = get_crossref_abstract(doi, mailto=mailto, session=sess)
-            # Throttle between requests, even on None, to be polite
-            time.sleep(min_interval)
-            # Fallback: try title search if no DOI abstract and DOI missing or returned None
-            if not abstract:
-                abstract = search_crossref_abstract_by_title(row.get('title') or '', mailto=mailto, session=sess)
-                time.sleep(min_interval)
-            # Try publisher/aggregator APIs by journal/domain (no scraping)
-            if not abstract:
-                abstract = try_publisher_apis(doi, row.get('feed_name') or '', row.get('link') or '', mailto=mailto, session=sess)
-                if abstract:
-                    time.sleep(min_interval)
-            if abstract:
-                # Write into DB
-                import sqlite3
-                conn = sqlite3.connect(db.db_paths['current'])
-                cur = conn.cursor()
-                cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (abstract, row['id'], t))
-                conn.commit()
-                conn.close()
-                fetched += 1
-            if max_per_topic is not None and fetched >= max_per_topic:
-                break
-        logger.info(f"Abstracts: topic='{t}' threshold={thr} candidates={total} with_doi={with_doi} updated={fetched}")
+        # Step 2: Crossref-only pass for above-threshold entries
+        fetched_crossref = _crossref_pass(db, t, thr, mailto=mailto, session=sess, min_interval=min_interval, max_per_topic=max_per_topic)
+        # Step 3: Fallback APIs for remaining above-threshold entries
+        fetched_fallback = _fallback_pass(db, t, thr, mailto=mailto, session=sess, min_interval=min_interval, max_per_topic=max_per_topic)
+        logger.info(f"Abstracts: topic='{t}' threshold={thr} updated_crossref={fetched_crossref} updated_fallback={fetched_fallback}")
 
     # no return
