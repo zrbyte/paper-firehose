@@ -38,7 +38,7 @@ class HTMLGenerator:
         
         return text
     
-    def generate_html_from_database(self, db_manager, topic_name: str, output_path: str, topic_description: str = None) -> None:
+    def generate_html_from_database(self, db_manager, topic_name: str, output_path: str, heading: str = None, description: str = None) -> None:
         """
         Generate HTML file for filtered articles directly from papers.db.
         
@@ -49,7 +49,7 @@ class HTMLGenerator:
             topic_description: Description for the topic
         """
         # Always create a fresh HTML file for each run
-        self._create_new_html_file(output_path, topic_name, topic_description)
+        self._create_new_html_file(output_path, heading or topic_name, description)
         
         # Get entries from papers.db for this topic
         entries = db_manager.get_current_entries(topic=topic_name, status='filtered')
@@ -87,14 +87,14 @@ class HTMLGenerator:
         
         logger.info(f"Generated fresh HTML file from database: {output_path}")
 
-    def generate_ranked_html_from_database(self, db_manager, topic_name: str, output_path: str, heading: str = None) -> None:
+    def generate_ranked_html_from_database(self, db_manager, topic_name: str, output_path: str, heading: str = None, description: str = None) -> None:
         """
         Generate an HTML file with entries sorted by descending rank_score for a topic.
 
         Displays the rank score truncated to two decimals next to each entry.
         """
         display_title = heading or f"Ranked Articles - {topic_name}"
-        self._create_new_html_file(output_path, display_title, display_title)
+        self._create_new_html_file(output_path, display_title, description)
 
         # Load entries from DB and sort by rank_score desc (only those with a score)
         entries = db_manager.get_current_entries(topic=topic_name)
@@ -142,7 +142,7 @@ class HTMLGenerator:
     # Note: legacy `generate_html` method removed; the system now renders
     # exclusively from papers.db via `generate_html_from_database`.
     
-    def _create_new_html_file(self, output_path: str, topic_name: str, topic_description: str = None) -> None:
+    def _create_new_html_file(self, output_path: str, title_text: str, subtitle_text: str = None) -> None:
         """Create a new HTML file using the template."""
         if not os.path.exists(self.template_path):
             # Create a basic template if the original doesn't exist
@@ -154,13 +154,17 @@ class HTMLGenerator:
         with open(self.template_path, 'r', encoding='utf-8') as tmpl:
             template = PercentTemplate(tmpl.read())
         
-        title = topic_description or f"Filtered Articles - {topic_name}"
+        title = title_text or "Filtered Articles"
         current_date = datetime.date.today()
-        rendered = template.substitute(
-            title=html.escape(title),
-            date=current_date,
-            content="",
-        )
+        rendered = template.substitute(title=html.escape(title), date=current_date, content="")
+
+        # Inject subtitle (topic description) as a subheading below the main title
+        if subtitle_text:
+            sub = f"\n<h2>{html.escape(subtitle_text)}</h2>\n"
+            # insert after first <h1>...</h1>
+            end_h1 = rendered.find('</h1>')
+            if end_h1 != -1:
+                rendered = rendered[: end_h1 + 5] + sub + rendered[end_h1 + 5 :]
         
         # Ensure output directory exists
         output_dir = os.path.dirname(output_path)

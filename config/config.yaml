@@ -5,8 +5,16 @@ database:
   history_path: "assets/matched_entries_history.db" # historical matches across all topics
 
 llm:
-  model: "gpt-5"
+  model: "gpt-5-mini"
   api_key_env: "OPENAI_API_KEY"
+  # Fallback model if the primary is unavailable/unsupported
+  model_fallback: "gpt-5-nano"
+  # Slower by default to be polite to API
+  rps: 0.5
+  max_retries: 3
+  # GPT-5 specific parameters
+  verbosity: "low" # values: low, medium, high
+  reasoning_effort: "minimal" # low, medium (default), high. GPT‑5 also supports minimal, which minimizes GPT‑5’s reasoning to return an answer quickly.
   
 feeds:
   cond-mat:
@@ -165,7 +173,21 @@ priority_journal_boost: 0.20
 
 # Global defaults
 defaults:
+  # Max age of feed entries to consider (days)
+  time_window_days: 365
+
   top_n_per_topic: 10
-  ranking_enabled: true
-  # Above this threshold, the abstract is fetched from Crossref
+  # Above this threshold, the abstract is fetched
   rank_threshold: 0.3
+
+  # Negative ranking penalty (applied when negative_queries match)
+  ranking_negative_penalty: 0.25
+
+  # Abstract fetching settings (Crossref and aggregators)
+  abstracts:
+    # Requests per second throttle (can be overridden by CLI --rps)
+    rps: 1.0
+    # Max retries per item (with exponential backoff and Retry-After)
+    max_retries: 3
+    # Contact email included in UA and as Crossref mailto param
+    mailto: "you@example.org"

@@ -263,6 +263,9 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
             entry_by_key = {(e["id"], e["topic"]): e for e in entries}
             adjusted: list[tuple[str, str, float]] = []
             penalized = 0
+            # Negative penalty configurable: topic.ranking.negative_penalty or defaults.ranking_negative_penalty (global), default 0.25
+            global_neg_pen = float((config.get("defaults") or {}).get("ranking_negative_penalty", 0.25))
+            neg_penalty = float(ranking_cfg.get("negative_penalty", global_neg_pen))
             for eid, tname, score in scores:
                 entry = entry_by_key.get((eid, tname)) or {}
                 title = (entry.get("title") or "").lower()
@@ -270,8 +273,8 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
                 blob = f"{title} {summary}"
                 has_negative = any(term in blob for term in neg_set)
                 if has_negative:
-                    # Subtract a fixed penalty and clamp to [0, 1]
-                    new_score = max(0.0, float(score) - 0.25)
+                    # Subtract a configurable penalty and clamp to [0, 1]
+                    new_score = max(0.0, float(score) - neg_penalty)
                     penalized += 1
                 else:
                     new_score = float(score)

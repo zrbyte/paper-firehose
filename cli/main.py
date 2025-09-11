@@ -18,6 +18,7 @@ from commands import filter as filter_cmd
 from commands import generate_html as html_cmd
 from commands import rank as rank_cmd
 from commands import abstracts as abstracts_cmd
+from commands import summarize as summarize_cmd
 
 # Setup logging
 logging.basicConfig(
@@ -100,6 +101,23 @@ def abstracts(ctx, topic, mailto, limit, rps):
             click.echo("✅ Abstract fetching completed for eligible topics")
     except Exception as e:
         click.echo(f"❌ Abstract fetching failed: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command('summarize')
+@click.option('--topic', help='Summarize a specific topic only')
+@click.option('--rps', type=float, help='Requests per second throttle (overrides config)')
+@click.pass_context
+def summarize(ctx, topic, rps):
+    """Run LLM summarization for top-ranked entries and write into llm_summary (always overwrites)."""
+    try:
+        summarize_cmd.run(ctx.obj['config_path'], topic, rps=rps)
+        if topic:
+            click.echo(f"✅ Summarization completed for topic '{topic}'")
+        else:
+            click.echo("✅ Summarization completed for eligible topics")
+    except Exception as e:
+        click.echo(f"❌ Summarization failed: {e}", err=True)
         sys.exit(1)
 
 

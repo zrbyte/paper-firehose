@@ -1,5 +1,5 @@
 name: "Perovskites"
-description: "Perovskite solar cells, photoelectrochemistry, stability and efficiency advances"
+description: "Perovskite solar cells, photoelectrochemistry, etc"
 
 # Which feeds to process for this topic
 feeds:
@@ -55,7 +55,27 @@ filter:
   fields: ["title", "summary"]
 
 # Ranking configuration
-ranking:
+ranking: 
+  query: >   # Natural-language ranking query used for sentence-transformers similarity
+    Perovskites, solar cells, photoelectrochemistry, solar water splitting, solar fuels
+
+  # Optional additional negative phrases to downweight (list may be empty)
+  negative_queries: [erratum, correction, reply, corrigendum]
+
+  # Preferred authors. Names in this list get a ranking boost. Order: First name (or initial), Last name.
+  preferred_authors: [Matyas Daboczi]
+  priority_author_boost: 0.2
+
+  # Sentence-Transformers model used for ranking (can be overridden per topic)
+  model: "all-MiniLM-L6-v2"
+
+# Abstract fetch configuration
+abstract_fetch:
+  enabled: true
+  rank_threshold: 0.2 # this overrides the global rank_threshold in config.yaml. Should be smaller than score_cutoff
+
+llm_summary:
+  enabled: true
   prompt: >
     You are a domain expert on perovskite solar cells and photoelectrochemistry.
     Emphasize entries that materially advance stability, efficiency, interface physics/chemistry,
@@ -63,29 +83,11 @@ ranking:
     Be concise and expert-focused. Keep text concise and information-dense.
     Avoid using superlatives and other over-the-top language.
     CRITICAL: Return ONLY valid JSON with the exact structure specified.
-    No markdown formatting, no explanations, no text before or after the JSON object.
-  # Natural-language ranking query used for sentence-transformers similarity
-  query: "Perovskites, solar cells, photoelectrochemistry, solar water splitting, solar fuels"
-
-  # Optional additional negative phrases to downweight (list may be empty)
-  negative_queries: [erratum, correction, reply, corrigendum]
-
-  # Preferred authors. Names in this list get a ranking boost. Order: First name (or initial), Last name.
-  preferred_authors: [Matyas Daboczi]
-  priority_author_boost: 0.20
-
-  # Sentence-Transformers model used for ranking (can be overridden per topic)
-  model: "all-MiniLM-L6-v2"
-
+    No markdown formatting, no explanations, no text before or after the JSON object.  
   # Cutoffs: strongest cutoff applies (the one returning the fewest entries)
-  # - score_cutoff: minimum cosine similarity (0.0–1.0); default 0.2
-  score_cutoff: 0.2
-  top_n: 5
-
-# Abstract fetch configuration
-abstract_fetch:
-  enabled: true
-  rank_threshold: 0.3 # this overrides the global rank_threshold in config.yaml
+  # score_cutoff: minimum cosine similarity (0.0–1.0)
+  score_cutoff: 0.3
+  top_n: 10
 
 # Output configuration
 output:

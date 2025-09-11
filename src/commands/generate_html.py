@@ -49,8 +49,9 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
             output_config = topic_config.get('output', {})
             output_filename = output_config.get('filename', f'{topic_name}_filtered_articles.html')
 
-            # Use the topic's display name as the main heading in HTML
+            # Use the topic's display name and description
             heading = topic_config.get('name', topic_name)
+            subheading = topic_config.get('description')
 
             # Generate from DB for this topic
             html_generator.generate_html_from_database(
@@ -58,6 +59,7 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
                 topic_name,
                 output_filename,
                 heading,
+                subheading,
             )
 
             logger.info(f"Generated HTML for topic '{topic_name}': {output_filename}")
@@ -67,7 +69,7 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
                 ranked_filename = output_config.get('filename_ranked') or f'results_{topic_name}_ranked.html'
                 ranked_template = 'ranked_template.html'
                 ranked_gen = HTMLGenerator(template_path=ranked_template)
-                ranked_gen.generate_ranked_html_from_database(db_manager, topic_name, ranked_filename, heading)
+                ranked_gen.generate_ranked_html_from_database(db_manager, topic_name, ranked_filename, heading, subheading)
                 logger.info(f"Generated ranked HTML for topic '{topic_name}': {ranked_filename}")
             except Exception as e:
                 logger.error(f"Failed to generate ranked HTML for topic '{topic_name}': {e}")

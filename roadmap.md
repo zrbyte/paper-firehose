@@ -16,7 +16,8 @@ Focus: add LLM summarization, keep pipeline minimal and robust.
     - Keep provenance (PDF path, arXiv id/version) to allow later refresh or replacement with publisher versions.
 
 ## Later
-- Make a cumulative html page for RG, catalysis, 2D metals
-- Web UI for browsing, configuration, and manual curation.
 - Check functionality of the `papers_firehose/__init__.py`
 - Set up `pages.yaml`, similarly to the one in the main branch. Ensure the caching of the models folder so that the sentence transformer is not downloaded each time.
+- Make a cumulative html page for RG, catalysis, 2D metals
+- Web UI for browsing, configuration, and manual curation.
+

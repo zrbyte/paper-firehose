@@ -15,8 +15,8 @@ from core.config import ConfigManager
 
 logger = logging.getLogger(__name__)
 
-# Time window for processing entries (1 year)
-TIME_DELTA = datetime.timedelta(days=365)
+# Default time window for processing entries (days); can be overridden by config.defaults.time_window_days
+DEFAULT_TIME_WINDOW_DAYS = 365
 
 
 class FeedProcessor:
@@ -25,6 +25,10 @@ class FeedProcessor:
     def __init__(self, db_manager: DatabaseManager, config_manager: ConfigManager):
         self.db = db_manager
         self.config = config_manager
+        # Resolve time window from config (defaults.time_window_days)
+        cfg = self.config.load_config()
+        days = int((cfg.get('defaults') or {}).get('time_window_days', DEFAULT_TIME_WINDOW_DAYS))
+        self.time_delta = datetime.timedelta(days=days)
     
     def fetch_feeds(self, topic_name: str) -> Dict[str, List[Dict[str, Any]]]:
         """
@@ -81,8 +85,8 @@ class FeedProcessor:
                     else:
                         entry_datetime = current_time
                     
-                    # Skip entries older than TIME_DELTA
-                    if (current_time - entry_datetime) > TIME_DELTA:
+                    # Skip entries older than configured time window
+                    if (current_time - entry_datetime) > self.time_delta:
                         continue
                     
                     # Check if this is a new entry (by title)

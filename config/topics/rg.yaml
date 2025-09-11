@@ -50,13 +50,7 @@ filter:
   fields: ["title", "summary"]
 
 ranking:
-  prompt: >
-    You are a world-class condensed-matter researcher with deep expertise in rhombohedral graphite
-    (ABC-stacked graphene multilayers) and related STM/transport phenomena. 
-    Prioritize entries that directly concern ABC/rhombohedral stacking, few-layer graphene
-    with rhombohedral domains, or unambiguous experimental/theory advances in this subfield.
-  # Natural-language ranking query used for sentence-transformers similarity
-  query: >
+  query: >   # Natural-language ranking query used for sentence-transformers similarity
     Rhombohedral graphite, rhombohedral stacking, rhombohedral multilayer graphene,
     ABC-stacked graphene, ABC stacking, trilayer, tetralayer, pentalayer, hexalayer,
     heptalayer graphene, chiral graphene
@@ -71,15 +65,23 @@ ranking:
   # Sentence-Transformers model used for ranking (can be overridden per topic)
   model: "all-MiniLM-L6-v2"
 
-  # Cutoffs: strongest cutoff applies (the one returning the fewest entries)
-  # - score_cutoff: minimum cosine similarity (0.0–1.0); default 0.2
-  score_cutoff: 0.2
-  top_n: 5
-
 # Abstract fetch configuration
 abstract_fetch:
   enabled: true
-  rank_threshold: 0.2 # this overrides the global rank_threshold in config.yaml
+  rank_threshold: 0.2 # this overrides the global rank_threshold in config.yaml. Should be smaller than score_cutoff
+
+# LLM summary configuration
+llm_summary:
+  enabled: true
+  prompt: >
+    You are a world-class condensed-matter researcher with deep expertise in rhombohedral graphite
+    (ABC-stacked graphene multilayers) and related STM/transport phenomena. 
+    Prioritize entries that directly concern ABC/rhombohedral stacking, few-layer graphene
+    with rhombohedral domains, or unambiguous experimental/theory advances in this subfield.
+  # Cutoffs: strongest cutoff applies (the one returning the fewest entries)
+  # - score_cutoff: minimum cosine similarity (0.0–1.0)
+  score_cutoff: 0.3
+  top_n: 10
 
 output:
   filename: "rg_filtered_articles.html"

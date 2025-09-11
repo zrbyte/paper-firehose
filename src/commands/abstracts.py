@@ -358,7 +358,7 @@ def _fill_arxiv_summaries(db: DatabaseManager, topics: Optional[list[str]] = Non
     return updated
 
 
-def _crossref_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto: str, session: requests.Session, min_interval: float, max_per_topic: Optional[int]) -> int:
+def _crossref_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto: str, session: requests.Session, min_interval: float, max_per_topic: Optional[int], max_retries: int = 3) -> int:
     """Second pass: Crossref only (DOI first, then title) for entries above threshold."""
     fetched = 0
     for row in _iter_targets(db, topic, threshold):
@@ -373,10 +373,10 @@ def _crossref_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto:
                 pass
         abstract: Optional[str] = None
         if doi:
-            abstract = get_crossref_abstract(doi, mailto=mailto, session=session)
+            abstract = get_crossref_abstract(doi, mailto=mailto, session=session, max_retries=max_retries)
         time.sleep(min_interval)
         if not abstract:
-            abstract = search_crossref_abstract_by_title(row.get('title') or '', mailto=mailto, session=session)
+            abstract = search_crossref_abstract_by_title(row.get('title') or '', mailto=mailto, session=session, max_retries=max_retries)
             time.sleep(min_interval)
         if abstract:
             import sqlite3
@@ -460,9 +460,20 @@ def run(config_path: str, topic: Optional[str] = None, *, mailto: Optional[str] 
     # Default threshold
     defaults = (config.get('defaults') or {})
     global_thresh = float(defaults.get('rank_threshold', 0.35))
+    abs_defaults = (defaults.get('abstracts') or {})
 
-    # Resolve contact email: CLI arg -> MAILTO env -> default
-    mailto = mailto or os.environ.get("MAILTO", "nemesp@gmail.com")
+    # Resolve contact email: CLI arg -> MAILTO env -> config.defaults.abstracts.mailto -> fallback
+    mailto = mailto or os.environ.get("MAILTO") or abs_defaults.get('mailto') or "nemesp@gmail.com"
+
+    # RPS from config if provided
+    if rps == 1.0:  # only use config if user didn't override
+        try:
+            rps_cfg = float(abs_defaults.get('rps')) if abs_defaults.get('rps') is not None else None
+            if rps_cfg and rps_cfg > 0:
+                rps = rps_cfg
+        except Exception:
+            pass
+    max_retries = int(abs_defaults.get('max_retries', 3))
 
     sess = requests.Session()
     min_interval = 1.0 / max(rps, 0.01)
@@ -480,7 +491,7 @@ def run(config_path: str, topic: Optional[str] = None, *, mailto: Optional[str] 
         thr = float(af_cfg.get('rank_threshold', global_thresh))
 
         # Step 2: Crossref-only pass for above-threshold entries
-        fetched_crossref = _crossref_pass(db, t, thr, mailto=mailto, session=sess, min_interval=min_interval, max_per_topic=max_per_topic)
+        fetched_crossref = _crossref_pass(db, t, thr, mailto=mailto, session=sess, min_interval=min_interval, max_per_topic=max_per_topic, max_retries=max_retries)
         # Step 3: Fallback APIs for remaining above-threshold entries
         fetched_fallback = _fallback_pass(db, t, thr, mailto=mailto, session=sess, min_interval=min_interval, max_per_topic=max_per_topic)
         logger.info(f"Abstracts: topic='{t}' threshold={thr} updated_crossref={fetched_crossref} updated_fallback={fetched_fallback}")
