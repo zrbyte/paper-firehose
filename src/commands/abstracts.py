@@ -43,6 +43,35 @@ def _strip_jats(text: str | None) -> Optional[str]:
     return htmllib.unescape(text).strip()
 
 
+def _clean_for_db(text: Optional[str]) -> Optional[str]:
+    """Conservative sanitizer for abstracts before storing in DB.
+
+    - Removes JATS/HTML tags and unescapes entities via _strip_jats
+    - Strips stray '<' and '>' characters (common artifact from feeds)
+    - Removes leading feed prefixes like "Abstract" and arXiv announce headers
+    - Normalizes whitespace and removes zero-width characters
+    """
+    if text is None:
+        return None
+    # First remove tags and unescape entities
+    s = _strip_jats(text) or ""
+    # Remove zero-width and BOM-like chars
+    s = s.replace("\u200B", "").replace("\u200C", "").replace("\u200D", "").replace("\uFEFF", "")
+    # Normalize non-breaking spaces
+    s = s.replace("\xa0", " ")
+    # Remove any remaining angle bracket characters which often leak from markup
+    s = s.replace("<", "").replace(">", "")
+    # Drop leading arXiv announce header like:
+    #   "arXiv:2509.09390v1 Announce Type: new Abstract: ..."
+    s = re.sub(r"^\s*arXiv:[^\n]*?(?:Announce\s+Type:\s*\w+\s+)?Abstract:\s*", "", s, flags=re.IGNORECASE)
+    # Drop simple leading "Abstract" or "Abstract:" tokens
+    s = re.sub(r"^\s*Abstract\s*:?[\s\-–—]*", "", s, flags=re.IGNORECASE)
+    # Collapse excessive whitespace
+    s = re.sub(r"[\t\r ]+", " ", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
+
+
 def _find_doi_in_text(text: Optional[str]) -> Optional[str]:
     if not text:
         return None
@@ -348,7 +377,7 @@ def _fill_arxiv_summaries(db: DatabaseManager, topics: Optional[list[str]] = Non
     for id_, tpc, feed, link, summary in rows:
         if not summary:
             continue
-        cleaned = _strip_jats(summary)
+        cleaned = _clean_for_db(summary)
         if cleaned:
             cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (cleaned, id_, tpc))
             updated += 1
@@ -388,6 +417,7 @@ def _crossref_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto:
             abstract = search_crossref_abstract_by_title(row.get('title') or '', mailto=mailto, session=session, max_retries=max_retries)
             time.sleep(min_interval)
         if abstract:
+            abstract = _clean_for_db(abstract)
             import sqlite3
             conn = sqlite3.connect(db.db_paths['current'])
             cur = conn.cursor()
@@ -437,6 +467,7 @@ def _fallback_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto:
                 pass
         abstract = try_publisher_apis(doi, row.get('feed_name') or '', row.get('link') or '', mailto=mailto, session=session)
         if abstract:
+            abstract = _clean_for_db(abstract)
             import sqlite3
             conn = sqlite3.connect(db.db_paths['current'])
             cur = conn.cursor()

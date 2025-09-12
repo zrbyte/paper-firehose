@@ -196,7 +196,7 @@ defaults:
 email:
   recipients_file: "config/secrets/mailing_lists.yaml"
   # Optional subject prefix
-  subject_prefix: "Paper Firehose"
+  subject_prefix: "paper firehose"
   # Sender address; defaults to smtp.username if omitted
   from: "nemeslab@nemeslab.com"
   smtp:
