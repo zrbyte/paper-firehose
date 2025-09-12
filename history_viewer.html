@@ -319,10 +319,13 @@
     }
 
     async function loadDB(bytes) {
+      console.log('Loading database, size:', bytes.length);
       const SQL = await initSQL();
       if (db) { db.close(); db = null; }
       db = new SQL.Database(bytes);
       allRows = parseRows(db);
+      console.log('Parsed rows:', allRows.length);
+      console.log('Sample topics:', allRows.slice(0, 5).map(r => r.topics));
       renderTopics(allRows);
       applyFilterAndRender();
     }
@@ -388,12 +391,18 @@
     tryAutoLoadFromQuery();
     // If no explicit ?db= query, attempt loading the default URL automatically
     if (!(new URLSearchParams(location.search)).get('db')) {
-      // Defer a tick to allow the page to paint
-      setTimeout(() => {
-        if ($('dburl').value) {
-          handleLoadClick();
+      // Wait for SQL.js to be fully loaded before attempting to load database
+      setTimeout(async () => {
+        try {
+          await initSQL(); // Ensure SQL.js is loaded
+          if ($('dburl').value) {
+            console.log('Auto-loading database from:', $('dburl').value);
+            handleLoadClick();
+          }
+        } catch (e) {
+          console.error('Failed to initialize SQL.js:', e);
         }
-      }, 50);
+      }, 1000); // Increased delay to ensure SQL.js is loaded
     }
   </script>
 </body>
