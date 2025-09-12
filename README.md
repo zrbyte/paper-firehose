@@ -64,7 +64,7 @@ Run with Python 3.11+.
 
 - Summarize (optional)
   - `python cli/main.py summarize [--topic TOPIC] [--rps 0.5]`
-  - Selects top entries per topic based on `llm_summary.score_cutoff` and `llm_summary.top_n`, builds input from `title + abstract` (or `summary` fallback), and calls the configured OpenAI chat model.
+  - Selects top entries per topic based on `llm_summary.score_cutoff` and `llm_summary.top_n`, builds input strictly from `title + abstract` (skips entries without an abstract), and calls the configured OpenAI chat model.
   - Writes summaries to `papers.db.entries.llm_summary` and, when present, `matched_entries_history.db.matched_entries.llm_summary`.
   - If `output.filename_summary` is set for a topic and summaries exist, generates an LLM summary HTML page using `llmsummary_template.html`.
   - API key resolution: reads from `openaikulcs.env` at repo root (raw key or `OPENAI_API_KEY=...` line), otherwise from `$OPENAI_API_KEY`.

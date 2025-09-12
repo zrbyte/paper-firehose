@@ -5,9 +5,9 @@ and matched_entries_history.db (matched_entries.llm_summary), guided by topic YA
 Behavior
 - Reads topic.llm_summary: { prompt, score_cutoff, top_n }
 - Selects entries by topic with rank_score >= score_cutoff, ordered desc, up to top_n.
-- Builds input text from title + abstract (fallback summary if abstract missing).
+- Builds input text strictly from title + abstract; skips entries without a non-empty abstract.
 - Calls OpenAI Chat Completions (via REST) with configured model and API key from config.llm.api_key_env.
-- Enforces length: summary must not exceed len(title) + len(abstract_or_summary).
+- Enforces length: summary must not exceed len(title) + len(abstract).
 - Skips entries that already have llm_summary unless --overwrite is set.
 
 Global config
@@ -83,6 +83,8 @@ def _iter_candidates(db: DatabaseManager, topic: str, score_cutoff: float, top_n
         FROM entries
         WHERE topic = ?
           AND COALESCE(rank_score, 0) >= ?
+          AND abstract IS NOT NULL
+          AND TRIM(abstract) <> ''
         ORDER BY rank_score DESC
         LIMIT ?
         """,
@@ -304,13 +306,12 @@ def run(config_path: str, topic: Optional[str] = None, *, rps: Optional[float] =
         updated = 0
         for row in candidates:
             title = (row.get('title') or '').strip()
-            source = (row.get('abstract') or '').strip()
-            if not source:
-                source = (row.get('summary') or '').strip()
-            if not title or not source:
+            abstract_txt = (row.get('abstract') or '').strip()
+            # Only summarize when abstract is present and non-empty
+            if not title or not abstract_txt:
                 continue
-            char_limit = len(title) + len(source)
-            summary = _call_openai(api_key, [model, model_fallback], prompt, title, source, char_limit, max_retries=max_retries, config=config)
+            char_limit = len(title) + len(abstract_txt)
+            summary = _call_openai(api_key, [model, model_fallback], prompt, title, abstract_txt, char_limit, max_retries=max_retries, config=config)
             time.sleep(min_interval)
             if not summary:
                 continue

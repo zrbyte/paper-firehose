@@ -4,8 +4,8 @@ matched_entries_history.db (matched_entries.abstract).
 
 Rules:
 - First pass fills arXiv/cond-mat abstracts from summary (no threshold).
-- Then for rows with rank_score >= threshold: aggregator fallbacks (Semantic Scholar, OpenAlex, PubMed).
-- Crossref API calls are DISABLED to avoid rate limiting issues.
+- Then for rows with rank_score >= threshold: Crossref (DOI, then title search),
+  followed by aggregator fallbacks (Semantic Scholar, OpenAlex, PubMed).
 - Only process topics where topic yaml has abstract_fetch.enabled: true.
 - Use per-topic abstract_fetch.rank_threshold if set; otherwise fall back to
   global defaults.rank_threshold in config.yaml.
@@ -490,11 +490,17 @@ def run(config_path: str, topic: Optional[str] = None, *, mailto: Optional[str] 
             continue
         thr = float(af_cfg.get('rank_threshold', global_thresh))
 
-        # Step 2: Crossref-only pass for above-threshold entries (DISABLED)
-        # fetched_crossref = _crossref_pass(db, t, thr, mailto=mailto, session=sess, min_interval=min_interval, max_per_topic=max_per_topic, max_retries=max_retries)
-        fetched_crossref = 0  # Crossref disabled
+        # Step 2: Crossref-only pass for above-threshold entries
+        fetched_crossref = _crossref_pass(
+            db, t, thr,
+            mailto=mailto,
+            session=sess,
+            min_interval=min_interval,
+            max_per_topic=max_per_topic,
+            max_retries=max_retries,
+        )
         # Step 3: Fallback APIs for remaining above-threshold entries
         fetched_fallback = _fallback_pass(db, t, thr, mailto=mailto, session=sess, min_interval=min_interval, max_per_topic=max_per_topic)
-        logger.info(f"Abstracts: topic='{t}' threshold={thr} updated_crossref={fetched_crossref} (disabled) updated_fallback={fetched_fallback}")
+        logger.info(f"Abstracts: topic='{t}' threshold={thr} updated_crossref={fetched_crossref} updated_fallback={fetched_fallback}")
 
     # no return
