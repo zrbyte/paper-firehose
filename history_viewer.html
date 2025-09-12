@@ -170,8 +170,7 @@
       const parts = parseGithubParts(url) || parseGithubParts(normalizeGithubRaw(url));
       const candidates = [];
       if (parts) {
-        // Prefer jsDelivr for better CORS from file:// origins; fall back to raw.
-        candidates.push(toJsDelivrURL(parts));
+        // Use raw GitHub URL directly to avoid jsDelivr caching issues
         candidates.push(`https://raw.githubusercontent.com/${parts.owner}/${parts.repo}/${parts.branch}/${parts.path}`);
       } else {
         candidates.push(normalizeGithubRaw(url));
@@ -181,7 +180,10 @@
       for (const u of candidates) {
         try {
           const res = await fetch(u);
-          if (!res.ok) { lastErr = new Error(`Failed to fetch: ${res.status}`); continue; }
+          if (!res.ok) { 
+            lastErr = new Error(`Failed to fetch: ${res.status}`); 
+            continue; 
+          }
           const buf = await res.arrayBuffer();
           return new Uint8Array(buf);
         } catch (e) {
@@ -319,13 +321,10 @@
     }
 
     async function loadDB(bytes) {
-      console.log('Loading database, size:', bytes.length);
       const SQL = await initSQL();
       if (db) { db.close(); db = null; }
       db = new SQL.Database(bytes);
       allRows = parseRows(db);
-      console.log('Parsed rows:', allRows.length);
-      console.log('Sample topics:', allRows.slice(0, 5).map(r => r.topics));
       renderTopics(allRows);
       applyFilterAndRender();
     }
@@ -391,18 +390,12 @@
     tryAutoLoadFromQuery();
     // If no explicit ?db= query, attempt loading the default URL automatically
     if (!(new URLSearchParams(location.search)).get('db')) {
-      // Wait for SQL.js to be fully loaded before attempting to load database
-      setTimeout(async () => {
-        try {
-          await initSQL(); // Ensure SQL.js is loaded
-          if ($('dburl').value) {
-            console.log('Auto-loading database from:', $('dburl').value);
-            handleLoadClick();
-          }
-        } catch (e) {
-          console.error('Failed to initialize SQL.js:', e);
+      // Defer a tick to allow the page to paint
+      setTimeout(() => {
+        if ($('dburl').value) {
+          handleLoadClick();
         }
-      }, 1000); // Increased delay to ensure SQL.js is loaded
+      }, 50);
     }
   </script>
 </body>
