@@ -100,28 +100,33 @@ def get_crossref_abstract(doi: str, *, mailto: str, max_retries: int = 3, sessio
         "User-Agent": f"paper-firehose/abstract-fetcher (mailto:{mailto})"
     }
     for attempt in range(max_retries):
-        r = sess.get(url, headers=headers, timeout=15)
-        # Exponential backoff on throttling/server errors, prefer Retry-After
-        if r.status_code == 404:
+        try:
+            r = sess.get(url, headers=headers, timeout=15)
+            # Exponential backoff on throttling/server errors, prefer Retry-After
+            if r.status_code == 404:
+                return None
+            if r.status_code in (429, 500, 502, 503, 504):
+                ra = r.headers.get("Retry-After")
+                if ra:
+                    try:
+                        wait = float(ra)
+                    except Exception:
+                        wait = 1.0
+                else:
+                    wait = min(8.0, 2.0 ** attempt)
+                time.sleep(wait if wait > 0 else 1.0)
+                continue
+            r.raise_for_status()
+            data = r.json()
+            msg = data.get("message", {})
+            abstract = msg.get("abstract")
+            if abstract:
+                return _strip_jats(abstract) or None
             return None
-        if r.status_code in (429, 500, 502, 503, 504):
-            ra = r.headers.get("Retry-After")
-            if ra:
-                try:
-                    wait = float(ra)
-                except Exception:
-                    wait = 1.0
-            else:
-                wait = min(8.0, 2.0 ** attempt)
-            time.sleep(wait if wait > 0 else 1.0)
+        except Exception:
+            # Network or parsing error → backoff and retry
+            time.sleep(min(8.0, 2.0 ** attempt))
             continue
-        r.raise_for_status()
-        data = r.json()
-        msg = data.get("message", {})
-        abstract = msg.get("abstract")
-        if abstract:
-            return _strip_jats(abstract) or None
-        return None
     return None
 
 
@@ -141,28 +146,32 @@ def search_crossref_abstract_by_title(title: str, *, mailto: str, max_retries: i
         "User-Agent": f"paper-firehose/abstract-fetcher (mailto:{mailto})"
     }
     for attempt in range(max_retries):
-        r = sess.get(url, headers=headers, timeout=15)
-        if r.status_code == 404:
+        try:
+            r = sess.get(url, headers=headers, timeout=15)
+            if r.status_code == 404:
+                return None
+            if r.status_code in (429, 500, 502, 503, 504):
+                ra = r.headers.get("Retry-After")
+                if ra:
+                    try:
+                        wait = float(ra)
+                    except Exception:
+                        wait = 1.0
+                else:
+                    wait = min(8.0, 2.0 ** attempt)
+                time.sleep(wait if wait > 0 else 1.0)
+                continue
+            r.raise_for_status()
+            data = r.json()
+            items = (data.get('message') or {}).get('items') or []
+            if items:
+                abstract = items[0].get('abstract')
+                if abstract:
+                    return _strip_jats(abstract) or None
             return None
-        if r.status_code in (429, 500, 502, 503, 504):
-            ra = r.headers.get("Retry-After")
-            if ra:
-                try:
-                    wait = float(ra)
-                except Exception:
-                    wait = 1.0
-            else:
-                wait = min(8.0, 2.0 ** attempt)
-            time.sleep(wait if wait > 0 else 1.0)
+        except Exception:
+            time.sleep(min(8.0, 2.0 ** attempt))
             continue
-        r.raise_for_status()
-        data = r.json()
-        items = (data.get('message') or {}).get('items') or []
-        if items:
-            abstract = items[0].get('abstract')
-            if abstract:
-                return _strip_jats(abstract) or None
-        return None
     return None
 
 
@@ -491,16 +500,44 @@ def run(config_path: str, topic: Optional[str] = None, *, mailto: Optional[str] 
         thr = float(af_cfg.get('rank_threshold', global_thresh))
 
         # Step 2: Crossref-only pass for above-threshold entries
-        fetched_crossref = _crossref_pass(
-            db, t, thr,
-            mailto=mailto,
-            session=sess,
-            min_interval=min_interval,
-            max_per_topic=max_per_topic,
-            max_retries=max_retries,
-        )
+        try:
+            fetched_crossref = _crossref_pass(
+                db, t, thr,
+                mailto=mailto,
+                session=sess,
+                min_interval=min_interval,
+                max_per_topic=max_per_topic,
+                max_retries=max_retries,
+            )
+        except Exception as e:
+            logger.error(f"Crossref pass failed for topic '{t}': {e}. Continuing with fallback providers.")
+            fetched_crossref = 0
         # Step 3: Fallback APIs for remaining above-threshold entries
-        fetched_fallback = _fallback_pass(db, t, thr, mailto=mailto, session=sess, min_interval=min_interval, max_per_topic=max_per_topic)
+        try:
+            fetched_fallback = _fallback_pass(db, t, thr, mailto=mailto, session=sess, min_interval=min_interval, max_per_topic=max_per_topic)
+        except Exception as e:
+            logger.error(f"Fallback providers pass failed for topic '{t}': {e}")
+            fetched_fallback = 0
         logger.info(f"Abstracts: topic='{t}' threshold={thr} updated_crossref={fetched_crossref} updated_fallback={fetched_fallback}")
+
+        # After fetching abstracts, regenerate filtered and ranked HTML for this topic
+        try:
+            from processors.html_generator import HTMLGenerator
+            html_gen = HTMLGenerator()
+            output_cfg = tcfg.get('output', {})
+            topic_name = tcfg.get('name', t)
+            topic_desc = tcfg.get('description', f"Articles related to {t}")
+
+            filtered_filename = output_cfg.get('filename')
+            if filtered_filename:
+                html_gen.generate_html_for_topic_from_database(db, t, filtered_filename, topic_desc)
+                logger.info(f"Regenerated filtered HTML for topic '{t}': {filtered_filename}")
+
+            ranked_filename = output_cfg.get('filename_ranked')
+            if ranked_filename:
+                html_gen.generate_ranked_html_from_database(db, t, ranked_filename, f"Ranked Articles - {topic_name}", topic_desc)
+                logger.info(f"Regenerated ranked HTML for topic '{t}': {ranked_filename}")
+        except Exception as e:
+            logger.error(f"Failed to regenerate HTML for topic '{t}': {e}")
 
     # no return

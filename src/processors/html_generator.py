@@ -112,21 +112,24 @@ class HTMLGenerator:
                 link = e.get('link', '#')
                 authors = self.process_text(e.get('authors', ''))
                 published = e.get('published_date', '')
-                summary = self.process_text(e.get('summary', ''))
+                abstract_raw = e.get('abstract', '')
+                summary_raw = e.get('summary', '')
+                body_text = self.process_text(abstract_raw if (abstract_raw and abstract_raw.strip()) else summary_raw)
+                feed_name_entry = self.process_text(e.get('feed_name', ''))
                 score = float(e.get('rank_score') or 0.0)
                 # Truncate to two decimals (not round)
                 score_trunc = int(score * 100) / 100.0
                 score_str = f"{score_trunc:.2f}"
-                html_parts.append(
-                    (
-                        '<div class="entry">\n'
-                        f'  <h3><a href="{link}">{title}</a> <span class="badge">Score {score_str}</span></h3>\n'
-                        f'  <p><strong>Authors:</strong> {authors}</p>\n'
-                        f'  <p><em>Published: {published}</em></p>\n'
-                        f'  <p>{summary}</p>\n'
-                        '</div>\n<hr>'
-                    )
+                entry_html = (
+                    '<div class="entry">\n'
+                    f'  <h3><a href="{link}">{title}</a> <span class="badge">Score {score_str}</span></h3>\n'
+                    f'  <p><strong>Authors:</strong> {authors}</p>\n'
+                    f'  <p><em>Published: {published}</em></p>\n'
+                    f'  <p>{body_text}</p>\n'
+                    f'  <p><strong>{feed_name_entry}</strong></p>\n'
                 )
+                entry_html += '</div>\n<hr>'
+                html_parts.append(entry_html)
 
         # Insert into template
         with open(output_path, 'r', encoding='utf-8') as f:
@@ -170,7 +173,10 @@ class HTMLGenerator:
                 authors = self.process_text(entry.get('authors', ''))
                 published = entry.get('published_date', '')
                 llm_summary_raw = entry.get('llm_summary', '')
-                abstract = self.process_text(entry.get('abstract', ''))
+                abstract_raw = entry.get('abstract', '')
+                summary_raw = entry.get('summary', '')
+                # Use abstract if present; otherwise use summary
+                context_text = self.process_text(abstract_raw if (abstract_raw and abstract_raw.strip()) else summary_raw)
                 rank_score = entry.get('rank_score')
                 
                 # Create unique ID for dropdown
@@ -199,14 +205,17 @@ class HTMLGenerator:
         {llm_summary_html}
     </div>'''
                 
-                if abstract:
+                if context_text:
+                    # Feed name shown below the abstract/summary inside the dropdown
+                    feed_name_entry = self.process_text(entry.get('feed_name', ''))
                     entry_html += f'''
     <div class="abstract-toggle">
-        <button onclick="toggleAbstract('{dropdown_id}')">Show/Hide Original Abstract</button>
+        <button onclick="toggleAbstract('{dropdown_id}')">Show/Hide Original Abstract/Summary</button>
     </div>
     <div id="{dropdown_id}" class="abstract-content">
-        <strong>Original Abstract:</strong><br>
-        {abstract}
+        <strong>Original Abstract/Summary:</strong><br>
+        {context_text}
+        <div class="entry-feed"><strong>{feed_name_entry}</strong></div>
     </div>'''
                 
                 entry_html += '</div>'
@@ -373,7 +382,8 @@ function toggleAbstract(id) {
             '  <h3><a href="$link">$title</a></h3>\n'
             '  <p><strong>Authors:</strong> $authors</p>\n'
             '  <p><em>Published: $published</em></p>\n'
-            '  <p>$summary</p>\n'
+            '  <p>$body_text</p>\n'
+            '  <p><strong>$feed_name</strong></p>\n'
             '</div>\n<hr>'
         )
         
@@ -395,15 +405,20 @@ function toggleAbstract(id) {
                     title = self.process_text(entry.get('title', 'No title'))
                     link = entry.get('link', '#')
                     published = entry.get('published_date', 'No published date')
-                    summary = self.process_text(entry.get('summary', 'No summary'))
+                    abstract_raw = entry.get('abstract', '')
+                    summary_raw = entry.get('summary', '')
+                    # Show abstract if present; otherwise fall back to summary
+                    body_text = self.process_text(abstract_raw if (abstract_raw and abstract_raw.strip()) else summary_raw or 'No summary')
                     authors = self.process_text(entry.get('authors', 'No author'))
+                    feed_name_entry = self.process_text(entry.get('feed_name', ''))
                     
                     context = {
                         'link': link,
                         'title': title,
                         'authors': authors,
                         'published': published,
-                        'summary': summary,
+                        'body_text': body_text,
+                        'feed_name': feed_name_entry,
                     }
                     html_parts.append(ENTRY_TEMPLATE.substitute(context))
         
