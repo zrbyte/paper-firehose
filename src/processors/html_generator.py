@@ -171,6 +171,7 @@ class HTMLGenerator:
                 title_text = self.process_text(entry.get('title', 'No title'))
                 link = entry.get('link', '#')
                 authors = self.process_text(entry.get('authors', ''))
+                feed_name_entry = self.process_text(entry.get('feed_name', ''))
                 published = entry.get('published_date', '')
                 llm_summary_raw = entry.get('llm_summary', '')
                 abstract_raw = entry.get('abstract', '')
@@ -200,6 +201,7 @@ class HTMLGenerator:
         <h3><a href="{link}" target="_blank">{title_text}</a>{score_badge}</h3>
     </div>
     <div class="entry-authors"><strong>Authors:</strong> {authors}</div>
+    <div class="entry-feed"><strong>{feed_name_entry}</strong></div>
     <div class="entry-published"><em>Published:</em> {published}</div>
     <div class="llm-summary">
         {llm_summary_html}
