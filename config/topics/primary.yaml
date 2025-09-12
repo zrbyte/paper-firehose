@@ -37,7 +37,7 @@ feeds:
 
 # Regex filter
 filter:
-  pattern: "(topolog[a-z]+)|\
+  pattern: '(topolog[a-z]+)|\
             (graphit[a-z]+)|\
             (rhombohedr[a-z]+)|\
             (graph[a-z]+.*polytyp[a-z]+)|\
@@ -50,13 +50,13 @@ filter:
             (scan[a-z]+ tunne[a-z]+ micr[a-z]+)|\
             (scan[a-z]+ tunne[a-z]+ spectr[a-z]+)|\
             (scan[a-z]+ prob[a-z]+ micr[a-z]+)|\
-            (MoS.+\\d+|MoS\\d+)|\
-            (MoSe.+\\d+|MoSe\\d+)|\
-            (MoTe.+\\d+|MoTe\\d+)|\
-            (WS.+\\d+|WS\\d+)|\
-            (WSe.+\\d+|WSe\\d+)|\
-            (WTe.+\\d+|WTe\\d+)|\
-            (Bi\\d+Rh\\d+I\\d+|Bi.+\\d+.+Rh.+\\d+.+I.+\\d+.+)|\
+            (MoS.+\d+|MoS\d+)|\
+            (MoSe.+\d+|MoSe\d+)|\
+            (MoTe.+\d+|MoTe\d+)|\
+            (WS.+\d+|WS\d+)|\
+            (WSe.+\d+|WSe\d+)|\
+            (WTe.+\d+|WTe\d+)|\
+            (Bi\d+Rh\d+I\d+|Bi.+\d+.+Rh.+\d+.+I.+\d+.+)|\
             (BiTeI)|\
             (BiTeBr)|\
             (BiTeCl)|\
@@ -64,7 +64,7 @@ filter:
             (Pt2HgSe3|Pt.+2HgSe.+3)|\
             (jacuting[a-z]+)|\
             (flatband)|\
-            (flat.{1}band)"
+            (flat.{1}band)'
   fields: ["title", "summary"]
 
 # Ranking configuration

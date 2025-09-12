@@ -42,24 +42,8 @@ feeds:
 
 # Regex filter
 filter:
-  pattern: "(MoS.+\d+|MoS\d+)|\
-            (MoSe.+\d+|MoSe\d+)|\
-            (MoTe.+\d+|MoTe\d+)|\
-            (WS.+\d+|WS\d+)|\
-            (WSe.+\d+|WSe\d+)|\
-            (WTe.+\d+|WTe\d+)|\
-            (NbSe\d+)|\
-            (PdTe\d+)|\
-            (Mo[\s-]*dichalcogenid[a-z]+)|\
-            (W[\s-]*dichalcogenid[a-z]+)|\
-            (transition[\s-]*metal[\s-]*dichalcogenid[a-z]+)|\
-            (Pt[a-z]*|platinum)|\
+  pattern: '(Pt[a-z]*|platinum)|\
             (platinum[\s-]*nanopartic[a-z]+)|\
-            (Bi|bismuth)|\
-            (Ga|gallium)|\
-            (In|indium)|\
-            (Sn|tin)|\
-            (Pb|lead)|\
             (stanene)|\
             (bismuthene)|\
             (antimonene)|\
@@ -70,20 +54,15 @@ filter:
             (catalys[a-z]+)|\
             (electrocatalys[a-z]+)|\
             (Faradaic[\s-]*efficienc[a-z]*)|\
-            (nonmetallic[\s-]*electronic[\s-]*struct[a-z]*)|\
-            (STM)|\
-            (scan[a-z]+ tunne[a-z]+ micr[a-z]+)"
+            (nonmetallic[\s-]*electronic[\s-]*struct[a-z]*)'
   fields: ["title", "summary"]
 
 # Ranking configuration
 ranking:
   query: >   # Natural-language ranking query used for sentence-transformers similarity
-    MoS2 MoSe2 MoTe2 WS2 WSe2 WTe2
-    dichalcogenide
     transition metal dichalcogenides
     TMDC
     2D metal
-    elemental monolayer
     Pt platinum
     platinum nanoparticle
     Pt bilayer, semiconducting Pt

@@ -34,7 +34,7 @@ feeds:
   - "npj-qmat"
 
 filter:
-  pattern: "(rhombohedr[a-z]+.*graph[a-z]+)|\
+  pattern: '(rhombohedr[a-z]+.*graph[a-z]+)|\
             (graph[a-z]+.*polytyp[a-z]+)|\
             (ABC.*graph[a-z]+)|\
             (ABC.*trilay[a-z]+)|\
@@ -46,7 +46,7 @@ filter:
             (hexalay[a-z]+.*graph[a-z]+)|\
             (graph[a-z]+.*hexalay[a-z]+)|\
             (heptalay[a-z]+.*graph[a-z]+)|\
-            (graph[a-z]+.*heptalay[a-z]+)"
+            (graph[a-z]+.*heptalay[a-z]+)'
   fields: ["title", "summary"]
 
 ranking:
