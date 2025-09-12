@@ -57,6 +57,48 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
   - `python cli/main.py status`
   - Validates config, lists topics/feeds, and shows DB paths.
 
+- **Email** (Mailman digest)
+  - `python cli/main.py email [--topic TOPIC] [--mode auto|ranked] [--limit N] [--dry-run]`
+  - Builds an email‑friendly HTML digest from `papers.db` and sends via SMTP (SSL).
+  - `--mode auto` renders a ranked‑style list directly from `papers.db`; `--mode ranked` embeds the pre‑generated ranked HTML if present, otherwise falls back to the ranked‑style list.
+  - `--dry-run` writes a preview HTML to `assets/` instead of sending.
+  - Per‑recipient routing: `python cli/main.py email --recipients config/secrets/mailing_lists.yaml` or set `config.email.recipients_file`.
+
+### Email configuration
+
+Add an `email` section in `config/config.yaml` (secrets in a separate file):
+
+```
+email:
+  to: "LIST_ADDRESS@yourdomain"             # Mailman list address
+  subject_prefix: "Paper Firehose"           # Optional
+  from: "_mainaccount@nemeslab.com"          # Defaults to smtp.username
+  smtp:
+    host: "mail.nemeslab.com"
+    port: 465
+    username: "_mainaccount@nemeslab.com"
+    password_file: "config/secrets/email_password.txt"  # store only the password here
+```
+
+Notes
+- Store the SMTP password in `config/secrets/email_password.txt` (gitignored).
+- The command prefers to be run after `filter`, `rank`, `abstracts`, and `summarize` so it can include LLM summaries when available.
+
+Per‑recipient YAML (config/secrets/mailing_lists.yaml)
+```
+recipients:
+  - to: "materials-list@nemeslab.com"
+    topics: ["primary", "perovskites"]
+    min_rank_score: 0.40
+    mode: "auto"
+    limit: 15
+  - to: "2d-list@nemeslab.com"
+    topics: ["rg", "2d_metals"]
+    min_rank_score: 0.35
+    mode: "ranked"
+    limit: 10
+```
+
 ## Python API
 
 You can call the main steps programmatically via `paper_firehose`.

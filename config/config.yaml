@@ -191,3 +191,17 @@ defaults:
     max_retries: 3
     # Contact email included in UA and as Crossref mailto param
     mailto: "you@example.org"
+
+# Email delivery (Mailman list)
+email:
+  recipients_file: "config/secrets/mailing_lists.yaml"
+  # Optional subject prefix
+  subject_prefix: "Paper Firehose"
+  # Sender address; defaults to smtp.username if omitted
+  from: "nemeslab@nemeslab.com"
+  smtp:
+    host: "mail.nemeslab.com"
+    port: 465
+    username: "_mainaccount@nemeslab.com"
+    # Prefer file-based secret storage. Put the password in this file (gitignored by you).
+    password_file: "config/secrets/email_password.env"

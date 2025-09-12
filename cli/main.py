@@ -19,6 +19,8 @@ from commands import generate_html as html_cmd
 from commands import rank as rank_cmd
 from commands import abstracts as abstracts_cmd
 from commands import summarize as summarize_cmd
+from commands import email_list as email_cmd
+from commands import email_list as email_cmd
 
 # Setup logging
 logging.basicConfig(
@@ -118,6 +120,26 @@ def summarize(ctx, topic, rps):
             click.echo("✅ Summarization completed for eligible topics")
     except Exception as e:
         click.echo(f"❌ Summarization failed: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command('email')
+@click.option('--topic', help='Send for a specific topic only (default: all topics)')
+@click.option('--mode', type=click.Choice(['auto', 'ranked']), default='auto', help='Content mode: auto (from DB) or ranked (embed ranked HTML if available)')
+@click.option('--limit', type=int, help='Limit number of entries per topic')
+@click.option('--recipients', 'recipients_file', type=str, help='Path to recipients YAML (overrides config.email.recipients_file)')
+@click.option('--dry-run', is_flag=True, help='Do not send; write preview HTML to assets/')
+@click.pass_context
+def email(ctx, topic, mode, limit, recipients_file, dry_run):
+    """Send an HTML digest email generated from papers.db via SMTP."""
+    try:
+        email_cmd.run(ctx.obj['config_path'], topic, mode=mode, limit=limit, dry_run=dry_run, recipients_file=recipients_file)
+        if dry_run:
+            click.echo("📝 Email dry-run completed (preview written to assets/)")
+        else:
+            click.echo("✅ Email sent successfully")
+    except Exception as e:
+        click.echo(f"❌ Email send failed: {e}", err=True)
         sys.exit(1)
 
 
