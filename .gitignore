@@ -7,6 +7,7 @@ __pycache__/
 archive/
 *.html
 !html_template.html
+!llmsummary_template.html
 
 *.db
 *.ipynb
