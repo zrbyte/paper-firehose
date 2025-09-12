@@ -170,8 +170,7 @@
       const parts = parseGithubParts(url) || parseGithubParts(normalizeGithubRaw(url));
       const candidates = [];
       if (parts) {
-        // Prefer jsDelivr for better CORS from file:// origins; fall back to raw.
-        candidates.push(toJsDelivrURL(parts));
+        // Use raw GitHub URL directly to avoid jsDelivr caching issues
         candidates.push(`https://raw.githubusercontent.com/${parts.owner}/${parts.repo}/${parts.branch}/${parts.path}`);
       } else {
         candidates.push(normalizeGithubRaw(url));
@@ -181,7 +180,10 @@
       for (const u of candidates) {
         try {
           const res = await fetch(u);
-          if (!res.ok) { lastErr = new Error(`Failed to fetch: ${res.status}`); continue; }
+          if (!res.ok) { 
+            lastErr = new Error(`Failed to fetch: ${res.status}`); 
+            continue; 
+          }
           const buf = await res.arrayBuffer();
           return new Uint8Array(buf);
         } catch (e) {
