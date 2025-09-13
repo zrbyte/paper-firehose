@@ -340,31 +340,33 @@ def run(config_path: str, topic: Optional[str] = None, *, rps: Optional[float] =
         total_updated += updated
         logger.info("Topic '%s': wrote llm_summary for %d entries", t, updated)
 
-    # Generate summarized HTML for each topic that has summaries
-    if total_updated > 0:
-        try:
-            from processors.html_generator import HTMLGenerator
-            html_gen = HTMLGenerator(template_path="llmsummary_template.html")
-            
-            for t in topics:
-                try:
-                    tcfg = cfg_mgr.load_topic_config(t)
-                    output_config = tcfg.get('output', {})
-                    summary_filename = output_config.get('filename_summary')
-                    
-                    if summary_filename:
-                        # Check if this topic has any summaries
-                        topic_entries = db.get_current_entries(topic=t)
-                        has_summaries = any(e.get('llm_summary') and e.get('llm_summary').strip() for e in topic_entries)
-                        
-                        if has_summaries:
-                            topic_name = tcfg.get('name', t)
-                            html_gen.generate_summarized_html_from_database(db, t, summary_filename, f"LLM Summaries - {topic_name}")
-                            logger.info("Generated summarized HTML for topic '%s': %s", t, summary_filename)
-                except Exception as e:
-                    logger.error("Failed to generate summarized HTML for topic '%s': %s", t, e)
-        except Exception as e:
-            logger.error("Failed to generate summarized HTML: %s", e)
+    # Generate summarized HTML for each topic, even if there are no summaries
+    # Rationale: ensure an output file exists with an empty/placeholder message,
+    # so downstream consumers and links remain stable.
+    try:
+        from processors.html_generator import HTMLGenerator
+        html_gen = HTMLGenerator(template_path="llmsummary_template.html")
+
+        for t in topics:
+            try:
+                tcfg = cfg_mgr.load_topic_config(t)
+                output_config = tcfg.get('output', {})
+                summary_filename = output_config.get('filename_summary')
+
+                if summary_filename:
+                    topic_name = tcfg.get('name', t)
+                    # Always generate; HTMLGenerator will render a friendly
+                    # placeholder when no LLM summaries exist yet.
+                    html_gen.generate_summarized_html_from_database(
+                        db, t, summary_filename, f"LLM Summaries - {topic_name}"
+                    )
+                    logger.info(
+                        "Generated summarized HTML for topic '%s': %s", t, summary_filename
+                    )
+            except Exception as e:
+                logger.error("Failed to generate summarized HTML for topic '%s': %s", t, e)
+    except Exception as e:
+        logger.error("Failed to generate summarized HTML: %s", e)
 
     db.close_all_connections()
     logger.info("LLM summarization completed; total updated=%d", total_updated)
