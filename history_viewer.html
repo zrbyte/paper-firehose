@@ -37,8 +37,10 @@
     <select id="topicSel"><option value="__all__">All</option></select>
     <label for="orderSel">Order:</label>
     <select id="orderSel">
-      <option value="desc">Published desc</option>
-      <option value="asc">Published asc</option>
+      <option value="pub_desc">Published desc</option>
+      <option value="pub_asc">Published asc</option>
+      <option value="matched_desc">Matched desc</option>
+      <option value="matched_asc">Matched asc</option>
     </select>
     <label for="search">Search:</label>
     <input id="search" type="text" size="24" placeholder="title or authors" />
@@ -267,13 +269,26 @@
     }
 
     function sortRows(rows, order) {
+      // Back-compat: if order is just 'asc' or 'desc', treat as published
+      let field = 'published_date';
+      let dir = 'desc';
+      if (order === 'asc' || order === 'desc') {
+        dir = order;
+      } else if (typeof order === 'string') {
+        if (order.startsWith('matched')) field = 'matched_date';
+        if (order.endsWith('_asc')) dir = 'asc';
+        if (order.endsWith('_desc')) dir = 'desc';
+        // also allow 'published_*' or 'pub_*'
+        if (order.startsWith('published') || order.startsWith('pub')) field = 'published_date';
+      }
       return rows.slice().sort((a,b) => {
-        const ap = (a.published_date||'').trim();
-        const bp = (b.published_date||'').trim();
-        if (!ap && !bp) return 0;
-        if (!ap) return 1; // empty last
-        if (!bp) return -1;
-        return (ap < bp ? -1 : (ap > bp ? 1 : 0)) * (order === 'asc' ? 1 : -1);
+        const av = (a[field]||'').trim();
+        const bv = (b[field]||'').trim();
+        if (!av && !bv) return 0;
+        if (!av) return 1; // empty last
+        if (!bv) return -1;
+        const cmp = av < bv ? -1 : (av > bv ? 1 : 0);
+        return dir === 'asc' ? cmp : -cmp;
       });
     }
 
@@ -365,8 +380,13 @@
         // Try later as well when topics populate
         setTimeout(updateTopic, 1500);
       }
-      if (order && (order === 'asc' || order === 'desc')) {
-        $('orderSel').value = order;
+      if (order) {
+        // Accept 'asc'/'desc' (published), 'pub_*', 'published_*', or 'matched_*'
+        let normalized = order;
+        if (order === 'asc' || order === 'desc') normalized = `pub_${order}`;
+        if (order.startsWith('published_')) normalized = order.replace('published_', 'pub_');
+        const allowed = new Set(['pub_asc','pub_desc','matched_asc','matched_desc']);
+        if (allowed.has(normalized)) $('orderSel').value = normalized;
       }
     }
 

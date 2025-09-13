@@ -126,6 +126,8 @@ Functions
   - `history_viewer.html?db=<url>` to load a specific remote DB
   - Use the file input or drag-and-drop a local `matched_entries_history.db`
 
+- `history_viewer_cards.html` provides a cleaner, card‑style view of history entries with just the key fields (title, authors, feed name, abstract, matched date). It supports the same controls and query params as `history_viewer.html` (topic, order, search, `?db=<url>` and file drag‑and‑drop) but focuses on readability instead of tabular data.
+
 
 ## Architecture overview
 
