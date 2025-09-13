@@ -178,10 +178,9 @@ class EmailRenderer:
             items = items[: max_items]
 
         parts: List[str] = []
-        parts.append(f"<h2 style=\"margin:16px 0 8px;\">{html.escape(topic_display_name)} — Ranked</h2>")
+        # Do not include a section header here; the caller provides the header.
         if not items:
-            parts.append('<p style="font-style:italic;color:#555;">No ranked entries available.</p>')
-            return "\n".join(parts)
+            return ""
 
         for e in items:
             title = html.escape((e.get('title') or '').strip() or 'No title')
