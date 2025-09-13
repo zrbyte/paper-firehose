@@ -50,7 +50,7 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
   - If entries are ranked, also generates a ranked page; if entries have `llm_summary` and `output.filename_summary` is configured, also generates a summary page.
 
 - **Purge**
-  - `python cli/main.py purge --days N` removes entries with `published_date` within the most recent N days across all DBs.
+  - `python cli/main.py purge --days N` removes entries with `published_date` within the most recent N days in the seen entries DB.
   - `python cli/main.py purge --all` deletes all DB files and reinitializes schemas (no confirmation prompt).
 
 - **Status**
