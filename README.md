@@ -85,6 +85,7 @@ Notes
 - The command prefers to be run after `filter`, `rank`, `abstracts`, and `summarize` so it can include LLM summaries when available.
 
 Per‑recipient YAML (config/secrets/mailing_lists.yaml)
+Example:
 ```
 recipients:
   - to: "materials-list@nemeslab.com"
@@ -92,14 +93,6 @@ recipients:
     min_rank_score: 0.40
   - to: "2d-list@nemeslab.com"
     topics: ["rg", "2d_metals"]
-    min_rank_score: 0.35
-```
-
-Minimal example
-```
-recipients:
-  - to: "2d-list@nemeslab.com"
-    topics: ["rg"]
     min_rank_score: 0.35
 ```
 
