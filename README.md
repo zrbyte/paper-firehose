@@ -90,13 +90,17 @@ recipients:
   - to: "materials-list@nemeslab.com"
     topics: ["primary", "perovskites"]
     min_rank_score: 0.40
-    mode: "auto"
-    limit: 15
   - to: "2d-list@nemeslab.com"
     topics: ["rg", "2d_metals"]
     min_rank_score: 0.35
-    mode: "ranked"
-    limit: 10
+```
+
+Minimal example
+```
+recipients:
+  - to: "2d-list@nemeslab.com"
+    topics: ["rg"]
+    min_rank_score: 0.35
 ```
 
 ## Python API
