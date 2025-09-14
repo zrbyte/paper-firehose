@@ -44,6 +44,13 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
   - API key resolution: reads from `openaikulcs.env` at repo root (raw key or `OPENAI_API_KEY=...` line), otherwise from `$OPENAI_API_KEY`.
   - Models: uses `config.llm.model` with fallback to `config.llm.model_fallback`. Supports JSON or plain-text responses; JSON is preferred and rendered with headings.
 
+- **pqa_summary** (PDF-based summarization)
+  - `python cli/main.py pqa_summary [--topic TOPIC]`
+  - Selects preprints from arXiv in `papers.db` with `rank_score >= config.paperqa.download_rank_threshold`, detects arXiv IDs, and downloads PDFs (polite arXiv API usage).
+  - Runs paper-qa to summarize full text into JSON keys: `summary`, `topical_relevance`, `methods`, `novelty_impact`.
+  - Writes summaries to `papers.db.entries.paper_qa_summary` and `matched_entries_history.db.matched_entries.paper_qa_summary`.
+  - Generates a PDF-based summary page per topic and includes the same content in the daily email after the abstract when available.
+
 - **HTML** (re-render only; no fetching)
   - `python cli/main.py html [--topic TOPIC]`
   - Reads from `papers.db` to generate filtered and ranked HTML pages.
@@ -162,6 +169,11 @@ Notes
 
 - `config/config.yaml` (feeds, DB paths, defaults)
   - Each feed has a key and a display `name`; the key is used in topic files, the name is stored in DBs.
+  - `paperqa`: settings for the arXiv downloader (Phase 1)
+    - `download_rank_threshold`: minimum `rank_score` to download (default 0.35)
+    - `rps`: requests/second throttle (default 0.3; ~1 request/3.3s per arXiv API guidance)
+    - `max_retries`: per-item retry attempts on transient errors
+    - `prompt`: paper-qa question used for summarization; should instruct the model to return only JSON with keys `summary`, `topical_relevance`, `methods`, `novelty_impact` (supports `{ranking_query}` placeholder)
 - `config/topics/<topic>.yaml`
   - `feeds`: list of feed keys from `config.yaml`.
   - `filter.pattern` and `filter.fields`: regex and fields to match (defaults include `title` and `summary`).
@@ -186,3 +198,7 @@ Notes
 ## Next up
 
 - Paper QA/extraction experiments for full‑text PDFs. Only for arXiv preprints.
+
+## Acknowledgments
+
+Thank you to arXiv for use of its open access interoperability.

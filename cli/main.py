@@ -19,6 +19,7 @@ from commands import generate_html as html_cmd
 from commands import rank as rank_cmd
 from commands import abstracts as abstracts_cmd
 from commands import summarize as summarize_cmd
+from commands import pqa_summary as pqa_cmd
 from commands import email_list as email_cmd
 from commands import email_list as email_cmd
 
@@ -122,6 +123,48 @@ def summarize(ctx, topic, rps):
         click.echo(f"❌ Summarization failed: {e}", err=True)
         sys.exit(1)
 
+
+@cli.command('pqa_summary')
+@click.option('--topic', help='Download arXiv PDFs for a specific topic only')
+@click.option('--rps', type=float, help='Requests per second throttle (polite; overrides config)')
+@click.option('--limit', type=int, help='Limit number of entries per topic (optional)')
+@click.option('--arxiv', 'arxiv_ids', multiple=True, help='ArXiv IDs or URLs to download directly (skip DB selection). Can be specified multiple times.')
+@click.option('--entry-id', 'entry_ids', multiple=True, help='Entry IDs to look up (prefer history DB for weekend testing). Multiple allowed.')
+@click.option('--use-history', is_flag=True, help='Resolve --entry-id lookups against matched_entries_history.db (default)')
+@click.option('--history-date', type=str, help='Restrict history lookup to matched_date (YYYY-MM-DD)')
+@click.option('--history-feed-like', type=str, help='Restrict history lookup to feeds whose name contains this substring (case-insensitive), e.g., "cond-mat"')
+@click.option('--summarize', is_flag=True, help='Run paper-qa summarization on the (archived) PDFs after download')
+@click.pass_context
+def pqa_summary(ctx, topic, rps, limit, arxiv_ids, entry_ids, use_history, history_date, history_feed_like, summarize):
+    """Download arXiv PDFs for ranked entries or specific arXiv IDs/URLs (then archives)."""
+    try:
+        # Default to history when entry_ids are provided unless explicitly not requested
+        effective_use_history = use_history or (len(entry_ids) > 0)
+        # Gate summarization via env var to avoid widening the function signature further
+        if summarize:
+            os.environ['PAPERQA_SUMMARIZE'] = '1'
+        pqa_cmd.run(
+            ctx.obj['config_path'],
+            topic,
+            rps=rps,
+            limit=limit,
+            arxiv=list(arxiv_ids) or None,
+            entry_ids=list(entry_ids) or None,
+            use_history=effective_use_history,
+            history_date=history_date,
+            history_feed_like=history_feed_like,
+        )
+        if arxiv_ids:
+            click.echo("✅ pqa_summary completed for provided arXiv IDs/URLs")
+        elif entry_ids:
+            click.echo("✅ pqa_summary completed for provided entry IDs via history lookup")
+        elif topic:
+            click.echo(f"✅ pqa_summary completed for topic '{topic}'")
+        else:
+            click.echo("✅ pqa_summary completed for all topics")
+    except Exception as e:
+        click.echo(f"❌ pqa_summary failed: {e}", err=True)
+        sys.exit(1)
 
 @cli.command('email')
 @click.option('--topic', help='Send for a specific topic only (default: all topics)')

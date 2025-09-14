@@ -270,11 +270,19 @@ class DatabaseManager:
                     rank_score REAL,
                     rank_reasoning TEXT,
                     llm_summary TEXT,
+                    paper_qa_summary TEXT,
                     raw_data TEXT,
                     PRIMARY KEY (id, topic),
                     UNIQUE(feed_name, topic, id)
                 )
             ''')
+        else:
+            # Lightweight migrations for new optional columns
+            if 'paper_qa_summary' not in columns:
+                try:
+                    cursor.execute("ALTER TABLE entries ADD COLUMN paper_qa_summary TEXT")
+                except Exception:
+                    pass
 
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_entries_topic_status 

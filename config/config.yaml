@@ -15,6 +15,23 @@ llm:
   # GPT-5 specific parameters
   verbosity: "low" # values: low, medium, high
   reasoning_effort: "minimal" # low, medium (default), high. GPT‑5 also supports minimal, which minimizes GPT‑5’s reasoning to return an answer quickly.
+
+# Paper-QA and arXiv downloader configuration
+paperqa:
+  # Download arXiv PDFs for entries with rank_score >= this threshold
+  download_rank_threshold: 0.35
+  # arXiv API ToU recommends ~1 request per 3 seconds; keep rps <= 0.33
+  rps: 0.3
+  max_retries: 3
+  # Prompt used by paper-qa summarization (Phase 2). Keep concise and JSON-only.
+  prompt: >
+    Read the PDF and summarize for an expert reader, according to the following rules.
+    CRITICAL: only reply in JSON format. RETURN EXACTLY THIS STRUCTURE: {"summary":"...", "topical_relevance":"...", "methods":"...", "novelty_impact":"..."}
+    Keep the text information-dense. Avoid using superlatives and other over-the-top language.
+    summary: up to 5 sentences. 
+    topical_relevance: evaluated based on the keywords in {ranking_query}, do NOT list or mention the keywords.
+    methods: experimental setup, parameters, and analysis methods, calculation details, include names of tools used.
+    novelty_impact: up to 5 sentences.
   
 feeds:
   cond-mat:
@@ -173,7 +190,7 @@ priority_journal_boost: 0.20
 
 # Global defaults
 defaults:
-  # Max age of feed entries to consider (days)
+  # Max age of feed entries to accumulate in all_feed_entries.db (days)
   time_window_days: 365
 
   top_n_per_topic: 10
@@ -190,7 +207,7 @@ defaults:
     # Max retries per item (with exponential backoff and Retry-After)
     max_retries: 3
     # Contact email included in UA and as Crossref mailto param
-    mailto: "you@example.org"
+    mailto: "nemesp@gmail.com"
 
 # Email delivery (Mailman list)
 email:

@@ -4,3 +4,4 @@ click
 sentence-transformers>=2.2.2  # needed for `rank` command scoring
 requests
 openai>=1.30.0
+paper-qa

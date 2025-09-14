@@ -255,6 +255,108 @@ function toggleAbstract(id) {
         
         logger.info(f"Generated summarized HTML file for topic '{topic_name}': {output_path}")
     
+    def generate_pqa_summarized_html_from_database(self, db_manager, topic_name: str, output_path: str, title: str = None) -> None:
+        """
+        Generate an HTML file with entries that have paper_qa_summary for a specific topic.
+
+        Uses a yellow-highlighted box and a "Fulltext summary" heading, and
+        renders Summary, Topical Relevance, Methods, and Novelty & Impact.
+        """
+        if title is None:
+            title = f"PDF Summaries - {topic_name}"
+
+        self._create_new_html_file(output_path, title)
+
+        entries = db_manager.get_current_entries(topic=topic_name)
+        summarized_entries = [e for e in entries if e.get('paper_qa_summary') and e.get('paper_qa_summary').strip()]
+
+        if not summarized_entries:
+            html_parts = ['<p class="no-entries">No PDF-based summaries available for this topic.</p>']
+        else:
+            summarized_entries.sort(key=lambda e: (e.get('rank_score') or 0.0), reverse=True)
+
+            html_parts = []
+            html_parts.append(f'<div class="entry-count">{len(summarized_entries)} summarized entries (sorted by rank score)</div>')
+
+            for idx, entry in enumerate(summarized_entries):
+                title_text = self.process_text(entry.get('title', 'No title'))
+                link = entry.get('link', '#')
+                authors = self.process_text(entry.get('authors', ''))
+                feed_name_entry = self.process_text(entry.get('feed_name', ''))
+                published = entry.get('published_date', '')
+                pqa_raw = entry.get('paper_qa_summary', '')
+                abstract_raw = entry.get('abstract', '')
+                summary_raw = entry.get('summary', '')
+                context_text = self.process_text(abstract_raw if (abstract_raw and abstract_raw.strip()) else summary_raw)
+                rank_score = entry.get('rank_score')
+
+                dropdown_id = f"abstract_{topic_name}_{idx}".replace(' ', '_').replace('-', '_')
+
+                score_badge = ""
+                if rank_score is not None:
+                    score = float(rank_score)
+                    score_trunc = int(score * 100) / 100.0
+                    score_str = f"{score_trunc:.2f}"
+                    score_badge = f' <span class="badge">Score {score_str}</span>'
+
+                pqa_html = self._format_pqa_summary(pqa_raw)
+
+                entry_html = f'''
+<div class="entry">
+    <div class="entry-title">
+        <h3><a href="{link}" target="_blank">{title_text}</a>{score_badge}</h3>
+    </div>
+    <div class="entry-authors"><strong>Authors:</strong> {authors}</div>
+    <div class="entry-feed"><strong>{feed_name_entry}</strong></div>
+    <div class="entry-published"><em>Published:</em> {published}</div>
+    <div class="pqa-summary">
+        <h4 class="pqa-heading">Fulltext summary</h4>
+        {pqa_html}
+    </div>'''
+
+                if context_text:
+                    feed_name_entry = self.process_text(entry.get('feed_name', ''))
+                    entry_html += f'''
+    <div class="abstract-toggle">
+        <button onclick="toggleAbstract('{dropdown_id}')">Show/Hide Original Abstract/Summary</button>
+    </div>
+    <div id="{dropdown_id}" class="abstract-content">
+        <strong>Original Abstract/Summary:</strong><br>
+        {context_text}
+        <div class="entry-feed"><strong>{feed_name_entry}</strong></div>
+    </div>'''
+
+                entry_html += '</div>'
+                html_parts.append(entry_html)
+
+        js_script = '''
+<script>
+function toggleAbstract(id) {
+    var element = document.getElementById(id);
+    element.classList.toggle('show');
+}
+</script>'''
+
+        with open(output_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+
+        insert_position = html_content.rfind('</body>')
+        if insert_position == -1:
+            insert_position = len(html_content)
+
+        updated_html = (
+            html_content[:insert_position]
+            + '\n'.join(html_parts)
+            + js_script
+            + html_content[insert_position:]
+        )
+
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(updated_html)
+
+        logger.info(f"Generated PQA summarized HTML file for topic '{topic_name}': {output_path}")
+
+    
     def _format_llm_summary(self, llm_summary_raw: str) -> str:
         """
         Parse LLM summary JSON and format it with proper subheadings.
@@ -281,7 +383,7 @@ function toggleAbstract(id) {
             # Format with subheadings
             return f'''
         <div class="summary-section">
-            <h4>Summary</h4>
+            <h4>Summary of abstract</h4>
             <p>{summary_text}</p>
         </div>
         <div class="summary-section">
@@ -299,6 +401,47 @@ function toggleAbstract(id) {
             # Fall back to plain text if JSON parsing fails
             processed_text = self.process_text(llm_summary_raw)
             return f'<p><strong>LLM Summary:</strong><br>{processed_text}</p>'
+
+    def _format_pqa_summary(self, pqa_raw: str) -> str:
+        """Parse paper_qa_summary JSON and format with Methods section.
+
+        Falls back to plain text if JSON parsing fails.
+        """
+        if not pqa_raw:
+            return '<p class="no-summary">No summary available.</p>'
+
+        try:
+            import json
+            data = json.loads(pqa_raw)
+            if not isinstance(data, dict):
+                raise ValueError('Not a JSON object')
+
+            summary_text = self.process_text(data.get('summary', 'No summary provided'))
+            topical_relevance = self.process_text(data.get('topical_relevance', 'No relevance assessment provided'))
+            methods_text = self.process_text(data.get('methods', 'No methods provided'))
+            novelty_impact = self.process_text(data.get('novelty_impact', 'No impact assessment provided'))
+
+            return f'''
+        <div class="summary-section">
+            <h4>Summary</h4>
+            <p>{summary_text}</p>
+        </div>
+        <div class="summary-section">
+            <h4>Topical Relevance</h4>
+            <p>{topical_relevance}</p>
+        </div>
+        <div class="summary-section">
+            <h4>Methods</h4>
+            <p>{methods_text}</p>
+        </div>
+        <div class="summary-section">
+            <h4>Novelty & Impact</h4>
+            <p>{novelty_impact}</p>
+        </div>'''
+        except Exception as e:
+            logger.debug(f"PQA JSON parsing failed: {e}. Raw text (first 200 chars): {pqa_raw[:200]}")
+            processed_text = self.process_text(pqa_raw)
+            return f'<p><strong>PDF Summary:</strong><br>{processed_text}</p>'
     
     # Note: legacy `generate_html` method removed; the system now renders
     # exclusively from papers.db via `generate_html_from_database`.

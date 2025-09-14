@@ -16,6 +16,7 @@ import os
 import smtplib
 import ssl
 from email.message import EmailMessage
+from html.parser import HTMLParser
 
 
 def _fmt_score_badge(score: Optional[float]) -> str:
@@ -96,6 +97,124 @@ class EmailRenderer:
             )
         return "\n".join(parts)
 
+    # --- HTML sanitization for abstracts (allow <img>) ---
+    def _sanitize_abstract_html(self, html_text: str) -> str:
+        """Return a sanitized HTML string suitable for email, preserving <img>.
+
+        - Allows a small whitelist of tags: b,strong,i,em,u,sub,sup,br,p,ul,ol,li,span,a,img
+        - For <a>, only http/https href; adds rel and target
+        - For <img>, only http/https src; forces style max-width:100%; height:auto
+        - Escapes all text and disallowed tags/attributes
+        """
+        if not html_text or ('<' not in html_text and '>' not in html_text):
+            # No tags likely present; escape and return
+            return html.escape(html_text or '')
+
+        allowed_tags = {
+            'b', 'strong', 'i', 'em', 'u', 'sub', 'sup', 'br', 'p', 'ul', 'ol', 'li', 'span', 'a', 'img'
+        }
+        allowed_attrs = {
+            'a': {'href'},
+            'img': {'src', 'alt', 'width', 'height'},
+            'span': {'style'},
+            'p': {'style'},
+        }
+
+        def is_http_url(url: str) -> bool:
+            u = (url or '').strip().lower()
+            return u.startswith('http://') or u.startswith('https://')
+
+        out: list[str] = []
+        skip_stack: list[str] = []
+        skip_tags = {'cite', 'footer'}  # drop content fully inside these
+
+        class Sanitizer(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                # If entering a skip-only tag, push and ignore until endtag
+                if tag in skip_tags:
+                    skip_stack.append(tag)
+                    return
+                if tag not in allowed_tags:
+                    return
+                if tag == 'a':
+                    href = ''
+                    for k, v in attrs:
+                        if k == 'href' and is_http_url(v):
+                            href = html.escape(v, quote=True)
+                            break
+                    if href:
+                        out.append(f'<a href="{href}" target="_blank" rel="noopener noreferrer">')
+                    else:
+                        out.append('<span>')
+                elif tag == 'img':
+                    src = ''
+                    alt = ''
+                    width = ''
+                    height = ''
+                    for k, v in attrs:
+                        if k == 'src' and is_http_url(v):
+                            src = html.escape(v, quote=True)
+                        elif k == 'alt':
+                            alt = html.escape(v or '', quote=True)
+                        elif k == 'width':
+                            width = html.escape(v or '', quote=True)
+                        elif k == 'height':
+                            height = html.escape(v or '', quote=True)
+                    if src:
+                        style = 'max-width:100%;height:auto;'
+                        dim = ''
+                        if width:
+                            dim += f' width="{width}"'
+                        if height:
+                            dim += f' height="{height}"'
+                        out.append(f'<img src="{src}" alt="{alt}" style="{style}"{dim}>')
+                else:
+                    # Generic allowed tag; filter attrs to allowed ones, escape values
+                    attrs_map = {k: v for k, v in attrs if k in allowed_attrs.get(tag, set())}
+                    attr_str = ''.join([f' {k}="{html.escape(v or "", quote=True)}"' for k, v in attrs_map.items()])
+                    out.append(f'<{tag}{attr_str}>')
+
+            def handle_endtag(self, tag):
+                if skip_stack and tag == skip_stack[-1]:
+                    skip_stack.pop()
+                    return
+                if tag not in allowed_tags:
+                    return
+                # If we replaced <a> with <span>, close span here gracefully; it's okay to emit </a> or </span>
+                if tag == 'a':
+                    out.append('</a>')
+                elif tag in ('img', 'br'):
+                    # already self-closed or no close tag required
+                    return
+                else:
+                    out.append(f'</{tag}>')
+
+            def handle_data(self, data):
+                # Skip data if we're inside a skipped tag
+                if skip_stack:
+                    return
+                # Drop common publisher footer lines like DOI
+                d = data.strip()
+                if not d:
+                    return
+                low = d.lower()
+                if low.startswith('doi:') or low.startswith('https://doi.org'):
+                    return
+                out.append(html.escape(data))
+
+            def handle_entityref(self, name):
+                out.append(f'&{name};')
+
+            def handle_charref(self, name):
+                out.append(f'&#{name};')
+
+        try:
+            Sanitizer().feed(html_text)
+            return ''.join(out)
+        except Exception:
+            # On any parse error, escape whole content
+            return html.escape(html_text)
+
     def render_full_email(
         self,
         title: str,
@@ -153,6 +272,37 @@ class EmailRenderer:
             # Fallback to plain text
             return html.escape(llm_summary_raw)
 
+    def _format_pqa_summary(self, pqa_raw: Optional[str]) -> Optional[str]:
+        """Format paper_qa_summary JSON for email.
+
+        Returns a compact HTML block with Summary, Topical Relevance, Methods,
+        and Novelty & Impact. Falls back to plain escaped text if not JSON.
+        """
+        if not pqa_raw:
+            return None
+        try:
+            import json
+            data = json.loads(pqa_raw)
+            if not isinstance(data, dict):
+                raise ValueError("not an object")
+            summary = html.escape(data.get('summary') or '')
+            topical = html.escape(data.get('topical_relevance') or '')
+            methods = html.escape(data.get('methods') or '')
+            novelty = html.escape(data.get('novelty_impact') or '')
+            parts: List[str] = []
+            if summary:
+                parts.append(f"<div><strong>Summary:</strong> {summary}</div>")
+            if topical:
+                parts.append(f"<div><strong>Topical Relevance:</strong> {topical}</div>")
+            if methods:
+                parts.append(f"<div><strong>Methods:</strong> {methods}</div>")
+            if novelty:
+                parts.append(f"<div><strong>Novelty & Impact:</strong> {novelty}</div>")
+            return "\n".join(parts) if parts else None
+        except Exception:
+            # Fallback to plain text
+            return html.escape(pqa_raw)
+
     def render_ranked_entries(
         self,
         topic_display_name: str,
@@ -190,7 +340,21 @@ class EmailRenderer:
             score_badge = _fmt_score_badge(e.get('rank_score'))
             abstract_raw = (e.get('abstract') or '').strip()
             summary_raw = (e.get('summary') or '').strip()
-            body_text = html.escape(abstract_raw if abstract_raw else summary_raw)
+            content_src = abstract_raw or summary_raw
+            if content_src:
+                body_text = self._sanitize_abstract_html(content_src)
+            else:
+                body_text = '<em>No abstract/summary.</em>'
+            pqa_block = self._format_pqa_summary(e.get('paper_qa_summary'))
+            if pqa_block:
+                pqa_html = (
+                    '<div style="background:#fff8d5;border-left:4px solid #d4b106;padding:8px 10px;margin:8px 0;">\n'
+                    '<div style="font-weight:bold;color:#8a6d3b;margin-bottom:4px;">Fulltext summary</div>'
+                    f"{pqa_block}"
+                    '</div>'
+                )
+            else:
+                pqa_html = ''
 
             parts.append(
                 f"""
@@ -202,6 +366,8 @@ class EmailRenderer:
   <div style=\"color:#333;margin:6px 0;\"><strong>Authors:</strong> {authors}</div>\n
   <div style=\"color:#333;margin:6px 0;\"><strong>{feed_name}</strong></div>\n
   <div style=\"color:#333;margin:6px 0;\">{body_text}</div>\n
+  {pqa_html}
+
 </div>
 """
             )

@@ -343,37 +343,65 @@ def _call_paperqa_on_pdf(pdf_path: str, *, question: str) -> Optional[str]:
 
 
 def _normalize_summary_json(raw: str) -> Optional[str]:
-    """Ensure the summary JSON has keys: summary, topical_relevance, novelty_impact.
+    """Strip code fences, parse JSON, and ensure required keys exist.
 
-    Accepts alternative keys 'relevance' and 'impact' and maps them.
-    Returns a minified JSON string or None on failure.
+    - Removes leading ```/```json and trailing ``` fences when present
+    - Ensures keys: summary, topical_relevance, methods, novelty_impact
+      (accepts aliases: relevance→topical_relevance; approach/method→methods; impact→novelty_impact)
+    - On parse failure, wraps cleaned text under 'summary' and sets others to ''
     """
     import json
-    try:
-        # Try to extract a JSON object from raw text
-        raw_str = raw.strip()
-        # Find the first JSON object if extraneous text present
-        start = raw_str.find('{')
-        end = raw_str.rfind('}')
-        if start != -1 and end != -1 and end > start:
-            raw_str = raw_str[start:end+1]
-        data = json.loads(raw_str)
-        if not isinstance(data, dict):
+
+    def _strip_fences(s: str) -> str:
+        s2 = (s or '').strip()
+        if s2.startswith('```'):
+            # Drop first line (``` or ```json)
+            nl = s2.find('\n')
+            s2 = s2[nl + 1:] if nl != -1 else s2.lstrip('`')
+        s2 = s2.rstrip()
+        if s2.endswith('```'):
+            s2 = s2[:-3].rstrip()
+        return s2
+
+    def _parse_obj(txt: str) -> Optional[dict]:
+        try:
+            obj = json.loads(txt)
+            return obj if isinstance(obj, dict) else None
+        except Exception:
             return None
-        # Map alternative keys if present
-        if 'topical_relevance' not in data and 'relevance' in data:
-            data['topical_relevance'] = data.get('relevance')
-        if 'novelty_impact' not in data and 'impact' in data:
-            data['novelty_impact'] = data.get('impact')
-        # Keep only expected keys
+
+    def _coerce_str(v) -> str:
+        if v is None:
+            return ''
+        return v if isinstance(v, str) else str(v)
+
+    cleaned = _strip_fences(raw)
+    data = _parse_obj(cleaned)
+    if data is None:
+        # Try extract JSON between braces
+        s = cleaned
+        start = s.find('{')
+        end = s.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            data = _parse_obj(s[start:end+1])
+
+    if data is None:
         out = {
-            'summary': data.get('summary', ''),
-            'topical_relevance': data.get('topical_relevance', ''),
-            'novelty_impact': data.get('novelty_impact', ''),
+            'summary': cleaned.strip(),
+            'topical_relevance': '',
+            'methods': '',
+            'novelty_impact': '',
         }
         return json.dumps(out, ensure_ascii=False)
-    except Exception:
-        return None
+
+    # Map aliases and enforce presence
+    out = {
+        'summary': _coerce_str(data.get('summary')),
+        'topical_relevance': _coerce_str(data.get('topical_relevance') or data.get('relevance')),
+        'methods': _coerce_str(data.get('methods') or data.get('method') or data.get('approach')),
+        'novelty_impact': _coerce_str(data.get('novelty_impact') or data.get('impact')),
+    }
+    return json.dumps(out, ensure_ascii=False)
 
 
 def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: str) -> None:
@@ -388,8 +416,10 @@ def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: 
         conn = sqlite3.connect(db.db_paths['current'])
         cur = conn.cursor()
         cur.execute("UPDATE entries SET paper_qa_summary = ? WHERE id = ?", (json_summary, entry_id))
+        updated_current = cur.rowcount
         conn.commit()
         conn.close()
+        logger.info("paper-qa DB write (papers.db): entry_id=%s updated_rows=%d", entry_id, updated_current)
     except Exception as e:
         logger.debug("Failed to write to papers.db for %s: %s", entry_id, e)
     # History DB
@@ -397,8 +427,10 @@ def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: 
         hconn = sqlite3.connect(db.db_paths['history'])
         hcur = hconn.cursor()
         hcur.execute("UPDATE matched_entries SET paper_qa_summary = ? WHERE entry_id = ?", (json_summary, entry_id))
+        updated_history = hcur.rowcount
         hconn.commit()
         hconn.close()
+        logger.info("paper-qa DB write (history.db): entry_id=%s updated_rows=%d", entry_id, updated_history)
     except Exception as e:
         logger.debug("Failed to write to matched_entries_history.db for %s: %s", entry_id, e)
 
@@ -647,12 +679,6 @@ def run(
     summarize_targets = repaired
     logger.info("Completed pqa_summary: candidates=%d, downloaded=%d, archived=%d", total_candidates, total_downloaded, len(downloaded_paths))
 
-    # Optional summarization phase (triggered via CLI)
-    # The CLI will pass a sentinel in config via env/kwargs; here we check an env var
-    do_summarize = os.environ.get('PAPERQA_SUMMARIZE', '').lower() in ('1', 'true', 'yes')
-    if not do_summarize:
-        return
-
     if not summarize_targets:
         logger.info("No PDFs to summarize.")
         return
@@ -685,9 +711,11 @@ def run(
         except Exception:
             # Best-effort logging; ignore formatting failures
             pass
+        # Normalize and write
         norm = _normalize_summary_json(raw_ans)
         if not norm:
-            continue
+            # As a last resort, write the raw response
+            norm = raw_ans
         if eid:
             _write_pqa_summary_to_dbs(db, eid, norm)
             summarized += 1
@@ -696,3 +724,23 @@ def run(
             logger.debug("Got summary for %s but no entry_id present; skipping DB write", aid)
 
     logger.info("paper-qa summarization completed: wrote %d summaries", summarized)
+
+    # Generate PQA summarized HTML for each topic, similar to LLM summaries but using paper_qa_summary
+    try:
+        from processors.html_generator import HTMLGenerator
+        html_gen = HTMLGenerator(template_path="llmsummary_template.html")
+        for t in topics:
+            try:
+                tcfg = cfg_mgr.load_topic_config(t)
+                output_config = tcfg.get('output', {})
+                summary_filename = output_config.get('filename_summary')
+                if summary_filename:
+                    topic_name = tcfg.get('name', t)
+                    html_gen.generate_pqa_summarized_html_from_database(
+                        db, t, summary_filename, f"PDF Summaries - {topic_name}"
+                    )
+                    logger.info("Generated PQA summarized HTML for topic '%s': %s", t, summary_filename)
+            except Exception as e:
+                logger.error("Failed to generate PQA summarized HTML for topic '%s': %s", t, e)
+    except Exception as e:
+        logger.error("Failed to generate PQA summarized HTML: %s", e)

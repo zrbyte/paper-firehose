@@ -102,9 +102,9 @@ llm_summary:
     No markdown formatting, no explanations, no text before or after the JSON object.
     Required JSON structure:
     {
-      "summary": "Brief technical summary of the paper",
+      "summary": "Brief technical summary of the paper", three sentences.
       "topical_relevance": "Assessment of relevance to: {ranking_query}, in one sentence",
-      "novelty_impact": "Evaluation of novelty and potential impact"
+      "novelty_impact": "Evaluation of novelty and potential impact", in two sentences.
     }
   # Cutoffs: strongest cutoff applies (the one returning the fewest entries)
   # score_cutoff: minimum cosine similarity (0.0–1.0)
