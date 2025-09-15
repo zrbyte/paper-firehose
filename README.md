@@ -2,7 +2,7 @@
 
 - Fetches academic RSS feeds, filters entries with per-topic regex, and writes results into SQLite databases. HTML pages with the results are rendered directly from the database.
 - Results are ranked by cosine similarity to a set of user defined keywords. Configurable list of authors can get a ranking boost. So papers from your friends / competitors can be boosted in ranking.
-- Highest ranked results are summarized by LLM (gpt-5-mini at the moment). For summarization to work, you need an OpenAI API key.
+- Highest ranked results are summarized by an LLM. For summarization to work, you need an OpenAI API key.
 - New search terms can be created by simply adding a yaml config file under: `config/topics/your_topic_name.yaml`. Look at the other topics for guidance. The script is configured to run using Github actions each day at 6 AM to fetch new papers. For your own runs, configure the `.github/workflows/pages.yml` file.
 
 Written using Python 3.11.
@@ -40,21 +40,28 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
   - `python cli/main.py summarize [--topic TOPIC] [--rps 0.5]`
   - Selects top entries per topic based on `llm_summary.score_cutoff` and `llm_summary.top_n`, builds input strictly from `title + abstract` (skips entries without an abstract), and calls the configured OpenAI chat model.
   - Writes summaries to `papers.db.entries.llm_summary` and, when present, `matched_entries_history.db.matched_entries.llm_summary`.
-  - If `output.filename_summary` is set for a topic, generates a summary HTML page using `llmsummary_template.html` that prefers PDF-based summaries (`paper_qa_summary`) when available, otherwise falls back to `llm_summary`. If neither is available for an entry, the page shows the ranked fields (abstract → summary) as a fallback, ordered by descending rank.
-  - API key resolution: reads from `openaikulcs.env` at repo root (raw key or `OPENAI_API_KEY=...` line), otherwise from `$OPENAI_API_KEY`.
-  - Models: uses `config.llm.model` with fallback to `config.llm.model_fallback`. Supports JSON or plain-text responses; JSON is preferred and rendered with headings.
+  - If `output.filename_summary` is set for a topic, generates a summary HTML page (see "Summary pages" below for content priority).
+  - Uses `config.llm` settings. Supports JSON or plain-text responses; JSON is preferred and rendered with headings.
 
 - **pqa_summary** (PDF-based summarization)
   - `python cli/main.py pqa_summary [--topic TOPIC]`
   - Selects preprints from arXiv in `papers.db` with `rank_score >= config.paperqa.download_rank_threshold`, detects arXiv IDs, and downloads PDFs (polite arXiv API usage).
   - Runs paper-qa to summarize full text into JSON keys: `summary`, `topical_relevance`, `methods`, `novelty_impact`.
   - Writes summaries to `papers.db.entries.paper_qa_summary` only for the specific topic row the item was selected under (no longer cross-updating all topics for the same entry id), and to `matched_entries_history.db.matched_entries.paper_qa_summary`.
-  - Updates the topic summary page (`output.filename_summary`) using PDF-based summaries when available; entries without `paper_qa_summary` display `llm_summary`; if neither exists, the page shows the ranked fields (abstract → summary) as fallback content.
+  - If `output.filename_summary` is configured for the topic, the summary page is refreshed (see "Summary pages" below for content priority).
 
 - **HTML** (re-render only; no fetching)
   - `python cli/main.py html [--topic TOPIC]`
   - Reads from `papers.db` to generate filtered and ranked HTML pages.
-  - If entries are ranked, also generates a ranked page; if `output.filename_summary` is configured, also generates a summary page (PDF-based summaries preferred, then LLM summary, otherwise ranked fields as fallback), always ordered by descending rank.
+  - If entries are ranked, also generates a ranked page; if `output.filename_summary` is configured, also generates a summary page (see "Summary pages" below for content priority).
+
+### Summary pages
+
+- When `output.filename_summary` is set for a topic, summary pages prefer content in this order:
+  1) `paper_qa_summary` (PDF-based)
+  2) `llm_summary`
+  3) Fallback to ranked fields (abstract → summary)
+- Entries are ordered by descending `rank_score`.
 
 - **Purge**
   - `python cli/main.py purge --days N` removes entries with `published_date` within the most recent N days in the seen entries DB.
