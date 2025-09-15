@@ -154,24 +154,23 @@ class HTMLGenerator:
         
         self._create_new_html_file(output_path, title)
         
-        # Get entries for this topic and keep those having either PQA or LLM summaries
+        # Load entries for this topic; prefer those with rank_score to match ranked order
         entries = db_manager.get_current_entries(topic=topic_name)
-        summarized_entries = [
-            e for e in entries
-            if ((e.get('paper_qa_summary') or '').strip()) or ((e.get('llm_summary') or '').strip())
-        ]
-        
-        if not summarized_entries:
-            html_parts = ['<p class="no-entries">No LLM summaries available for this topic.</p>']
+        ranked_entries = [e for e in entries if e.get('rank_score') is not None]
+        # If nothing has rank_score, fall back to all entries
+        base_entries = ranked_entries if ranked_entries else entries
+
+        if not base_entries:
+            html_parts = ['<p class="no-entries">No entries available for this topic.</p>']
         else:
             # Sort entries by rank_score in descending order (highest scores first)
-            summarized_entries.sort(key=lambda e: (e.get('rank_score') or 0.0), reverse=True)
-            
+            base_entries.sort(key=lambda e: (e.get('rank_score') or 0.0), reverse=True)
+
             html_parts = []
-            html_parts.append(f'<div class="entry-count">{len(summarized_entries)} summarized entries (sorted by rank score)</div>')
-            
+            html_parts.append(f'<div class="entry-count">{len(base_entries)} summarized entries (sorted by rank score)</div>')
+
             # Entries for this topic
-            for idx, entry in enumerate(summarized_entries):
+            for idx, entry in enumerate(base_entries):
                 title_text = self.process_text(entry.get('title', 'No title'))
                 link = entry.get('link', '#')
                 authors = self.process_text(entry.get('authors', ''))
@@ -198,16 +197,27 @@ class HTMLGenerator:
                     score_str = f"{score_trunc:.2f}"
                     score_badge = f' <span class="badge">Score {score_str}</span>'
                 
-                # Build summary HTML: PQA preferred, else LLM
+                # Build summary HTML per entry:
+                # 1) Prefer PQA summary
+                # 2) Else use LLM summary
+                # 3) Else fall back to ranked fields (abstract -> summary)
+                used_fallback = False
                 if (pqa_summary_raw or '').strip():
                     summary_block_html = f'''<div class="pqa-summary">
         <h4 class="pqa-heading">Fulltext summary</h4>
         {self._format_pqa_summary(pqa_summary_raw)}
     </div>'''
-                else:
+                elif (llm_summary_raw or '').strip():
                     # Parse LLM summary JSON if possible, otherwise display as plain text
                     summary_block_html = f'''<div class="llm-summary">
         {self._format_llm_summary(llm_summary_raw)}
+    </div>'''
+                else:
+                    used_fallback = True
+                    # Show context text similar to ranked page
+                    fallback_text = context_text if context_text else 'No abstract or summary available.'
+                    summary_block_html = f'''<div class="llm-summary">
+        <p>{fallback_text}</p>
     </div>'''
                 
                 entry_html = f'''
@@ -220,7 +230,8 @@ class HTMLGenerator:
     <div class="entry-published"><em>Published:</em> {published}</div>
     {summary_block_html}'''
                 
-                if context_text:
+                # Only show the dropdown if we are not already showing the context as the main block
+                if context_text and not used_fallback:
                     # Feed name shown below the abstract/summary inside the dropdown
                     feed_name_entry = self.process_text(entry.get('feed_name', ''))
                     entry_html += f'''

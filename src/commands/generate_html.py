@@ -88,22 +88,16 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
                 summary_filename = output_config.get('filename_summary')
                 
                 if summary_filename:
-                    # Check if this topic has any summaries (PQA preferred, else LLM)
-                    topic_entries = db_manager.get_current_entries(topic=topic_name)
-                    has_summaries = any(
-                        ((e.get('paper_qa_summary') or '').strip()) or ((e.get('llm_summary') or '').strip())
-                        for e in topic_entries
+                    topic_display_name = topic_config.get('name', topic_name)
+                    # Always generate the summary page. The generator prefers PQA/LLM summaries
+                    # and falls back to ranked fields when none are available.
+                    html_gen.generate_summarized_html_from_database(
+                        db_manager,
+                        topic_name,
+                        summary_filename,
+                        f"LLM Summaries - {topic_display_name}"
                     )
-
-                    if has_summaries:
-                        topic_display_name = topic_config.get('name', topic_name)
-                        html_gen.generate_summarized_html_from_database(
-                            db_manager,
-                            topic_name,
-                            summary_filename,
-                            f"LLM Summaries - {topic_display_name}"
-                        )
-                        logger.info("Generated summarized HTML for topic '%s': %s", topic_name, summary_filename)
+                    logger.info("Generated summarized HTML for topic '%s': %s", topic_name, summary_filename)
             except Exception as e:
                 logger.error("Failed to generate summarized HTML for topic '%s': %s", topic_name, e)
     except Exception as e:
