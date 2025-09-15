@@ -48,7 +48,7 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
   - `python cli/main.py pqa_summary [--topic TOPIC]`
   - Selects preprints from arXiv in `papers.db` with `rank_score >= config.paperqa.download_rank_threshold`, detects arXiv IDs, and downloads PDFs (polite arXiv API usage).
   - Runs paper-qa to summarize full text into JSON keys: `summary`, `topical_relevance`, `methods`, `novelty_impact`.
-  - Writes summaries to `papers.db.entries.paper_qa_summary` and `matched_entries_history.db.matched_entries.paper_qa_summary`.
+  - Writes summaries to `papers.db.entries.paper_qa_summary` only for the specific topic row the item was selected under (no longer cross-updating all topics for the same entry id), and to `matched_entries_history.db.matched_entries.paper_qa_summary`.
   - Generates a PDF-based summary page per topic and includes the same content in the daily email after the abstract when available.
 
 - **HTML** (re-render only; no fetching)

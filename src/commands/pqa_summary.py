@@ -404,10 +404,10 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
     return json.dumps(out, ensure_ascii=False)
 
 
-def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: str) -> None:
+def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: str, *, topic: Optional[str] = None) -> None:
     """Write paper_qa_summary JSON into both current and history DBs.
 
-    - papers.db: update all rows with id = entry_id (across topics)
+    - papers.db: update the row for (id, topic) when topic is provided; otherwise update all rows with id = entry_id.
     - matched_entries_history.db: update row with entry_id
     """
     import sqlite3
@@ -415,11 +415,32 @@ def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: 
     try:
         conn = sqlite3.connect(db.db_paths['current'])
         cur = conn.cursor()
-        cur.execute("UPDATE entries SET paper_qa_summary = ? WHERE id = ?", (json_summary, entry_id))
+        if topic:
+            cur.execute(
+                "UPDATE entries SET paper_qa_summary = ? WHERE id = ? AND topic = ?",
+                (json_summary, entry_id, topic),
+            )
+        else:
+            cur.execute(
+                "UPDATE entries SET paper_qa_summary = ? WHERE id = ?",
+                (json_summary, entry_id),
+            )
         updated_current = cur.rowcount
         conn.commit()
         conn.close()
-        logger.info("paper-qa DB write (papers.db): entry_id=%s updated_rows=%d", entry_id, updated_current)
+        if topic:
+            logger.info(
+                "paper-qa DB write (papers.db): entry_id=%s topic=%s updated_rows=%d",
+                entry_id,
+                topic,
+                updated_current,
+            )
+        else:
+            logger.info(
+                "paper-qa DB write (papers.db): entry_id=%s updated_rows=%d",
+                entry_id,
+                updated_current,
+            )
     except Exception as e:
         logger.debug("Failed to write to papers.db for %s: %s", entry_id, e)
     # History DB
@@ -717,7 +738,7 @@ def run(
             # As a last resort, write the raw response
             norm = raw_ans
         if eid:
-            _write_pqa_summary_to_dbs(db, eid, norm)
+            _write_pqa_summary_to_dbs(db, eid, norm, topic=tctx)
             summarized += 1
         else:
             # No entry id: history-only test not possible; skip write
