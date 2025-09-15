@@ -195,10 +195,6 @@ Notes
   - `max_retries`: retry attempts per item on transient errors
   - Optional GPT‑5 parameters: `verbosity`, `reasoning_effort` (used when the model starts with `gpt-5`)
 
-## Next up
-
-- Paper QA/extraction experiments for full‑text PDFs. Only for arXiv preprints.
-
 ## Acknowledgments
 
 Thank you to arXiv for use of its open access interoperability.
