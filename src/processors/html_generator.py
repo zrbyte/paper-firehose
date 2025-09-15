@@ -144,18 +144,22 @@ class HTMLGenerator:
     
     def generate_summarized_html_from_database(self, db_manager, topic_name: str, output_path: str, title: str = None) -> None:
         """
-        Generate an HTML file with entries that have LLM summaries for a specific topic.
-        
-        Shows entry title (as link), authors, LLM summary, and original abstract in dropdown.
+        Generate an HTML file with entries that have either paper_qa_summary or llm_summary for a topic.
+
+        Preference: display paper_qa_summary when available; otherwise fall back to llm_summary.
+        Shows entry title (as link), authors, summary block, and original abstract in dropdown.
         """
         if title is None:
             title = f"LLM Summaries - {topic_name}"
         
         self._create_new_html_file(output_path, title)
         
-        # Get entries with non-empty llm_summary for this specific topic
+        # Get entries for this topic and keep those having either PQA or LLM summaries
         entries = db_manager.get_current_entries(topic=topic_name)
-        summarized_entries = [e for e in entries if e.get('llm_summary') and e.get('llm_summary').strip()]
+        summarized_entries = [
+            e for e in entries
+            if ((e.get('paper_qa_summary') or '').strip()) or ((e.get('llm_summary') or '').strip())
+        ]
         
         if not summarized_entries:
             html_parts = ['<p class="no-entries">No LLM summaries available for this topic.</p>']
@@ -173,6 +177,8 @@ class HTMLGenerator:
                 authors = self.process_text(entry.get('authors', ''))
                 feed_name_entry = self.process_text(entry.get('feed_name', ''))
                 published = entry.get('published_date', '')
+                # Prefer PQA summary; fall back to LLM summary
+                pqa_summary_raw = entry.get('paper_qa_summary', '')
                 llm_summary_raw = entry.get('llm_summary', '')
                 abstract_raw = entry.get('abstract', '')
                 summary_raw = entry.get('summary', '')
@@ -192,8 +198,17 @@ class HTMLGenerator:
                     score_str = f"{score_trunc:.2f}"
                     score_badge = f' <span class="badge">Score {score_str}</span>'
                 
-                # Parse LLM summary JSON if possible, otherwise display as plain text
-                llm_summary_html = self._format_llm_summary(llm_summary_raw)
+                # Build summary HTML: PQA preferred, else LLM
+                if (pqa_summary_raw or '').strip():
+                    summary_block_html = f'''<div class="pqa-summary">
+        <h4 class="pqa-heading">Fulltext summary</h4>
+        {self._format_pqa_summary(pqa_summary_raw)}
+    </div>'''
+                else:
+                    # Parse LLM summary JSON if possible, otherwise display as plain text
+                    summary_block_html = f'''<div class="llm-summary">
+        {self._format_llm_summary(llm_summary_raw)}
+    </div>'''
                 
                 entry_html = f'''
 <div class="entry">
@@ -203,16 +218,14 @@ class HTMLGenerator:
     <div class="entry-authors"><strong>Authors:</strong> {authors}</div>
     <div class="entry-feed"><strong>{feed_name_entry}</strong></div>
     <div class="entry-published"><em>Published:</em> {published}</div>
-    <div class="llm-summary">
-        {llm_summary_html}
-    </div>'''
+    {summary_block_html}'''
                 
                 if context_text:
                     # Feed name shown below the abstract/summary inside the dropdown
                     feed_name_entry = self.process_text(entry.get('feed_name', ''))
                     entry_html += f'''
     <div class="abstract-toggle">
-        <button onclick="toggleAbstract('{dropdown_id}')">Show/Hide Original Abstract/Summary</button>
+        <button onclick="toggleAbstract('{dropdown_id}')">Show/Hide Original Abstract</button>
     </div>
     <div id="{dropdown_id}" class="abstract-content">
         <strong>Original Abstract/Summary:</strong><br>
@@ -318,7 +331,7 @@ function toggleAbstract(id) {
                     feed_name_entry = self.process_text(entry.get('feed_name', ''))
                     entry_html += f'''
     <div class="abstract-toggle">
-        <button onclick="toggleAbstract('{dropdown_id}')">Show/Hide Original Abstract/Summary</button>
+        <button onclick="toggleAbstract('{dropdown_id}')">Show/Hide Original Abstract</button>
     </div>
     <div id="{dropdown_id}" class="abstract-content">
         <strong>Original Abstract/Summary:</strong><br>

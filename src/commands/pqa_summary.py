@@ -746,7 +746,7 @@ def run(
 
     logger.info("paper-qa summarization completed: wrote %d summaries", summarized)
 
-    # Generate PQA summarized HTML for each topic, similar to LLM summaries but using paper_qa_summary
+    # Generate summarized HTML for each topic, preferring paper_qa_summary and falling back to llm_summary
     try:
         from processors.html_generator import HTMLGenerator
         html_gen = HTMLGenerator(template_path="llmsummary_template.html")
@@ -757,11 +757,12 @@ def run(
                 summary_filename = output_config.get('filename_summary')
                 if summary_filename:
                     topic_name = tcfg.get('name', t)
-                    html_gen.generate_pqa_summarized_html_from_database(
-                        db, t, summary_filename, f"PDF Summaries - {topic_name}"
+                    # Use the combined generator so existing LLM summaries remain visible
+                    html_gen.generate_summarized_html_from_database(
+                        db, t, summary_filename, f"LLM Summaries - {topic_name}"
                     )
-                    logger.info("Generated PQA summarized HTML for topic '%s': %s", t, summary_filename)
+                    logger.info("Generated summarized HTML for topic '%s': %s", t, summary_filename)
             except Exception as e:
-                logger.error("Failed to generate PQA summarized HTML for topic '%s': %s", t, e)
+                logger.error("Failed to generate summarized HTML for topic '%s': %s", t, e)
     except Exception as e:
-        logger.error("Failed to generate PQA summarized HTML: %s", e)
+        logger.error("Failed to generate summarized HTML: %s", e)

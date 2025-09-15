@@ -40,7 +40,7 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
   - `python cli/main.py summarize [--topic TOPIC] [--rps 0.5]`
   - Selects top entries per topic based on `llm_summary.score_cutoff` and `llm_summary.top_n`, builds input strictly from `title + abstract` (skips entries without an abstract), and calls the configured OpenAI chat model.
   - Writes summaries to `papers.db.entries.llm_summary` and, when present, `matched_entries_history.db.matched_entries.llm_summary`.
-  - If `output.filename_summary` is set for a topic and summaries exist, generates an LLM summary HTML page using `llmsummary_template.html`.
+  - If `output.filename_summary` is set for a topic and summaries exist, generates a summary HTML page using `llmsummary_template.html` that prefers PDF-based summaries (`paper_qa_summary`) when available, otherwise falls back to `llm_summary`.
   - API key resolution: reads from `openaikulcs.env` at repo root (raw key or `OPENAI_API_KEY=...` line), otherwise from `$OPENAI_API_KEY`.
   - Models: uses `config.llm.model` with fallback to `config.llm.model_fallback`. Supports JSON or plain-text responses; JSON is preferred and rendered with headings.
 
@@ -49,12 +49,12 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
   - Selects preprints from arXiv in `papers.db` with `rank_score >= config.paperqa.download_rank_threshold`, detects arXiv IDs, and downloads PDFs (polite arXiv API usage).
   - Runs paper-qa to summarize full text into JSON keys: `summary`, `topical_relevance`, `methods`, `novelty_impact`.
   - Writes summaries to `papers.db.entries.paper_qa_summary` only for the specific topic row the item was selected under (no longer cross-updating all topics for the same entry id), and to `matched_entries_history.db.matched_entries.paper_qa_summary`.
-  - Generates a PDF-based summary page per topic and includes the same content in the daily email after the abstract when available.
+  - Updates the topic summary page (`output.filename_summary`) using PDF-based summaries when available; entries without `paper_qa_summary` display `llm_summary` instead.
 
 - **HTML** (re-render only; no fetching)
   - `python cli/main.py html [--topic TOPIC]`
   - Reads from `papers.db` to generate filtered and ranked HTML pages.
-  - If entries are ranked, also generates a ranked page; if entries have `llm_summary` and `output.filename_summary` is configured, also generates a summary page.
+  - If entries are ranked, also generates a ranked page; if entries have `paper_qa_summary` or `llm_summary` and `output.filename_summary` is configured, also generates a summary page (PDF-based summaries preferred).
 
 - **Purge**
   - `python cli/main.py purge --days N` removes entries with `published_date` within the most recent N days in the seen entries DB.
