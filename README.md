@@ -40,20 +40,22 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
   - `python cli/main.py summarize [--topic TOPIC] [--rps 0.5]`
   - Selects top entries per topic based on `llm_summary.score_cutoff` and `llm_summary.top_n`, builds input strictly from `title + abstract` (skips entries without an abstract), and calls the configured OpenAI chat model.
   - Writes summaries to `papers.db.entries.llm_summary` and, when present, `matched_entries_history.db.matched_entries.llm_summary`.
-  - If `output.filename_summary` is set for a topic, generates a summary HTML page (see "Summary pages" below for content priority).
   - Uses `config.llm` settings. Supports JSON or plain-text responses; JSON is preferred and rendered with headings.
+  - Note: This command only updates databases. Use `html` to render pages.
 
 - **pqa_summary** (PDF-based summarization)
   - `python cli/main.py pqa_summary [--topic TOPIC]`
   - Selects preprints from arXiv in `papers.db` with `rank_score >= config.paperqa.download_rank_threshold`, detects arXiv IDs, and downloads PDFs (polite arXiv API usage).
   - Runs paper-qa to summarize full text into JSON keys: `summary`, `topical_relevance`, `methods`, `novelty_impact`.
   - Writes summaries to `papers.db.entries.paper_qa_summary` only for the specific topic row the item was selected under (no longer cross-updating all topics for the same entry id), and to `matched_entries_history.db.matched_entries.paper_qa_summary`.
-  - If `output.filename_summary` is configured for the topic, the summary page is refreshed (see "Summary pages" below for content priority).
+  - Note: This command only updates databases. Use `html` to render pages.
 
-- **HTML** (re-render only; no fetching)
+- **HTML** (render only; no fetching)
   - `python cli/main.py html [--topic TOPIC]`
-  - Reads from `papers.db` to generate filtered and ranked HTML pages.
-  - If entries are ranked, also generates a ranked page; if `output.filename_summary` is configured, also generates a summary page (see "Summary pages" below for content priority).
+  - Reads from `papers.db` and generates, per topic:
+    - Filtered page: `output.filename` (if configured)
+    - Ranked page: `output.filename_ranked` (if configured and entries exist)
+    - Summary page: `output.filename_summary` (if configured). Content priority: PDF summaries → LLM summaries → abstract-only fallback; always ordered by rank.
 
 ### Summary pages
 

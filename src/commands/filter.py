@@ -1,6 +1,7 @@
 """
 Filter command implementation.
-Fetches RSS feeds, applies regex filters, and generates HTML output.
+Fetches RSS feeds, applies regex filters, and writes results to databases.
+HTML rendering is handled exclusively by the `html` command.
 """
 
 import os
@@ -10,7 +11,6 @@ from typing import Optional
 from core.config import ConfigManager
 from core.database import DatabaseManager
 from processors.feed_processor import FeedProcessor
-from commands import generate_html as html_cmd  # reuse shared HTML generation
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +23,7 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
     2. Fetch RSS feeds for each topic
     3. Deduplicate feeds. 
     4. Apply regex filters
-    5. Generate HTML output
-    6. Store filtered entries in database with status='filtered'
+    5. Store filtered entries in database with status='filtered'
     
     Args:
         config_path: Path to the main configuration file
@@ -103,12 +102,6 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         # Save ALL processed entries to deduplication database
         if all_processed_entries:
             feed_processor.save_all_entries_to_dedup_db(all_processed_entries)
-        
-        # After processing, regenerate HTML for all topics from the current DB
-        try:
-            html_cmd.run(config_path)
-        except Exception as e:
-            logger.error(f"HTML regeneration failed after filtering: {e}")
         
         # Close database connections
         db_manager.close_all_connections()
