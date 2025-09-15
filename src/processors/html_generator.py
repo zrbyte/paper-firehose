@@ -181,8 +181,10 @@ class HTMLGenerator:
                 llm_summary_raw = entry.get('llm_summary', '')
                 abstract_raw = entry.get('abstract', '')
                 summary_raw = entry.get('summary', '')
-                # Use abstract if present; otherwise use summary
+                # For dropdown context (when AI summary exists), prefer abstract; else fall back to summary
                 context_text = self.process_text(abstract_raw if (abstract_raw and abstract_raw.strip()) else summary_raw)
+                # For no-AI-summary fallback block, include only the abstract (never the summary)
+                abstract_text_only = self.process_text(abstract_raw) if (abstract_raw and str(abstract_raw).strip()) else ''
                 rank_score = entry.get('rank_score')
                 
                 # Create unique ID for dropdown
@@ -214,8 +216,8 @@ class HTMLGenerator:
     </div>'''
                 else:
                     used_fallback = True
-                    # Show context text similar to ranked page
-                    fallback_text = context_text if context_text else 'No abstract or summary available.'
+                    # Only show the abstract from DB; do not use the RSS summary
+                    fallback_text = abstract_text_only if abstract_text_only else 'No abstract available.'
                     summary_block_html = f'''<div class="llm-summary">
         <p>{fallback_text}</p>
     </div>'''

@@ -118,11 +118,17 @@ jobs:
           echo "Step 3: Running abstracts command..."
           python cli/main.py abstracts --mailto "github-actions@paper-firehose.com"
           
-          echo "Step 4: Running pqa_summary (PDF-based summarization) ..."
+          echo "Step 4: Running abstract summarization ..."
+          python cli/main.py summarize
+
+          echo "Step 5: Running pqa_summary (PDF-based summarization) ..."
           python cli/main.py pqa_summary
           
-          echo "Step 5: Running email command..."
+          echo "Step 6: Running email command..."
           python cli/main.py email
+
+          echo "Step 7: Running HTML generation..."
+          python cli/main.py html
           
           echo "✅ Pipeline completed successfully"
           
