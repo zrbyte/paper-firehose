@@ -551,24 +551,6 @@ def run(config_path: str, topic: Optional[str] = None, *, mailto: Optional[str] 
             fetched_fallback = 0
         logger.info(f"Abstracts: topic='{t}' threshold={thr} updated_crossref={fetched_crossref} updated_fallback={fetched_fallback}")
 
-        # After fetching abstracts, regenerate filtered and ranked HTML for this topic
-        try:
-            from processors.html_generator import HTMLGenerator
-            html_gen = HTMLGenerator()
-            output_cfg = tcfg.get('output', {})
-            topic_name = tcfg.get('name', t)
-            topic_desc = tcfg.get('description', f"Articles related to {t}")
-
-            filtered_filename = output_cfg.get('filename')
-            if filtered_filename:
-                html_gen.generate_html_for_topic_from_database(db, t, filtered_filename, topic_desc)
-                logger.info(f"Regenerated filtered HTML for topic '{t}': {filtered_filename}")
-
-            ranked_filename = output_cfg.get('filename_ranked')
-            if ranked_filename:
-                html_gen.generate_ranked_html_from_database(db, t, ranked_filename, f"Ranked Articles - {topic_name}", topic_desc)
-                logger.info(f"Regenerated ranked HTML for topic '{t}': {ranked_filename}")
-        except Exception as e:
-            logger.error(f"Failed to regenerate HTML for topic '{t}': {e}")
+        # HTML generation is handled by the `html` command.
 
     # no return
