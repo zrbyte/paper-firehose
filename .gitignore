@@ -14,3 +14,6 @@ archive/
 .DS_Store
 models/*
 .cursor/rules/python-environment.mdc
+config/secrets/*
+assets/paperqa/*
+assets/paperqa_archive/*
