@@ -17,3 +17,4 @@ models/*
 config/secrets/*
 assets/paperqa/*
 assets/paperqa_archive/*
+rg_papers_statistics/
