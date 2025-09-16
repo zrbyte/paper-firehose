@@ -1,22 +1,13 @@
 """
-Paper-QA Summarizer (Phase 1: arXiv PDF downloader)
+Paper-QA Summarizer
 
 This command selects entries from papers.db for a given topic with
 rank_score >= configured threshold and downloads arXiv PDFs for them,
 adhering to arXiv API Terms of Use (polite rate limiting and descriptive
 User-Agent with contact email).
-
-Current scope (Phase 1):
-- Detect arXiv entries and resolve their arXiv IDs (from link, DOI, or text)
-- Query arXiv API for the PDF link and download the PDF
-- Save PDFs to assets/paperqa/ during the run
-- After a successful run, move downloaded PDFs to assets/paperqa_archive/
-
-Future scope (Phase 2):
 - Run paper-qa over downloaded PDFs to produce grounded JSON summaries
 - Write summaries into papers.db (entries.paper_qa_summary) and
   matched_entries_history.db (matched_entries.paper_qa_summary)
-- Extend HTML rendering to prefer or optionally display paper-qa summaries
 """
 
 from __future__ import annotations

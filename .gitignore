@@ -20,3 +20,4 @@ assets/paperqa_archive/*
 models/*
 assets/secrets/*
 config/secrets/*
+rg_papers_statistics/*
