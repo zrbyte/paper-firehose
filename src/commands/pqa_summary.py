@@ -313,6 +313,32 @@ def _move_to_archive(paths: List[str], archive_dir: str) -> None:
             logger.warning(f"Failed to move {p} to archive: {e}")
 
 
+def _cleanup_archive(archive_dir: str, *, max_age_days: int = 30) -> None:
+    """Remove archived PDFs older than max_age_days."""
+    cutoff = time.time() - max_age_days * 24 * 60 * 60
+    removed = 0
+    try:
+        entries = os.listdir(archive_dir)
+    except FileNotFoundError:
+        return
+    for fn in entries:
+        if not fn.lower().endswith('.pdf'):
+            continue
+        path = os.path.join(archive_dir, fn)
+        try:
+            if not os.path.isfile(path):
+                continue
+            if os.path.getmtime(path) < cutoff:
+                os.remove(path)
+                removed += 1
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            logger.warning("Failed to remove archived PDF %s: %s", path, e)
+    if removed:
+        logger.info("Removed %d archived PDFs older than %d days", removed, max_age_days)
+
+
 def _call_paperqa_on_pdf(pdf_path: str, *, question: str) -> Optional[str]:
     """Summarize a PDF using paper-qa if available; return raw string answer.
 
@@ -492,9 +518,12 @@ def run(
     - Detect arXiv IDs and fetch PDFs via arXiv API (polite UA and rate)
     - Save into assets/paperqa/, then move to assets/paperqa_archive/ after run
     """
+    download_dir = os.path.join('assets', 'paperqa')
+    archive_dir = os.path.join('assets', 'paperqa_archive')
     cfg_mgr = ConfigManager(config_path)
     if not cfg_mgr.validate_config():
         logger.error("Configuration validation failed")
+        _cleanup_archive(archive_dir)
         return
     config = cfg_mgr.load_config()
     db = DatabaseManager(config)
@@ -507,8 +536,6 @@ def run(
     rps_eff = rps if rps is not None else rps_cfg
     min_interval = max(3.0, 1.0 / max(rps_eff, 0.01))
 
-    download_dir = os.path.join('assets', 'paperqa')
-    archive_dir = os.path.join('assets', 'paperqa_archive')
     _ensure_dirs(download_dir, archive_dir)
 
     topics: List[str] = [topic] if topic else cfg_mgr.get_available_topics()
@@ -702,6 +729,7 @@ def run(
 
     if not summarize_targets:
         logger.info("No PDFs to summarize.")
+        _cleanup_archive(archive_dir)
         return
 
     summarized = 0
@@ -745,5 +773,7 @@ def run(
             logger.debug("Got summary for %s but no entry_id present; skipping DB write", aid)
 
     logger.info("paper-qa summarization completed: wrote %d summaries", summarized)
+
+    _cleanup_archive(archive_dir)
 
     # HTML generation is handled by the `html` command.
