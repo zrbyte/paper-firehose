@@ -205,4 +205,4 @@ Notes
   - `max_retries`: retry attempts per item on transient errors
   - Optional GPT‑5 parameters: `verbosity`, `reasoning_effort` (used when the model starts with `gpt-5`)
 
-Thank you to arXiv for use of its open access interoperability. The script does not serve pdf's of arxiv preprints, but serves up a link to the filtered article.
+Thank you to arXiv for use of its open access interoperability. The script does not serve pdf's or arxiv preprints, but serves up a link to the filtered article.
