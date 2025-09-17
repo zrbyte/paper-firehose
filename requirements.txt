@@ -1,2 +1,0 @@
-feedparser
-paper-qa>=5.0.0
