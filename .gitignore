@@ -4,10 +4,12 @@ __pycache__/
 *.pyc
 *.backup*
 
+agents.md
 archive/
 *.html
 !html_template.html
 !llmsummary_template.html
+!history_viewer_cards.html
 
 *.db
 *.ipynb
