@@ -13,3 +13,7 @@ archive/
 *.env
 .DS_Store
 assets/*.json
+.cursor/rules/python-environment.mdc
+/models/*
+config/secrets/*
+rg_papers_statistics/*
