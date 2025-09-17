@@ -40,13 +40,13 @@ class HTMLGenerator:
     
     def generate_html_from_database(self, db_manager, topic_name: str, output_path: str, heading: str = None, description: str = None) -> None:
         """
-        Generate HTML file for filtered articles directly from papers.db.
-        
+        Generate an HTML file for filtered entries pulled directly from papers.db.
+
         Args:
             db_manager: Database manager instance
             topic_name: Name of the topic
-            output_path: Path to output HTML file
-            topic_description: Description for the topic
+            output_path: Path to the output HTML file
+            description: Optional subheading text to include beneath the page title
         """
         # Always create a fresh HTML file for each run
         self._create_new_html_file(output_path, heading or topic_name, description)

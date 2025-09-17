@@ -106,9 +106,11 @@ def run(
     Args:
         config_path: Path to main config file
         topic: Optional topic to send; if None, include all topics
-        mode: 'ranked' embeds pre-generated ranked HTML when available; 'auto' renders ranked-style from DB
+        mode: Accepted for CLI compatibility; the implementation currently always renders
+            ranked-style sections directly from the database regardless of value.
         limit: Optional per-topic limit of items
         dry_run: If True, do not send; write preview to assets/email_preview_*.html
+        recipients_file: Optional YAML file describing per-recipient overrides
     """
     cfg_mgr = ConfigManager(config_path)
     if not cfg_mgr.validate_config():

@@ -503,11 +503,19 @@ def run(
     history_date: Optional[str] = None,
     history_feed_like: Optional[str] = None,
 ) -> None:
-    """Download arXiv PDFs for ranked entries of a topic.
+    """Execute the paper-qa download + summarization workflow.
 
-    - Select entries with rank_score >= paperqa.download_rank_threshold
-    - Detect arXiv IDs and fetch PDFs via arXiv API (polite UA and rate)
-    - Save into assets/paperqa/, then move to assets/paperqa_archive/ after run
+    Workflow overview:
+    - Load configuration/database state and prepare download/archive folders.
+    - Determine targets either from ranked topic entries (respecting the download
+      rank threshold and optional ``limit``) or from the explicit ``arxiv``/``entry_ids``
+      arguments, optionally pulling metadata from the history database when
+      ``use_history`` is enabled.
+    - Resolve arXiv IDs, reuse archived PDFs when possible, download missing
+      PDFs under the configured rate limit, and archive successful downloads.
+    - Run paper-qa on each PDF, normalize the JSON result, and write summaries
+      back to both ``papers.db`` and ``matched_entries_history.db`` when an
+      ``entry_id`` is available.
     """
     download_dir = os.path.join('assets', 'paperqa')
     archive_dir = os.path.join('assets', 'paperqa_archive')

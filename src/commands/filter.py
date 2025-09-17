@@ -16,18 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 def run(config_path: str, topic: Optional[str] = None) -> None:
-    """
-    Run the filter command.
-    
-    1. Load config and topic definitions
-    2. Fetch RSS feeds for each topic
-    3. Deduplicate feeds. 
-    4. Apply regex filters
-    5. Store filtered entries in database with status='filtered'
-    
+    """Run the filtering pipeline for one or all topics.
+
+    Workflow:
+    1. Load and validate configuration, then prepare database state (backup + clear current run DB).
+    2. Fetch the configured feeds for each topic, yielding only new entries within the time window.
+    3. Apply the topic regex filters, writing matches to ``papers.db`` and to the history DB when enabled.
+    4. Record every processed entry in the deduplication database for future runs.
+
     Args:
         config_path: Path to the main configuration file
-        topic: Optional specific topic to process (if None, process all topics)
+        topic: Optional specific topic to process (if ``None``, process every topic)
     """
     logger.info("Starting filter command")
     
