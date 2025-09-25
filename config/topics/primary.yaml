@@ -64,14 +64,24 @@ filter:
             (Pt2HgSe3|Pt.+2HgSe.+3)|\
             (jacuting[a-z]+)|\
             (flatband)|\
-            (flat.{1}band)'
+            (flat.*band)'
   fields: ["title", "summary"]
 
 # Ranking configuration
 ranking:
   query: >   # Natural-language ranking query used for sentence-transformers similarity
-    graphene rhombohedral graphite ABC stacking STM scanning tunneling microscopy
-    scanning probe moiré moir\'e moire twisted van der Waals topology Dirac chalcogenide
+    graphene
+    rhombohedral graphite
+    ABC stacking
+    STM
+    scanning tunneling microscopy
+    scanning probe
+    moire
+    twisted
+    van der Waals
+    topology
+    Dirac
+    chalcogenide
 
   # Optional additional negative phrases to downweight (list may be empty)
   negative_queries: [erratum, correction, reply, corrigendum]
