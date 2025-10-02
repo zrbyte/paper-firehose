@@ -275,8 +275,8 @@ class EmailRenderer:
     def _format_pqa_summary(self, pqa_raw: Optional[str]) -> Optional[str]:
         """Format paper_qa_summary JSON for email.
 
-        Returns a compact HTML block with Summary, Topical Relevance, Methods,
-        and Novelty & Impact. Falls back to plain escaped text if not JSON.
+        Returns a compact HTML block with Summary and Methods.
+        Falls back to plain escaped text if not JSON.
         """
         if not pqa_raw:
             return None
@@ -286,18 +286,12 @@ class EmailRenderer:
             if not isinstance(data, dict):
                 raise ValueError("not an object")
             summary = html.escape(data.get('summary') or '')
-            topical = html.escape(data.get('topical_relevance') or '')
             methods = html.escape(data.get('methods') or '')
-            novelty = html.escape(data.get('novelty_impact') or '')
             parts: List[str] = []
             if summary:
                 parts.append(f"<div><strong>Summary:</strong> {summary}</div>")
-            if topical:
-                parts.append(f"<div><strong>Topical Relevance:</strong> {topical}</div>")
             if methods:
                 parts.append(f"<div><strong>Methods:</strong> {methods}</div>")
-            if novelty:
-                parts.append(f"<div><strong>Novelty & Impact:</strong> {novelty}</div>")
             return "\n".join(parts) if parts else None
         except Exception:
             # Fallback to plain text

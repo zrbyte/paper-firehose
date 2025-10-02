@@ -47,7 +47,7 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
 - **pqa_summary** (PDF-based summarization)
   - `python cli/main.py pqa_summary [--topic TOPIC]`
   - Selects preprints from arXiv in `papers.db` with `rank_score >= config.paperqa.download_rank_threshold`, detects arXiv IDs, and downloads PDFs (polite arXiv API usage).
-  - Runs paper-qa to summarize full text into JSON keys: `summary`, `topical_relevance`, `methods`, `novelty_impact`.
+  - Runs paper-qa to summarize full text into JSON keys: `summary`, `methods`.
   - Writes summaries to `papers.db.entries.paper_qa_summary` only for the specific topic row the item was selected under (no longer cross-updating all topics for the same entry id), and to `matched_entries_history.db.matched_entries.paper_qa_summary`.
   - Prunes archived PDFs older than ~30 days from `assets/paperqa_archive/` after each run to keep storage manageable.
   - Note: This command only updates databases. Use `html` to render pages.
@@ -184,7 +184,7 @@ Notes
     - `download_rank_threshold`: minimum `rank_score` to download (default 0.35)
     - `rps`: requests/second throttle (default 0.3; ~1 request/3.3s per arXiv API guidance)
     - `max_retries`: per-item retry attempts on transient errors
-    - `prompt`: paper-qa question used for summarization; should instruct the model to return only JSON with keys `summary`, `topical_relevance`, `methods`, `novelty_impact` (supports `{ranking_query}` placeholder)
+    - `prompt`: paper-qa question used for summarization; should instruct the model to return only JSON with keys `summary`, `methods` (supports `{ranking_query}` placeholder)
 - `config/topics/<topic>.yaml`
   - `feeds`: list of feed keys from `config.yaml`.
   - `filter.pattern` and `filter.fields`: regex and fields to match (defaults include `title` and `summary`).

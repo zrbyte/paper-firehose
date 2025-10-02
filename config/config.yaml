@@ -26,12 +26,10 @@ paperqa:
   # Prompt used by paper-qa summarization (Phase 2). Keep concise and JSON-only.
   prompt: >
     Read the PDF and summarize for an expert reader, according to the following rules.
-    CRITICAL: only reply in JSON format. RETURN EXACTLY THIS STRUCTURE: {"summary":"...", "topical_relevance":"...", "methods":"...", "novelty_impact":"..."}
+    CRITICAL: only reply in JSON format. RETURN EXACTLY THIS STRUCTURE: {"summary":"...", "methods":"..."}
     Keep the text information-dense. Avoid using superlatives and other over-the-top language.
-    summary: up to 5 sentences. 
-    topical_relevance: evaluated based on the keywords in {ranking_query}, do NOT list or mention the keywords.
+    summary: up to 8 sentences.
     methods: experimental setup, parameters, and analysis methods, calculation details, include names of tools used.
-    novelty_impact: up to 5 sentences.
   
 feeds:
   cond-mat:

@@ -286,7 +286,7 @@ function toggleAbstract(id) {
         Generate an HTML file with entries that have paper_qa_summary for a specific topic.
 
         Uses a yellow-highlighted box and a "Fulltext summary" heading, and
-        renders Summary, Topical Relevance, Methods, and Novelty & Impact.
+        renders Summary and Methods sections from the JSON payload.
         """
         if title is None:
             title = f"PDF Summaries - {topic_name}"
@@ -429,7 +429,7 @@ function toggleAbstract(id) {
             return f'<p><strong>LLM Summary:</strong><br>{processed_text}</p>'
 
     def _format_pqa_summary(self, pqa_raw: str) -> str:
-        """Parse paper_qa_summary JSON and format with Methods section.
+        """Parse paper_qa_summary JSON and format Summary/Methods sections.
 
         Falls back to plain text if JSON parsing fails.
         """
@@ -442,28 +442,30 @@ function toggleAbstract(id) {
             if not isinstance(data, dict):
                 raise ValueError('Not a JSON object')
 
-            summary_text = self.process_text(data.get('summary', 'No summary provided'))
-            topical_relevance = self.process_text(data.get('topical_relevance', 'No relevance assessment provided'))
-            methods_text = self.process_text(data.get('methods', 'No methods provided'))
-            novelty_impact = self.process_text(data.get('novelty_impact', 'No impact assessment provided'))
+            summary_raw = data.get('summary')
+            methods_raw = data.get('methods')
 
-            return f'''
+            summary_text = self.process_text(summary_raw if (summary_raw is not None and str(summary_raw).strip()) else 'No summary provided')
+            methods_text = self.process_text(methods_raw if (methods_raw is not None and str(methods_raw).strip()) else 'No methods provided')
+
+            sections = [
+                f'''
         <div class="summary-section">
             <h4>Summary</h4>
             <p>{summary_text}</p>
-        </div>
-        <div class="summary-section">
-            <h4>Topical Relevance</h4>
-            <p>{topical_relevance}</p>
-        </div>
+        </div>'''
+            ]
+
+            if methods_text:
+                sections.append(
+                    f'''
         <div class="summary-section">
             <h4>Methods</h4>
             <p>{methods_text}</p>
-        </div>
-        <div class="summary-section">
-            <h4>Novelty & Impact</h4>
-            <p>{novelty_impact}</p>
         </div>'''
+                )
+
+            return ''.join(sections)
         except Exception as e:
             logger.debug(f"PQA JSON parsing failed: {e}. Raw text (first 200 chars): {pqa_raw[:200]}")
             processed_text = self.process_text(pqa_raw)

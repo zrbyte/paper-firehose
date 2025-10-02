@@ -363,9 +363,8 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
     """Strip code fences, parse JSON, and ensure required keys exist.
 
     - Removes leading ```/```json and trailing ``` fences when present
-    - Ensures keys: summary, topical_relevance, methods, novelty_impact
-      (accepts aliases: relevance→topical_relevance; approach/method→methods; impact→novelty_impact)
-    - On parse failure, wraps cleaned text under 'summary' and sets others to ''
+    - Ensures keys: summary, methods (accepts aliases such as method/approach)
+    - On parse failure, wraps cleaned text under 'summary' and sets 'methods' to ''
     """
     import json
 
@@ -405,18 +404,27 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
     if data is None:
         out = {
             'summary': cleaned.strip(),
-            'topical_relevance': '',
             'methods': '',
-            'novelty_impact': '',
         }
         return json.dumps(out, ensure_ascii=False)
 
-    # Map aliases and enforce presence
+    def _first_nonempty(keys: Tuple[str, ...]) -> str:
+        for key in keys:
+            if key in data:
+                val = _coerce_str(data.get(key))
+                if val.strip():
+                    return val
+        return ''
+
+    summary_val = _first_nonempty(('summary', 'overall_summary', 'answer', 'response', 'content'))
+    if not summary_val.strip():
+        summary_val = cleaned.strip()
+
+    methods_val = _first_nonempty(('methods', 'method', 'approach', 'methodology', 'experimental_setup'))
+
     out = {
-        'summary': _coerce_str(data.get('summary')),
-        'topical_relevance': _coerce_str(data.get('topical_relevance') or data.get('relevance')),
-        'methods': _coerce_str(data.get('methods') or data.get('method') or data.get('approach')),
-        'novelty_impact': _coerce_str(data.get('novelty_impact') or data.get('impact')),
+        'summary': summary_val,
+        'methods': methods_val,
     }
     return json.dumps(out, ensure_ascii=False)
 
@@ -738,8 +746,8 @@ def run(
         if not question:
             question = (
                 "You are an expert technical reader. Summarize this paper for experts. "
-                "Return ONLY a JSON object with keys: 'summary', 'topical_relevance', 'novelty_impact'. "
-                "Keep each value to 1-3 concise sentences."
+                "Return ONLY a JSON object with keys: 'summary', 'methods'. "
+                "Keep each value concise and information dense."
             )
         if tctx:
             try:
