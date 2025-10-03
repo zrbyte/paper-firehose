@@ -18,6 +18,9 @@ import time
 import shutil
 import logging
 import sqlite3
+import asyncio
+import threading
+import inspect
 from typing import Dict, Any, List, Optional, Tuple
 
 import requests
@@ -331,29 +334,75 @@ def _cleanup_archive(archive_dir: str, *, max_age_days: int = 30) -> None:
 
 
 def _call_paperqa_on_pdf(pdf_path: str, *, question: str) -> Optional[str]:
-    """Summarize a PDF using paper-qa if available; return raw string answer.
-
-    The answer is expected to be JSON. This function does not parse it; callers may parse/map keys.
-    """
+    """Summarize a PDF using paper-qa if available; return raw string answer."""
     try:
         from paperqa import Docs  # type: ignore
     except Exception as e:
         logger.error("paperqa not installed or import failed: %s", e)
         return None
-    try:
-        docs = Docs()
-        # Add PDF (paper-qa handles parsing/embedding)
-        docs.add(pdf_path)
-        # Some versions of paper-qa Docs.query() don't accept 'k'; call without kwargs
-        ans = docs.query(question)
-        # Try attributes in common versions
+
+    def _extract_answer(ans_obj: Any) -> Optional[str]:
         for attr in ("answer", "formatted_answer"):
-            val = getattr(ans, attr, None)
+            val = getattr(ans_obj, attr, None)
             if isinstance(val, str) and val.strip():
                 return val.strip()
-        # Fallback to str(ans)
-        s = str(ans).strip()
-        return s if s else None
+        if isinstance(ans_obj, str) and ans_obj.strip():
+            return ans_obj.strip()
+        try:
+            s = str(ans_obj).strip()
+            return s if s else None
+        except Exception:
+            return None
+
+    async def _run_async() -> Any:
+        docs = Docs()
+        # Prefer async methods when available; fall back to sync versions.
+        add_fn = getattr(docs, "aadd", None)
+        if callable(add_fn):
+            await add_fn(pdf_path)
+        else:
+            res = docs.add(pdf_path)
+            if inspect.isawaitable(res):
+                await res
+
+        query_fn = getattr(docs, "aquery", None)
+        if callable(query_fn):
+            return await query_fn(question)
+        result = docs.query(question)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    try:
+        try:
+            ans_obj = asyncio.run(_run_async())
+            return _extract_answer(ans_obj)
+        except RuntimeError as exc:
+            if "event loop" not in str(exc).lower():
+                raise
+
+        outcome: Dict[str, Any] = {}
+        error: Dict[str, BaseException] = {}
+
+        def _worker() -> None:
+            new_loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(new_loop)
+                outcome['value'] = new_loop.run_until_complete(_run_async())
+            except BaseException as exc:  # capture to re-raise outside thread
+                error['error'] = exc
+            finally:
+                asyncio.set_event_loop(None)
+                new_loop.close()
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+        thread.join()
+
+        if 'error' in error:
+            raise error['error']
+
+        return _extract_answer(outcome.get('value'))
     except Exception as e:
         logger.error("paperqa query failed for %s: %s", pdf_path, e)
         return None

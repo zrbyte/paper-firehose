@@ -126,10 +126,12 @@ Functions
 - `pf.filter(topic=None, config_path=None)`: Runs the filter step for one topic or all.
 - `pf.rank(topic=None, config_path=None)`: Computes and writes `rank_score` for entries.
 - `pf.abstracts(topic=None, *, mailto=None, limit=None, rps=None, config_path=None)`: Fetches abstracts for above‑threshold entries and writes to DBs.
-- `pf.summarize(topic=None, *, rps=None, config_path=None)`: Runs LLM summarization for top‐ranked entries per topic, writing JSON (or text) to `llm_summary`. Generates summary HTML if configured.
-- `pf.generate_html(topic, output_path=None, config_path=None)`: Regenerates the filtered list HTML directly from `papers.db` for the given topic (uses topic description, and defaults to the topic’s configured `output.filename` if `output_path` is omitted).
+- `pf.summarize(topic=None, *, rps=None, config_path=None)`: Runs LLM summarization for top‐ranked entries per topic, writing JSON (or text) to `llm_summary`.
+- `pf.pqa_summary(topic=None, *, rps=None, limit=None, arxiv=None, entry_ids=None, use_history=False, history_date=None, history_feed_like=None, config_path=None)`: Runs the paper-qa PDF summarizer with the same parameters as the CLI command.
+- `pf.html(topic=None, output_path=None, config_path=None)`: Regenerates the HTML pages directly from `papers.db`. When `topic` is omitted, all topics are rendered to their configured filenames.
+- `pf.email(topic=None, *, mode='auto', limit=None, recipients_file=None, dry_run=False, config_path=None)`: Sends the digest email (or writes a preview on `dry_run`).
 - `pf.purge(days=None, all_data=False, config_path=None)`: Purges entries based on publication date. When `days` is provided, removes entries from the most recent N days (including today) across all DBs; when `all_data=True`, reinitializes all DBs.
-- `pf.status(config_path=None) -> dict`: Returns a dict with config validity, topics, feed count, and DB paths.
+- `pf.status(config_path=None) -> dict`: Returns configuration validity, available topics, enabled feed count, and database paths.
 
 ## History Viewer
 

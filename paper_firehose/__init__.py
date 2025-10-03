@@ -1,6 +1,6 @@
 import os
 import sys
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # Ensure the repository's src/ directory is on sys.path so we can reuse
 # the existing implementation without changing its structure.
@@ -14,6 +14,8 @@ from commands import filter as filter_cmd  # type: ignore
 from commands import rank as rank_cmd  # type: ignore
 from commands import abstracts as abstracts_cmd  # type: ignore
 from commands import summarize as summarize_cmd  # type: ignore
+from commands import pqa_summary as pqa_summary_cmd  # type: ignore
+from commands import email_list as email_cmd  # type: ignore
 from core.config import ConfigManager  # type: ignore
 from core.database import DatabaseManager  # type: ignore
 from processors.html_generator import HTMLGenerator  # type: ignore
@@ -30,9 +32,11 @@ __all__ = [
     'rank',
     'abstracts',
     'summarize',
+    'pqa_summary',
+    'email',
     'purge',
     'status',
-    'generate_html',
+    'html',
 ]
 
 
@@ -91,6 +95,67 @@ def summarize(
     summarize_cmd.run(cfg_path, topic, rps=rps)
 
 
+def pqa_summary(
+    topic: Optional[str] = None,
+    *,
+    rps: Optional[float] = None,
+    limit: Optional[int] = None,
+    arxiv: Optional[List[str]] = None,
+    entry_ids: Optional[List[str]] = None,
+    use_history: bool = False,
+    history_date: Optional[str] = None,
+    history_feed_like: Optional[str] = None,
+    config_path: Optional[str] = None,
+) -> None:
+    """Run the paper-qa pipeline to download PDFs and write grounded summaries.
+
+    Args:
+        topic: Optional topic name to target ranked entries; when omitted and no
+            IDs are supplied, all configured topics are scanned.
+        rps: Optional requests-per-second override for arXiv lookups/downloads.
+        limit: Optional cap on number of ranked entries per topic.
+        arxiv: Optional list of arXiv IDs/URLs to process directly (bypass ranking).
+        entry_ids: Optional list of database entry IDs to summarize (history lookup).
+        use_history: When True, resolve `entry_ids` against the history database.
+        history_date: Optional YYYY-MM-DD filter when querying history records.
+        history_feed_like: Optional substring filter for history feed names.
+        config_path: Path to main YAML config; defaults to repo config.
+    """
+    cfg_path = config_path or _DEFAULT_CONFIG
+    pqa_summary_cmd.run(
+        cfg_path,
+        topic,
+        rps=rps,
+        limit=limit,
+        arxiv=arxiv,
+        entry_ids=entry_ids,
+        use_history=use_history,
+        history_date=history_date,
+        history_feed_like=history_feed_like,
+    )
+
+
+def email(
+    topic: Optional[str] = None,
+    *,
+    mode: str = 'auto',
+    limit: Optional[int] = None,
+    recipients_file: Optional[str] = None,
+    dry_run: bool = False,
+    config_path: Optional[str] = None,
+) -> None:
+    """Send an email digest generated from papers.db via SMTP."""
+    cfg_path = config_path or _DEFAULT_CONFIG
+    email_cmd.run(
+        cfg_path,
+        topic,
+        mode=mode,
+        limit=limit,
+        dry_run=dry_run,
+        recipients_file=recipients_file,
+    )
+
+
 def purge(days: Optional[int] = None, all_data: bool = False, config_path: Optional[str] = None) -> None:
     """Purge entries from databases.
 
@@ -132,7 +197,7 @@ def status(config_path: Optional[str] = None) -> Dict[str, Any]:
         return info
 
 
-def generate_html(
+def html(
     topic: Optional[str] = None,
     output_path: Optional[str] = None,
     config_path: Optional[str] = None,
@@ -170,19 +235,15 @@ def generate_html(
     try:
         for topic_name in topics_to_render:
             topic_config = config_manager.load_topic_config(topic_name)
-            if not isinstance(topic_config, dict):
-                logger.warning("Topic config for '%s' is not a dict; skipping", topic_name)
-                continue
-
-            output_config = topic_config.get('output', {}) if isinstance(topic_config, dict) else {}
+            output_config = topic_config.get('output', {})
             topic_output_path = (
                 output_path
                 if topic and output_path
                 else output_config.get('filename', f'{topic_name}_filtered_articles.html')
             )
 
-            heading = topic_config.get('name', topic_name)
-            description = topic_config.get('description', f"Articles related to {topic_name}")
+            heading = topic_config['name']
+            description = topic_config.get('description')
 
             base_generator.generate_html_from_database(
                 db_manager,
@@ -218,3 +279,8 @@ def generate_html(
                     logger.error("Failed to generate summarized HTML for topic '%s': %s", topic_name, exc)
     finally:
         db_manager.close_all_connections()
+
+
+# Backward compatibility aliases (deprecated)
+paperqa_summary = pqa_summary
+generate_html = html
