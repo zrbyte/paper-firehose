@@ -18,6 +18,11 @@ from core.config import ConfigManager  # type: ignore
 from core.database import DatabaseManager  # type: ignore
 from processors.html_generator import HTMLGenerator  # type: ignore
 
+import logging
+
+
+logger = logging.getLogger(__name__)
+
 _DEFAULT_CONFIG = os.path.join(_REPO_ROOT, 'config', 'config.yaml')
 
 __all__ = [
@@ -127,33 +132,89 @@ def status(config_path: Optional[str] = None) -> Dict[str, Any]:
         return info
 
 
-def generate_html(topic: str, output_path: Optional[str] = None, config_path: Optional[str] = None) -> None:
-    """Generate HTML for a topic directly from papers.db.
-    
+def generate_html(
+    topic: Optional[str] = None,
+    output_path: Optional[str] = None,
+    config_path: Optional[str] = None,
+) -> None:
+    """Generate HTML for one or all topics directly from papers.db.
+
     Args:
-        topic: Topic name to generate HTML for
-        output_path: Optional output path (defaults to topic config filename)
-        config_path: Path to main YAML config; defaults to repo config
+        topic: Optional topic name. When omitted, HTML is produced for all topics
+            defined in the configuration.
+        output_path: Optional output path. Only valid when *topic* is provided; when
+            generating all topics the configured filenames are used.
+        config_path: Path to main YAML config; defaults to repo config.
     """
     cfg_path = config_path or _DEFAULT_CONFIG
-    
-    # Load config and initialize components
+
+    if output_path and not topic:
+        raise ValueError("output_path can only be provided when generating a single topic")
+
     config_manager = ConfigManager(cfg_path)
+    if not config_manager.validate_config():
+        raise ValueError(f"Invalid configuration at {cfg_path}")
+
     config = config_manager.load_config()
     db_manager = DatabaseManager(config)
-    
-    # Always load topic config to have description available regardless of output_path
-    topic_config = config_manager.load_topic_config(topic)
-    # Get output path from topic config if not specified
-    if not output_path:
-        output_config = topic_config.get('output', {})
-        output_path = output_config.get('filename', f'{topic}_filtered_articles.html')
-    
-    # Generate HTML
-    html_generator = HTMLGenerator()
-    html_generator.generate_html_for_topic_from_database(
-        db_manager,
-        topic,
-        output_path,
-        topic_config.get('description', f"Articles related to {topic}")
-    )
+
+    topics_to_render = [topic] if topic else config_manager.get_available_topics()
+    if not topics_to_render:
+        db_manager.close_all_connections()
+        raise ValueError("No topics available in configuration")
+
+    base_generator = HTMLGenerator()
+    ranked_generator = HTMLGenerator(template_path='ranked_template.html')
+    summary_generator = HTMLGenerator(template_path='llmsummary_template.html')
+
+    try:
+        for topic_name in topics_to_render:
+            topic_config = config_manager.load_topic_config(topic_name)
+            if not isinstance(topic_config, dict):
+                logger.warning("Topic config for '%s' is not a dict; skipping", topic_name)
+                continue
+
+            output_config = topic_config.get('output', {}) if isinstance(topic_config, dict) else {}
+            topic_output_path = (
+                output_path
+                if topic and output_path
+                else output_config.get('filename', f'{topic_name}_filtered_articles.html')
+            )
+
+            heading = topic_config.get('name', topic_name)
+            description = topic_config.get('description', f"Articles related to {topic_name}")
+
+            base_generator.generate_html_from_database(
+                db_manager,
+                topic_name,
+                topic_output_path,
+                heading,
+                description,
+            )
+
+            ranked_output_path = output_config.get('filename_ranked') or f'results_{topic_name}_ranked.html'
+            try:
+                ranked_generator.generate_ranked_html_from_database(
+                    db_manager,
+                    topic_name,
+                    ranked_output_path,
+                    heading,
+                    description,
+                )
+            except Exception as exc:
+                logger.error("Failed to generate ranked HTML for topic '%s': %s", topic_name, exc)
+
+            summary_output_path = output_config.get('filename_summary')
+            if summary_output_path:
+                summary_title = f"LLM Summaries - {heading}"
+                try:
+                    summary_generator.generate_summarized_html_from_database(
+                        db_manager,
+                        topic_name,
+                        summary_output_path,
+                        summary_title,
+                    )
+                except Exception as exc:
+                    logger.error("Failed to generate summarized HTML for topic '%s': %s", topic_name, exc)
+    finally:
+        db_manager.close_all_connections()
