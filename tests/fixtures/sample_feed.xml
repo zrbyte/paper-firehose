@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Local Test Feed</title>
+    <link>http://example.com/</link>
+    <description>Sample feed for testing</description>
+    <item>
+      <title>Graphene breakthroughs in materials science</title>
+      <link>http://example.com/graphene</link>
+      <description>Recent advances in graphene applications.</description>
+      <author>Jane Doe</author>
+      <pubDate>Wed, 01 Oct 2025 12:00:00 GMT</pubDate>
+      <guid>graphene-123</guid>
+    </item>
+    <item>
+      <title>Other topic unrelated to filters</title>
+      <link>http://example.com/other</link>
+      <description>Does not mention the keyword.</description>
+      <author>John Smith</author>
+      <pubDate>Wed, 01 Oct 2025 13:00:00 GMT</pubDate>
+      <guid>other-456</guid>
+    </item>
+  </channel>
+</rss>
