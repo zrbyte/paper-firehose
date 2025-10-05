@@ -90,11 +90,11 @@ Add an `email` section in `config/config.yaml` (secrets in a separate file):
 email:
   to: "LIST_ADDRESS@yourdomain"             # Mailman list address
   subject_prefix: "Paper Firehose"           # Optional
-  from: "_mainaccount@nemeslab.com"          # Defaults to smtp.username
+  from: "mail@xyz.com"          # Defaults to smtp.username
   smtp:
-    host: "mail.nemeslab.com"
+    host: "mail.xyz.com"
     port: 465
-    username: "_mainaccount@nemeslab.com"
+    username: "youraccount"
     password_file: "config/secrets/email_password.txt"  # store only the password here
 ```
 
