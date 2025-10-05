@@ -21,6 +21,7 @@ from commands import abstracts as abstracts_cmd
 from commands import summarize as summarize_cmd
 from commands import pqa_summary as pqa_cmd
 from commands import email_list as email_cmd
+from core.config import DEFAULT_CONFIG_PATH
 from core.paths import get_data_dir
 
 # Setup logging
@@ -31,7 +32,12 @@ logging.basicConfig(
 
 
 @click.group()
-@click.option('--config', default='config/config.yaml', help='Path to config file')
+@click.option(
+    '--config',
+    default=str(DEFAULT_CONFIG_PATH),
+    show_default=True,
+    help='Path to config file (default: ~/.paper_firehose/config.yaml)',
+)
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging')
 @click.pass_context
 def cli(ctx, config, verbose):

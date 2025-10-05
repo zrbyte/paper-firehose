@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime
 import logging
 import os
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from core.config import ConfigManager
@@ -48,11 +49,11 @@ def _resolve_email_settings(config: Dict[str, Any]) -> Dict[str, Any]:
     email_cfg.setdefault('to', email_cfg.get('list_address'))
     smtp = email_cfg.get('smtp') or {}
     if not smtp:
-        raise RuntimeError("Missing email.smtp configuration in config.yaml")
+        raise RuntimeError("Missing email.smtp configuration in the configuration file")
     required = ['host', 'port', 'username']
     for k in required:
         if not smtp.get(k):
-            raise RuntimeError(f"email.smtp.{k} is required in config.yaml")
+            raise RuntimeError(f"email.smtp.{k} is required in the configuration file")
     if not (email_cfg.get('from') or '').strip():
         # default to username
         email_cfg['from'] = smtp.get('username')
@@ -125,9 +126,15 @@ def run(
     # Recipients file precedence: CLI flag -> config[email].recipients_file
     if not recipients_file:
         recipients_file = (config.get('email') or {}).get('recipients_file')
+
+    if recipients_file:
+        candidate = Path(str(recipients_file)).expanduser()
+        if not candidate.is_absolute():
+            candidate = (Path(cfg_mgr.base_dir) / candidate).resolve()
+        recipients_file = str(candidate)
     to_addr = email_cfg['to']
     from_addr = email_cfg['from']
-    smtp_sender = SMTPSender(email_cfg['smtp'])
+    smtp_sender = SMTPSender(email_cfg['smtp'], config_dir=cfg_mgr.base_dir)
 
     topics = [topic] if topic else cfg_mgr.get_available_topics()
     renderer = EmailRenderer()

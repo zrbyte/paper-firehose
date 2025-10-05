@@ -24,7 +24,7 @@ import logging
 import requests
 from openai import OpenAI
 
-from core.config import ConfigManager
+from core.config import ConfigManager, DEFAULT_CONFIG_DIR
 from core.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -52,20 +52,47 @@ def _load_key_from_file(path: str) -> Optional[str]:
     return None
 
 
-def _resolve_api_key(config: Dict[str, Any]) -> str:
-    """Prefer key from repo-root openaikulcs.env, else env OPENAI_API_KEY."""
-    # Try CWD (repo root typical) first
-    key = _load_key_from_file('openaikulcs.env')
-    if not key:
-        # Try computing path relative to this file two levels up (src/commands -> repo root)
-        here = os.path.dirname(__file__)
-        repo_root_guess = os.path.abspath(os.path.join(here, '..', '..'))
-        key = _load_key_from_file(os.path.join(repo_root_guess, 'openaikulcs.env'))
-    if not key:
-        key = os.environ.get('OPENAI_API_KEY')
-    if not key:
-        raise RuntimeError("Missing OpenAI API key in openaikulcs.env or environment variable OPENAI_API_KEY")
-    return key
+def _resolve_api_key(config: Dict[str, Any], config_base_dir: Optional[str]) -> str:
+    """Resolve the OpenAI API key from the config directory, repo root, or environment."""
+
+    llm_cfg = (config.get('llm') or {})
+    env_var = llm_cfg.get('api_key_env') or 'OPENAI_API_KEY'
+    candidate_files = []
+
+    # Configurable key file path (optional)
+    key_file_cfg = (llm_cfg.get('api_key_file') or '').strip()
+    if key_file_cfg:
+        if os.path.isabs(key_file_cfg):
+            candidate_files.append(key_file_cfg)
+        else:
+            if config_base_dir:
+                candidate_files.append(os.path.join(config_base_dir, key_file_cfg))
+            candidate_files.append(os.path.abspath(key_file_cfg))
+
+    # Default secrets location under the managed config directory
+    if config_base_dir:
+        candidate_files.append(os.path.join(config_base_dir, 'secrets', 'openaikulcs.env'))
+        candidate_files.append(os.path.join(config_base_dir, 'openaikulcs.env'))
+
+    # Legacy repo-root fallbacks for backwards compatibility
+    candidate_files.append('openaikulcs.env')
+    here = os.path.dirname(__file__)
+    repo_root_guess = os.path.abspath(os.path.join(here, '..', '..'))
+    candidate_files.append(os.path.join(repo_root_guess, 'openaikulcs.env'))
+
+    for path in candidate_files:
+        key = _load_key_from_file(path)
+        if key:
+            return key
+
+    key = os.environ.get(env_var)
+    if key:
+        return key
+
+    raise RuntimeError(
+        "Missing OpenAI API key. Set %s or place the key in %s"
+        % (env_var, os.path.join(config_base_dir or DEFAULT_CONFIG_DIR, 'secrets', 'openaikulcs.env'))
+    )
 
 
 def _resolve_model(config: Dict[str, Any]) -> str:
@@ -263,7 +290,7 @@ def run(config_path: str, topic: Optional[str] = None, *, rps: Optional[float] =
     db = DatabaseManager(config)
 
     topics: List[str] = [topic] if topic else cfg_mgr.get_available_topics()
-    api_key = _resolve_api_key(config)
+    api_key = _resolve_api_key(config, cfg_mgr.base_dir)
     model = _resolve_model(config)
     model_fallback = (config.get('llm') or {}).get('model_fallback') or 'gpt-4o-mini'
     defaults = (config.get('defaults') or {})

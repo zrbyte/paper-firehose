@@ -3,12 +3,12 @@
 - Fetches academic RSS feeds, filters entries with per-topic regex, and writes results into SQLite databases. HTML pages with the results are rendered directly from the database.
 - Results are ranked by cosine similarity to a set of user defined keywords. Configurable list of authors can get a ranking boost. So papers from your friends / competitors can be boosted in ranking.
 - Highest ranked results are summarized by an LLM. For summarization to work, you need an OpenAI API key. Full text summarization uses [Paper-qa](https://github.com/Future-House/paper-qa).
-- New search terms can be created by simply adding a yaml config file under: `config/topics/your_topic_name.yaml`. Look at the other topics for guidance.
+- New search terms can be created by simply adding a yaml config file under: `~/.paper_firehose/topics/your_topic_name.yaml`. Look at the other topics for guidance.
 - The script is configured to run using Github actions each day at 6 AM to fetch new papers. For your own runs, configure the `.github/workflows/pages.yml` file.
 
 Written using Python 3.11.
 For dependencies check `requirements.txt`.
-OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or `OPENAI_API_KEY` environment variable.
+OpenAI API key is searched for in `~/.paper_firehose/secrets/openaikulcs.env` (created on first run) or, as a fallback, the `OPENAI_API_KEY` environment variable. A legacy `./openaikulcs.env` file is still honored for backward compatibility.
 
 ## CLI
 
@@ -80,12 +80,12 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
   - `python cli/main.py email [--topic TOPIC] [--mode auto|ranked] [--limit N] [--dry-run]`
   - Builds an email‑friendly HTML digest from `papers.db` and sends via SMTP (SSL).
   - `--mode auto` renders a ranked‑style list directly from `papers.db`; `--mode ranked` embeds the pre‑generated ranked HTML if present, otherwise falls back to the ranked‑style list.
-  - `--dry-run` writes a preview HTML under the runtime data directory (defaults to `~/.paper_firehose/`).
-  - Per‑recipient routing: `python cli/main.py email --recipients config/secrets/mailing_lists.yaml` or set `config.email.recipients_file`.
+- `--dry-run` writes a preview HTML under the runtime data directory (defaults to `~/.paper_firehose/`).
+- Per‑recipient routing: `python cli/main.py email --recipients ~/.paper_firehose/secrets/mailing_lists.yaml` or set `config.email.recipients_file` (relative paths are resolved under the config directory).
 
 ### Email configuration
 
-Add an `email` section in `config/config.yaml` (secrets in a separate file):
+Add an `email` section in `~/.paper_firehose/config.yaml` (secrets live under `~/.paper_firehose/secrets/`):
 
 ```
 email:
@@ -96,14 +96,15 @@ email:
     host: "mail.nemeslab.com"
     port: 465
     username: "_mainaccount@nemeslab.com"
-    password_file: "config/secrets/email_password.txt"  # store only the password here
+    password_file: "secrets/email_password.env"  # store only the password here
 ```
 
 Notes
-- Store the SMTP password in `config/secrets/email_password.txt` (gitignored).
+- The first run seeds `~/.paper_firehose/secrets/email_password.env` with a placeholder file—replace its contents with the actual SMTP password (keep the file out of version control).
+- A sample `mailing_lists.yaml` is copied to `~/.paper_firehose/secrets/`; update it before enabling per-recipient routing.
 - The command prefers to be run after `filter`, `rank`, `abstracts`, and `summarize` so it can include LLM summaries when available.
 
-Per‑recipient YAML (config/secrets/mailing_lists.yaml)
+Per‑recipient YAML (`~/.paper_firehose/secrets/mailing_lists.yaml`)
 Example:
 ```
 recipients:
@@ -121,7 +122,7 @@ You can call the main steps programmatically via `paper_firehose`.
 
 Basics
 - `import paper_firehose as pf`
-- All functions default to `config/config.yaml`; override with `config_path="..."`.
+- All functions default to `~/.paper_firehose/config.yaml`; override with `config_path="..."`.
 
 Functions
 - `pf.filter(topic=None, config_path=None)`: Runs the filter step for one topic or all.
@@ -186,14 +187,14 @@ Notes
   - Override the location by setting the `PAPER_FIREHOSE_DATA_DIR` environment variable (for example in CI workflows).
   - The directory is created automatically when the application starts.
 
-- `config/config.yaml` (feeds, DB paths, defaults)
+- `~/.paper_firehose/config.yaml` (feeds, DB paths, defaults)
   - Each feed has a key and a display `name`; the key is used in topic files, the name is stored in DBs.
   - `paperqa`: settings for the arXiv downloader (Phase 1)
     - `download_rank_threshold`: minimum `rank_score` to download (default 0.35)
     - `rps`: requests/second throttle (default 0.3; ~1 request/3.3s per arXiv API guidance)
     - `max_retries`: per-item retry attempts on transient errors
     - `prompt`: paper-qa question used for summarization; should instruct the model to return only JSON with keys `summary`, `methods` (supports `{ranking_query}` placeholder)
-- `config/topics/<topic>.yaml`
+- `~/.paper_firehose/topics/<topic>.yaml`
   - `feeds`: list of feed keys from `config.yaml`.
   - `filter.pattern` and `filter.fields`: regex and fields to match (defaults include `title` and `summary`).
   - `ranking`: optional `query`, `model`, cutoffs, etc. (for the rank command).
@@ -209,7 +210,8 @@ Notes
 - `config.llm` (global model settings)
   - `model`: preferred chat model id
   - `model_fallback`: secondary model if the primary is unsupported/unavailable
-  - `api_key_env`: environment variable name to read if `openaikulcs.env` is missing
+  - `api_key_env`: environment variable name to read if the key file is missing (default: `OPENAI_API_KEY`)
+  - `api_key_file` *(optional)*: custom path to the API key file; defaults to `secrets/openaikulcs.env` under the config directory
   - `rps`: default requests/second throttle for summarization
   - `max_retries`: retry attempts per item on transient errors
   - Optional GPT‑5 parameters: `verbosity`, `reasoning_effort` (used when the model starts with `gpt-5`)
