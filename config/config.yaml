@@ -7,6 +7,8 @@ database:
 llm:
   model: "gpt-5-mini"
   api_key_env: "OPENAI_API_KEY"
+  # Optional: override the default key location (~/.paper_firehose/secrets/openaikulcs.env)
+  # api_key_file: "secrets/openaikulcs.env"
   # Fallback model if the primary is unavailable/unsupported
   model_fallback: "gpt-5-nano"
   # Slower by default to be polite to API
@@ -209,7 +211,7 @@ defaults:
 
 # Email delivery (Mailman list)
 email:
-  recipients_file: "config/secrets/mailing_lists.yaml"
+  recipients_file: "secrets/mailing_lists.yaml"
   # Optional subject prefix
   subject_prefix: "paper firehose"
   # Sender address; defaults to smtp.username if omitted
@@ -219,4 +221,4 @@ email:
     port: 465
     username: "_mainaccount@nemeslab.com"
     # Prefer file-based secret storage. Put the password in this file (gitignored by you).
-    password_file: "config/secrets/email_password.env"
+    password_file: "secrets/email_password.env"

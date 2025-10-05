@@ -22,4 +22,8 @@ assets/paperqa_archive/*
 models/*
 assets/secrets/*
 config/secrets/*
+!config/secrets/README.md
+!config/secrets/email_password.env
+!config/secrets/mailing_lists.yaml
+!config/secrets/openaikulcs.env
 rg_papers_statistics/*

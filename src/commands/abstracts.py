@@ -485,7 +485,7 @@ def run(config_path: str, topic: Optional[str] = None, *, mailto: Optional[str] 
     """Fetch and write abstracts into papers.db for ranked entries.
 
     Args:
-        config_path: Path to config/config.yaml
+        config_path: Path to the main configuration file (defaults to ~/.paper_firehose/config.yaml)
         topic: Optional single topic; otherwise process all topics
         mailto: Contact email for Crossref User-Agent
         max_per_topic: Optional cap on number of fetches per topic
