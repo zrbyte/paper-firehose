@@ -13,7 +13,7 @@ SRC_PATH = REPO_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-import commands.summarize as summarize  # noqa: E402
+from paper_firehose.commands import summarize  # noqa: E402
 
 
 def test_resolve_api_key_prefers_default_config_dir_when_base_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
