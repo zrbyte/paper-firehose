@@ -15,16 +15,5 @@ archive/
 *.env
 .DS_Store
 .cursor/*
-assets/*.db  # ignore all files in assets dir. Actions will commit the DB files to GitHub. Will not be downloaded so as to not create conflicts with test runs.
-assets/paperqa/*
-assets/paperqa_archive/*
-models/*
 paper_firehose/system/models/*
-assets/secrets/*
-paper_firehose/system/config/secrets/*
-!paper_firehose/system/config/secrets/README.md
-!paper_firehose/system/config/secrets/email_password.env
-!paper_firehose/system/config/secrets/mailing_lists.yaml
-!paper_firehose/system/config/secrets/openaikulcs.env
-.paper_firehose/
-rg_papers_statistics/*
+.paper_firehose/*
