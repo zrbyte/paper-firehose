@@ -16,7 +16,7 @@ from commands import abstracts as abstracts_cmd  # type: ignore
 from commands import summarize as summarize_cmd  # type: ignore
 from commands import pqa_summary as pqa_summary_cmd  # type: ignore
 from commands import email_list as email_cmd  # type: ignore
-from core.config import ConfigManager  # type: ignore
+from core.config import ConfigManager, DEFAULT_CONFIG_PATH  # type: ignore
 from core.database import DatabaseManager  # type: ignore
 from processors.html_generator import HTMLGenerator  # type: ignore
 
@@ -25,7 +25,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CONFIG = os.path.join(_REPO_ROOT, 'config', 'config.yaml')
+_DEFAULT_CONFIG = str(DEFAULT_CONFIG_PATH)
 
 __all__ = [
     'filter',
