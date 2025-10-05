@@ -1,0 +1,57 @@
+[build-system]
+requires = [
+    "setuptools>=68",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paper_firehose"
+version = "0.1.0"
+description = "Filter, rank, and summarize research-paper RSS feeds."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Peter Nemes-Incze" },
+]
+requires-python = ">=3.10"
+dependencies = [
+    "feedparser",
+    "PyYAML",
+    "click",
+    "sentence-transformers>=2.2.2",
+    "requests",
+    "openai>=1.30.0",
+    "paper-qa",
+]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+keywords = ["rss", "llm", "research", "papers", "arxiv", "summaries"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+]
+
+[project.scripts]
+paper-firehose = "paper_firehose.cli:cli"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+paper_firehose = [
+    "system/**/*",
+]
