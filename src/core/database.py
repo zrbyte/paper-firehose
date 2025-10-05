@@ -15,6 +15,8 @@ from typing import Dict, List, Any, Optional
 import logging
 import glob
 
+from core.paths import resolve_data_file
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,14 +26,10 @@ class DatabaseManager:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.db_paths = {
-            'all_feeds': config['database']['all_feeds_path'],
-            'history': config['database']['history_path'],
-            'current': config['database']['path']
+            'all_feeds': str(resolve_data_file(config['database']['all_feeds_path'], ensure_parent=True)),
+            'history': str(resolve_data_file(config['database']['history_path'], ensure_parent=True)),
+            'current': str(resolve_data_file(config['database']['path'], ensure_parent=True)),
         }
-        
-        # Ensure assets directory exists
-        for path in self.db_paths.values():
-            os.makedirs(os.path.dirname(path), exist_ok=True)
         
         self._init_databases()
     
@@ -88,7 +86,7 @@ class DatabaseManager:
     def backup_important_databases(self) -> Dict[str, str]:
         """Backup history and all_feeds databases with timestamped rotation.
 
-        - Writes timestamped backups alongside the source DBs in `assets/`.
+        - Writes timestamped backups alongside the source DBs in the runtime data directory.
         - Keeps up to 3 most recent backups per database, pruning older ones.
 
         Returns a dict mapping logical db keys to the created backup file paths.

@@ -49,7 +49,7 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
   - Selects preprints from arXiv in `papers.db` with `rank_score >= config.paperqa.download_rank_threshold`, detects arXiv IDs, and downloads PDFs (polite arXiv API usage).
   - Runs paper-qa to summarize full text into JSON keys: `summary`, `methods`.
   - Writes summaries to `papers.db.entries.paper_qa_summary` only for the specific topic row the item was selected under (no longer cross-updating all topics for the same entry id), and to `matched_entries_history.db.matched_entries.paper_qa_summary`.
-  - Prunes archived PDFs older than ~30 days from `assets/paperqa_archive/` after each run to keep storage manageable.
+  - Prunes archived PDFs older than ~30 days from the runtime data directory's `paperqa_archive/` folder (defaults to `~/.paper_firehose/paperqa_archive/`).
   - Note: This command only updates databases. Use `html` to render pages.
 
 - **HTML** (render only; no fetching)
@@ -58,6 +58,7 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
     - Filtered page: `output.filename` (if configured)
     - Ranked page: `output.filename_ranked` (if configured and entries exist)
     - Summary page: `output.filename_summary` (if configured). Content priority: PDF summaries → LLM summaries → abstract-only fallback; always ordered by rank.
+  - All generated HTML files are written under the runtime data directory's `html/` folder (defaults to `~/.paper_firehose/html/`).
 
 ### Summary pages
 
@@ -79,7 +80,7 @@ OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or
   - `python cli/main.py email [--topic TOPIC] [--mode auto|ranked] [--limit N] [--dry-run]`
   - Builds an email‑friendly HTML digest from `papers.db` and sends via SMTP (SSL).
   - `--mode auto` renders a ranked‑style list directly from `papers.db`; `--mode ranked` embeds the pre‑generated ranked HTML if present, otherwise falls back to the ranked‑style list.
-  - `--dry-run` writes a preview HTML to `assets/` instead of sending.
+  - `--dry-run` writes a preview HTML under the runtime data directory (defaults to `~/.paper_firehose/`).
   - Per‑recipient routing: `python cli/main.py email --recipients config/secrets/mailing_lists.yaml` or set `config.email.recipients_file`.
 
 ### Email configuration
@@ -135,9 +136,9 @@ Functions
 
 ## History Viewer
 
-- `history_viewer.html` is a static browser viewer for `assets/matched_entries_history.db` (table `matched_entries`).
-- By default it auto-loads the latest history DB from GitHub:
-  - Displayed: `https://github.com/zrbyte/paper-firehose/tree/data/assets/matched_entries_history.latest.db`
+- `history_viewer.html` is a static browser viewer for `matched_entries_history.db` (table `matched_entries`) located under the runtime data directory.
+- By default it auto-loads the latest history DB published on the `data` branch:
+  - Displayed: `https://github.com/zrbyte/paper-firehose/tree/data/.paper_firehose/matched_entries_history.latest.db`
   - The viewer automatically normalizes GitHub page links to their raw content (e.g., `raw.githubusercontent.com`) before fetching.
 - You can override with a query param or local file:
   - `history_viewer.html?db=<url>` to load a specific remote DB
@@ -148,10 +149,10 @@ Functions
 
 ## Architecture overview
 
-- Three-DB architecture:
-  - `assets/all_feed_entries.db`: Every fetched item (for deduplication).
-  - `assets/matched_entries_history.db`: All matched items across topics and runs (historical archive).
-  - `assets/papers.db`: Current-run working set (filtered → ranked → summarized).
+- Three-DB architecture (data lives under the runtime data directory, default `~/.paper_firehose/`):
+  - `all_feed_entries.db`: Every fetched item (for deduplication).
+  - `matched_entries_history.db`: All matched items across topics and runs (historical archive).
+  - `papers.db`: Current-run working set (filtered → ranked → summarized).
 - YAML-driven configuration for feeds and topics.
 - HTML generated from `papers.db` so you can re-render without refetching.
 - Optional LLM summarization writes JSON summaries to DB and renders dedicated summary pages.
@@ -179,6 +180,11 @@ Notes
 
 
 ## Configuration
+
+- Runtime data directory
+  - All SQLite databases, email previews, and PDF archives are written under the runtime data directory (defaults to `~/.paper_firehose/`).
+  - Override the location by setting the `PAPER_FIREHOSE_DATA_DIR` environment variable (for example in CI workflows).
+  - The directory is created automatically when the application starts.
 
 - `config/config.yaml` (feeds, DB paths, defaults)
   - Each feed has a key and a display `name`; the key is used in topic files, the name is stored in DBs.

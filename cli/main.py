@@ -21,7 +21,7 @@ from commands import abstracts as abstracts_cmd
 from commands import summarize as summarize_cmd
 from commands import pqa_summary as pqa_cmd
 from commands import email_list as email_cmd
-from commands import email_list as email_cmd
+from core.paths import get_data_dir
 
 # Setup logging
 logging.basicConfig(
@@ -171,14 +171,14 @@ def pqa_summary(ctx, topic, rps, limit, arxiv_ids, entry_ids, use_history, histo
 @click.option('--mode', type=click.Choice(['auto', 'ranked']), default='auto', help='Content mode: auto (from DB) or ranked (embed ranked HTML if available)')
 @click.option('--limit', type=int, help='Limit number of entries per topic')
 @click.option('--recipients', 'recipients_file', type=str, help='Path to recipients YAML (overrides config.email.recipients_file)')
-@click.option('--dry-run', is_flag=True, help='Do not send; write preview HTML to assets/')
+@click.option('--dry-run', is_flag=True, help='Do not send; write preview HTML under the runtime data directory')
 @click.pass_context
 def email(ctx, topic, mode, limit, recipients_file, dry_run):
     """Send an HTML digest email generated from papers.db via SMTP."""
     try:
         email_cmd.run(ctx.obj['config_path'], topic, mode=mode, limit=limit, dry_run=dry_run, recipients_file=recipients_file)
         if dry_run:
-            click.echo("📝 Email dry-run completed (preview written to assets/)")
+            click.echo(f"📝 Email dry-run completed (preview written under {get_data_dir()})")
         else:
             click.echo("✅ Email sent successfully")
     except Exception as e:

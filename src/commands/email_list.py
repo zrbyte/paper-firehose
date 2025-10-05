@@ -13,6 +13,7 @@ from typing import Optional, List, Dict, Any
 
 from core.config import ConfigManager
 from core.database import DatabaseManager
+from core.paths import resolve_data_path
 from processors.emailer import EmailRenderer, SMTPSender
 
 logger = logging.getLogger(__name__)
@@ -109,7 +110,7 @@ def run(
         mode: Accepted for CLI compatibility; the implementation currently always renders
             ranked-style sections directly from the database regardless of value.
         limit: Optional per-topic limit of items
-        dry_run: If True, do not send; write preview to assets/email_preview_*.html
+        dry_run: If True, do not send; write preview HTML under the runtime data directory
         recipients_file: Optional YAML file describing per-recipient overrides
     """
     cfg_mgr = ConfigManager(config_path)
@@ -176,10 +177,8 @@ def run(
                     subj = f"{subject_prefix}: Digest — {today}"
                 html_body = renderer.render_full_email(subj, sections)
                 if dry_run:
-                    out_dir = os.path.join('assets')
-                    os.makedirs(out_dir, exist_ok=True)
                     local = to_specific.split('@')[0]
-                    out_path = os.path.join(out_dir, f"email_preview_{local}_{today}.html")
+                    out_path = resolve_data_path(f"email_preview_{local}_{today}.html")
                     with open(out_path, 'w', encoding='utf-8') as f:
                         f.write(html_body)
                     logger.info("Email dry-run: wrote preview for %s to %s", to_specific, out_path)
@@ -202,9 +201,7 @@ def run(
         return
     html_body = renderer.render_full_email(subject, sections)
     if dry_run:
-        out_dir = os.path.join('assets')
-        os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, f"email_preview_{today}.html")
+        out_path = resolve_data_path(f"email_preview_{today}.html")
         with open(out_path, 'w', encoding='utf-8') as f:
             f.write(html_body)
         logger.info("Email dry-run: wrote preview to %s", out_path)

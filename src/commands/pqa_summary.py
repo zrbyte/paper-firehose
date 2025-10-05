@@ -28,6 +28,7 @@ import feedparser
 
 from core.config import ConfigManager
 from core.database import DatabaseManager
+from core.paths import resolve_data_path
 
 logger = logging.getLogger(__name__)
 
@@ -574,8 +575,8 @@ def run(
       back to both ``papers.db`` and ``matched_entries_history.db`` when an
       ``entry_id`` is available.
     """
-    download_dir = os.path.join('assets', 'paperqa')
-    archive_dir = os.path.join('assets', 'paperqa_archive')
+    download_dir = str(resolve_data_path('paperqa'))
+    archive_dir = str(resolve_data_path('paperqa_archive'))
     cfg_mgr = ConfigManager(config_path)
     if not cfg_mgr.validate_config():
         logger.error("Configuration validation failed")

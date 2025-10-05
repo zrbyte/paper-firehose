@@ -3,7 +3,11 @@
 Merge an older matched_entries history DB into the current schema.
 
 Usage:
-  python scripts/migrate_history_db.py --source /path/to/old.db [--dest assets/matched_entries_history.db] [--create-latest]
+  python scripts/migrate_history_db.py --source /path/to/old.db [--dest <path>] [--create-latest]
+
+By default, `--dest` resolves to the runtime data directory (e.g.,
+`~/.paper_firehose/matched_entries_history.db` unless `PAPER_FIREHOSE_DATA_DIR`
+is set).
 
 This script:
 - Ensures the destination DB has the expected `matched_entries` schema.
@@ -13,7 +17,7 @@ This script:
 
 Notes:
 - Keep changes minimal and focused on merging data; it does not modify other DBs.
-- Use `--create-latest` to write a copy to `assets/matched_entries_history.latest.db` for publishing.
+- Use `--create-latest` to write a `matched_entries_history.latest.db` copy alongside the destination.
 """
 
 import argparse
@@ -25,6 +29,17 @@ from typing import Dict, Any, Tuple
 import shutil
 import json
 import re
+from pathlib import Path
+import sys
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = REPO_ROOT / 'src'
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
+
+from core.paths import resolve_data_file
+
+DEFAULT_DEST = str(resolve_data_file('matched_entries_history.db'))
 
 
 REQUIRED_COLUMNS = {
@@ -34,7 +49,8 @@ REQUIRED_COLUMNS = {
 
 
 def ensure_dest_schema(dest_path: str) -> None:
-    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    dir_name = os.path.dirname(dest_path)
+    os.makedirs(dir_name or '.', exist_ok=True)
     conn = sqlite3.connect(dest_path)
     cur = conn.cursor()
     cur.execute("PRAGMA journal_mode=WAL")
@@ -254,11 +270,13 @@ def upsert_row(dest: sqlite3.Connection, rec: Dict[str, Any]) -> None:
 def main():
     ap = argparse.ArgumentParser(description="Merge an older history DB into current schema")
     ap.add_argument('--source', required=True, help='Path to the old history DB')
-    ap.add_argument('--dest', default='assets/matched_entries_history.db', help='Destination DB (default: assets/matched_entries_history.db)')
-    ap.add_argument('--create-latest', action='store_true', help='Also create assets/matched_entries_history.latest.db copy of dest')
+    ap.add_argument('--dest', default=DEFAULT_DEST, help=f'Destination DB (default: {DEFAULT_DEST})')
+    ap.add_argument('--create-latest', action='store_true', help='Also create a matched_entries_history.latest.db copy alongside the destination')
     args = ap.parse_args()
 
-    ensure_dest_schema(args.dest)
+    dest_path = os.path.abspath(args.dest)
+
+    ensure_dest_schema(dest_path)
 
     src = sqlite3.connect(args.source)
     src_cur = src.cursor()
@@ -274,7 +292,7 @@ def main():
     src_cur.execute('SELECT * FROM matched_entries')
     rows = src_cur.fetchall()
 
-    dest = sqlite3.connect(args.dest)
+    dest = sqlite3.connect(dest_path)
     dest.execute('BEGIN')
 
     count = 0
@@ -314,11 +332,11 @@ def main():
     dest.close()
     src.close()
 
-    print(f"Merged {count} rows from {args.source} into {args.dest}")
+    print(f"Merged {count} rows from {args.source} into {dest_path}")
 
     if args.create_latest:
-        latest_path = os.path.join(os.path.dirname(args.dest), 'matched_entries_history.latest.db')
-        shutil.copy2(args.dest, latest_path)
+        latest_path = os.path.join(os.path.dirname(dest_path), 'matched_entries_history.latest.db')
+        shutil.copy2(dest_path, latest_path)
         print(f"Also wrote latest copy to {latest_path}")
 
 
