@@ -1,27 +1,20 @@
-import os
-import sys
-from typing import Optional, Dict, Any, List
-
-# Ensure the repository's src/ directory is on sys.path so we can reuse
-# the existing implementation without changing its structure.
-_PACKAGE_DIR = os.path.dirname(__file__)
-_REPO_ROOT = os.path.dirname(_PACKAGE_DIR)
-_SRC_PATH = os.path.join(_REPO_ROOT, 'src')
-if _SRC_PATH not in sys.path:
-    sys.path.insert(0, _SRC_PATH)
-
-from commands import filter as filter_cmd  # type: ignore
-from commands import rank as rank_cmd  # type: ignore
-from commands import abstracts as abstracts_cmd  # type: ignore
-from commands import summarize as summarize_cmd  # type: ignore
-from commands import pqa_summary as pqa_summary_cmd  # type: ignore
-from commands import email_list as email_cmd  # type: ignore
-from core.config import ConfigManager, DEFAULT_CONFIG_PATH  # type: ignore
-from core.database import DatabaseManager  # type: ignore
-from processors.html_generator import HTMLGenerator  # type: ignore
+from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
+from .commands import filter as filter_cmd
+from .commands import rank as rank_cmd
+from .commands import abstracts as abstracts_cmd
+from .commands import summarize as summarize_cmd
+from .commands import pqa_summary as pqa_summary_cmd
+from .commands import email_list as email_cmd
+from .core.config import ConfigManager, DEFAULT_CONFIG_PATH
+from .core.database import DatabaseManager
+from .core.paths import resolve_data_path
+from .processors.html_generator import HTMLGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +26,22 @@ __all__ = [
     'abstracts',
     'summarize',
     'pqa_summary',
+    'paperqa_summary',
     'email',
     'purge',
     'status',
     'html',
+    'generate_html',
 ]
+
+
+def _resolve_output_path(path: str) -> Path:
+    """Resolve HTML output paths under the runtime data directory."""
+    candidate = Path(path)
+    if candidate.is_absolute():
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        return candidate
+    return resolve_data_path('html', *candidate.parts, ensure_parent=True)
 
 
 def filter(topic: Optional[str] = None, config_path: Optional[str] = None) -> None:
@@ -245,20 +249,23 @@ def html(
             heading = topic_config['name']
             description = topic_config.get('description')
 
+            output_target = _resolve_output_path(topic_output_path)
+
             base_generator.generate_html_from_database(
                 db_manager,
                 topic_name,
-                topic_output_path,
+                str(output_target),
                 heading,
                 description,
             )
 
             ranked_output_path = output_config.get('filename_ranked') or f'results_{topic_name}_ranked.html'
             try:
+                ranked_target = _resolve_output_path(ranked_output_path)
                 ranked_generator.generate_ranked_html_from_database(
                     db_manager,
                     topic_name,
-                    ranked_output_path,
+                    str(ranked_target),
                     heading,
                     description,
                 )
@@ -269,10 +276,11 @@ def html(
             if summary_output_path:
                 summary_title = f"LLM Summaries - {heading}"
                 try:
+                    summary_target = _resolve_output_path(summary_output_path)
                     summary_generator.generate_summarized_html_from_database(
                         db_manager,
                         topic_name,
-                        summary_output_path,
+                        str(summary_target),
                         summary_title,
                     )
                 except Exception as exc:

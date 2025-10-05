@@ -12,10 +12,10 @@ import os
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from core.config import ConfigManager
-from core.database import DatabaseManager
-from core.paths import resolve_data_path
-from processors.emailer import EmailRenderer, SMTPSender
+from ..core.config import ConfigManager
+from ..core.database import DatabaseManager
+from ..core.paths import resolve_data_path
+from ..processors.emailer import EmailRenderer, SMTPSender
 
 logger = logging.getLogger(__name__)
 

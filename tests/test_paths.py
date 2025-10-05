@@ -15,7 +15,7 @@ SRC_PATH = REPO_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from core.paths import ensure_data_dir, get_data_dir  # noqa: E402
+from paper_firehose.core.paths import ensure_data_dir, get_data_dir  # noqa: E402
 
 
 class DataDirEnvironmentOverrideTests(unittest.TestCase):

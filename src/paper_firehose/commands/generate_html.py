@@ -8,10 +8,10 @@ using entries already stored in papers.db (status='filtered').
 import logging
 from typing import Optional
 
-from core.config import ConfigManager
-from core.database import DatabaseManager
-from core.paths import resolve_data_path
-from processors.html_generator import HTMLGenerator
+from ..core.config import ConfigManager
+from ..core.database import DatabaseManager
+from ..core.paths import resolve_data_path
+from ..processors.html_generator import HTMLGenerator
 
 logger = logging.getLogger(__name__)
 

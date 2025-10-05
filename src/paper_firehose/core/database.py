@@ -15,7 +15,7 @@ from typing import Dict, List, Any, Optional
 import logging
 import glob
 
-from core.paths import resolve_data_file
+from .paths import resolve_data_file
 
 logger = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ from typing import Iterable
 
 _ENV_VAR = "PAPER_FIREHOSE_DATA_DIR"
 _DEFAULT_DIRNAME = ".paper_firehose"
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _SYSTEM_DIR = _REPO_ROOT / "paper_firehose" / "system"
 
 

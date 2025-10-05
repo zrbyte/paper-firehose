@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from core.paths import get_data_dir, get_system_path
+from .paths import get_data_dir, get_system_path
 
 logger = logging.getLogger(__name__)
 

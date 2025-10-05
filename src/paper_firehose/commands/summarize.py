@@ -25,8 +25,8 @@ import logging
 import requests
 from openai import OpenAI
 
-from core.config import ConfigManager, DEFAULT_CONFIG_DIR
-from core.database import DatabaseManager
+from ..core.config import ConfigManager, DEFAULT_CONFIG_DIR
+from ..core.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 

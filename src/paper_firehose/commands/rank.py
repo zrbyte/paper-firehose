@@ -23,10 +23,10 @@ from typing import Optional, List, Dict, Any
 import unicodedata
 import re
 
-from core.config import ConfigManager
-from core.database import DatabaseManager
-from core.paths import get_system_path, resolve_data_dir
-from processors.st_ranker import STRanker
+from ..core.config import ConfigManager
+from ..core.database import DatabaseManager
+from ..core.paths import get_system_path, resolve_data_dir
+from ..processors.st_ranker import STRanker
 
 logger = logging.getLogger(__name__)
 

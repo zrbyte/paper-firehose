@@ -25,8 +25,8 @@ import os
 
 import requests
 
-from core.config import ConfigManager
-from core.database import DatabaseManager
+from ..core.config import ConfigManager
+from ..core.database import DatabaseManager
 import logging
 
 

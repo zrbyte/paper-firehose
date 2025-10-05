@@ -11,7 +11,7 @@ from pathlib import Path
 from string import Template
 from typing import Dict, List, Any, Optional
 
-from core.paths import get_system_path, resolve_data_path
+from ..core.paths import get_system_path, resolve_data_path
 
 logger = logging.getLogger(__name__)
 

@@ -26,9 +26,9 @@ from typing import Dict, Any, List, Optional, Tuple
 import requests
 import feedparser
 
-from core.config import ConfigManager
-from core.database import DatabaseManager
-from core.paths import resolve_data_path
+from ..core.config import ConfigManager
+from ..core.database import DatabaseManager
+from ..core.paths import resolve_data_path
 
 logger = logging.getLogger(__name__)
 

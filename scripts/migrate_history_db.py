@@ -37,7 +37,7 @@ SRC_PATH = REPO_ROOT / 'src'
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from core.paths import resolve_data_file
+from paper_firehose.core.paths import resolve_data_file
 
 DEFAULT_DEST = str(resolve_data_file('matched_entries_history.db'))
 

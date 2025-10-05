@@ -13,10 +13,10 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from commands import filter as filter_cmd
-from commands import generate_html as html_cmd
-from commands import rank as rank_cmd
-import core.config as core_config
+from paper_firehose.commands import filter as filter_cmd
+from paper_firehose.commands import generate_html as html_cmd
+from paper_firehose.commands import rank as rank_cmd
+import paper_firehose.core.config as core_config
 
 
 class DummyRanker:

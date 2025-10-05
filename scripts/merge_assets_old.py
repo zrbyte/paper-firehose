@@ -38,7 +38,7 @@ SRC_PATH = REPO_ROOT / 'src'
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from core.paths import ensure_data_dir
+from paper_firehose.core.paths import ensure_data_dir
 
 DATA_DIR = ensure_data_dir()
 ASSETS_DIR = str(DATA_DIR)

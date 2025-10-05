@@ -10,8 +10,8 @@ import datetime
 from typing import Dict, List, Any
 import logging
 
-from core.database import DatabaseManager
-from core.config import ConfigManager
+from ..core.database import DatabaseManager
+from ..core.config import ConfigManager
 
 logger = logging.getLogger(__name__)
 
