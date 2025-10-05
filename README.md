@@ -3,17 +3,12 @@
 - Fetches academic RSS feeds, filters entries with per-topic regex, and writes results into SQLite databases. HTML pages with the results are rendered directly from the database.
 - Results are ranked by cosine similarity to a set of user defined keywords. Configurable list of authors can get a ranking boost. So papers from your friends / competitors can be boosted in ranking.
 - Highest ranked results are summarized by an LLM. For summarization to work, you need an OpenAI API key. Full text summarization uses [Paper-qa](https://github.com/Future-House/paper-qa).
-- New search terms can be created by simply adding a yaml config file under: `<DATA_DIR>/config/topics/your_topic_name.yaml`. Look at the other topics for guidance.
+- New search terms can be created by simply adding a yaml config file under: `config/topics/your_topic_name.yaml`. Look at the other topics for guidance.
 - The script is configured to run using Github actions each day at 6 AM to fetch new papers. For your own runs, configure the `.github/workflows/pages.yml` file.
 
 Written using Python 3.11.
 For dependencies check `requirements.txt`.
-OpenAI API key is searched for in `<DATA_DIR>/config/secrets/openaikulcs.env` (created on first run) or, as a fallback, the `OPENAI_API_KEY` environment variable. A legacy `./openaikulcs.env` file is still honored for backward compatibility.
-
-`<DATA_DIR>` refers to the runtime data directory. It resolves to the path specified by
-`PAPER_FIREHOSE_DATA_DIR` (commonly `./.paper_firehose` in CI). When the variable is unset,
-the pipeline uses `~/.paper_firehose` in the current user's home directory, seeding it on
-first run from the bundled defaults in `paper_firehose/system/`.
+OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or `OPENAI_API_KEY` environment variable.
 
 ## CLI
 
@@ -54,7 +49,7 @@ first run from the bundled defaults in `paper_firehose/system/`.
   - Selects preprints from arXiv in `papers.db` with `rank_score >= config.paperqa.download_rank_threshold`, detects arXiv IDs, and downloads PDFs (polite arXiv API usage).
   - Runs paper-qa to summarize full text into JSON keys: `summary`, `methods`.
   - Writes summaries to `papers.db.entries.paper_qa_summary` only for the specific topic row the item was selected under (no longer cross-updating all topics for the same entry id), and to `matched_entries_history.db.matched_entries.paper_qa_summary`.
-  - Prunes archived PDFs older than ~30 days from the runtime data directory's `paperqa_archive/` folder (defaults to `<DATA_DIR>/paperqa_archive/`).
+  - Prunes archived PDFs older than ~30 days from `assets/paperqa_archive/` after each run to keep storage manageable.
   - Note: This command only updates databases. Use `html` to render pages.
 
 - **HTML** (render only; no fetching)
@@ -63,7 +58,6 @@ first run from the bundled defaults in `paper_firehose/system/`.
     - Filtered page: `output.filename` (if configured)
     - Ranked page: `output.filename_ranked` (if configured and entries exist)
     - Summary page: `output.filename_summary` (if configured). Content priority: PDF summaries → LLM summaries → abstract-only fallback; always ordered by rank.
-  - All generated HTML files are written under the runtime data directory's `html/` folder (defaults to `<DATA_DIR>/html/`).
 
 ### Summary pages
 
@@ -85,31 +79,30 @@ first run from the bundled defaults in `paper_firehose/system/`.
   - `python cli/main.py email [--topic TOPIC] [--mode auto|ranked] [--limit N] [--dry-run]`
   - Builds an email‑friendly HTML digest from `papers.db` and sends via SMTP (SSL).
   - `--mode auto` renders a ranked‑style list directly from `papers.db`; `--mode ranked` embeds the pre‑generated ranked HTML if present, otherwise falls back to the ranked‑style list.
-- `--dry-run` writes a preview HTML under the runtime data directory (defaults to `<DATA_DIR>/`).
-- Per‑recipient routing: `python cli/main.py email --recipients <DATA_DIR>/config/secrets/mailing_lists.yaml` or set `config.email.recipients_file` (relative paths are resolved under the config directory).
+  - `--dry-run` writes a preview HTML to `assets/` instead of sending.
+  - Per‑recipient routing: `python cli/main.py email --recipients config/secrets/mailing_lists.yaml` or set `config.email.recipients_file`.
 
 ### Email configuration
 
-Add an `email` section in `<DATA_DIR>/config/config.yaml` (secrets live under `<DATA_DIR>/config/secrets/`):
+Add an `email` section in `config/config.yaml` (secrets in a separate file):
 
 ```
 email:
   to: "LIST_ADDRESS@yourdomain"             # Mailman list address
   subject_prefix: "Paper Firehose"           # Optional
-  from: "_mainaccount@nemeslab.com"          # Defaults to smtp.username
+  from: "mail@xyz.com"          # Defaults to smtp.username
   smtp:
-    host: "mail.nemeslab.com"
+    host: "mail.xyz.com"
     port: 465
-    username: "_mainaccount@nemeslab.com"
-    password_file: "secrets/email_password.env"  # store only the password here
+    username: "youraccount"
+    password_file: "config/secrets/email_password.txt"  # store only the password here
 ```
 
 Notes
-- The first run seeds `<DATA_DIR>/config/secrets/email_password.env` with a placeholder file—replace its contents with the actual SMTP password (keep the file out of version control).
-- A sample `mailing_lists.yaml` is copied to `<DATA_DIR>/config/secrets/`; update it before enabling per-recipient routing.
+- Store the SMTP password in `config/secrets/email_password.txt` (gitignored).
 - The command prefers to be run after `filter`, `rank`, `abstracts`, and `summarize` so it can include LLM summaries when available.
 
-Per‑recipient YAML (`<DATA_DIR>/config/secrets/mailing_lists.yaml`)
+Per‑recipient YAML (config/secrets/mailing_lists.yaml)
 Example:
 ```
 recipients:
@@ -127,7 +120,7 @@ You can call the main steps programmatically via `paper_firehose`.
 
 Basics
 - `import paper_firehose as pf`
-- All functions default to `<DATA_DIR>/config/config.yaml`; override with `config_path="..."`.
+- All functions default to `config/config.yaml`; override with `config_path="..."`.
 
 Functions
 - `pf.filter(topic=None, config_path=None)`: Runs the filter step for one topic or all.
@@ -142,9 +135,9 @@ Functions
 
 ## History Viewer
 
-- `history_viewer.html` is a static browser viewer for `matched_entries_history.db` (table `matched_entries`) located under the runtime data directory.
-- By default it auto-loads the latest history DB published on the `data` branch:
-  - Displayed: `https://github.com/zrbyte/paper-firehose/tree/data/.paper_firehose/matched_entries_history.latest.db`
+- `history_viewer.html` is a static browser viewer for `assets/matched_entries_history.db` (table `matched_entries`).
+- By default it auto-loads the latest history DB from GitHub:
+  - Displayed: `https://github.com/zrbyte/paper-firehose/tree/data/assets/matched_entries_history.latest.db`
   - The viewer automatically normalizes GitHub page links to their raw content (e.g., `raw.githubusercontent.com`) before fetching.
 - You can override with a query param or local file:
   - `history_viewer.html?db=<url>` to load a specific remote DB
@@ -155,10 +148,10 @@ Functions
 
 ## Architecture overview
 
-- Three-DB architecture (data lives under the runtime data directory, default `<DATA_DIR>/`):
-  - `all_feed_entries.db`: Every fetched item (for deduplication).
-  - `matched_entries_history.db`: All matched items across topics and runs (historical archive).
-  - `papers.db`: Current-run working set (filtered → ranked → summarized).
+- Three-DB architecture:
+  - `assets/all_feed_entries.db`: Every fetched item (for deduplication).
+  - `assets/matched_entries_history.db`: All matched items across topics and runs (historical archive).
+  - `assets/papers.db`: Current-run working set (filtered → ranked → summarized).
 - YAML-driven configuration for feeds and topics.
 - HTML generated from `papers.db` so you can re-render without refetching.
 - Optional LLM summarization writes JSON summaries to DB and renders dedicated summary pages.
@@ -187,19 +180,14 @@ Notes
 
 ## Configuration
 
-- Runtime data directory
-  - All SQLite databases, email previews, and PDF archives are written under the runtime data directory (defaults to `<DATA_DIR>/`).
-  - Override the location by setting the `PAPER_FIREHOSE_DATA_DIR` environment variable (for example in CI workflows).
-  - The directory is created automatically when the application starts.
-
-- `<DATA_DIR>/config/config.yaml` (feeds, DB paths, defaults)
+- `config/config.yaml` (feeds, DB paths, defaults)
   - Each feed has a key and a display `name`; the key is used in topic files, the name is stored in DBs.
   - `paperqa`: settings for the arXiv downloader (Phase 1)
     - `download_rank_threshold`: minimum `rank_score` to download (default 0.35)
     - `rps`: requests/second throttle (default 0.3; ~1 request/3.3s per arXiv API guidance)
     - `max_retries`: per-item retry attempts on transient errors
     - `prompt`: paper-qa question used for summarization; should instruct the model to return only JSON with keys `summary`, `methods` (supports `{ranking_query}` placeholder)
-- `<DATA_DIR>/config/topics/<topic>.yaml`
+- `config/topics/<topic>.yaml`
   - `feeds`: list of feed keys from `config.yaml`.
   - `filter.pattern` and `filter.fields`: regex and fields to match (defaults include `title` and `summary`).
   - `ranking`: optional `query`, `model`, cutoffs, etc. (for the rank command).
@@ -215,8 +203,7 @@ Notes
 - `config.llm` (global model settings)
   - `model`: preferred chat model id
   - `model_fallback`: secondary model if the primary is unsupported/unavailable
-  - `api_key_env`: environment variable name to read if the key file is missing (default: `OPENAI_API_KEY`)
-  - `api_key_file` *(optional)*: custom path to the API key file; defaults to `secrets/openaikulcs.env` under the config directory
+  - `api_key_env`: environment variable name to read if `openaikulcs.env` is missing
   - `rps`: default requests/second throttle for summarization
   - `max_retries`: retry attempts per item on transient errors
   - Optional GPT‑5 parameters: `verbosity`, `reasoning_effort` (used when the model starts with `gpt-5`)
