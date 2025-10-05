@@ -9,11 +9,13 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from core.paths import get_data_dir, get_system_path
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONFIG_DIR = Path.home() / ".paper_firehose"
+DEFAULT_CONFIG_DIR = get_data_dir() / "config"
 DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.yaml"
-_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "config"
+_TEMPLATE_DIR = get_system_path("config")
 _TEMPLATE_CONFIG = _TEMPLATE_DIR / "config.yaml"
 _TEMPLATE_TOPICS_DIR = _TEMPLATE_DIR / "topics"
 _TEMPLATE_SECRETS_DIR = _TEMPLATE_DIR / "secrets"
@@ -99,8 +101,11 @@ class ConfigManager:
     """Manages loading and validation of YAML configuration files."""
 
     def __init__(self, config_path: Optional[str] = None):
-        self.config_path = os.path.abspath(str(config_path or DEFAULT_CONFIG_PATH))
-        self.base_dir = os.path.dirname(self.config_path)
+        path = Path(config_path or DEFAULT_CONFIG_PATH).expanduser()
+        if not path.is_absolute():
+            path = path.resolve()
+        self.config_path = str(path)
+        self.base_dir = str(path.parent)
         self._config = None
         self._topics = {}
         self._ensure_default_config()

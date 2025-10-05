@@ -2,7 +2,8 @@
 Email rendering and sending utilities for Paper Firehose.
 
 Generates a simple, email-friendly HTML digest from papers.db and sends it via
-SMTP (SSL) based on configuration in ~/.paper_firehose/config.yaml under `email`.
+SMTP (SSL) based on configuration stored in the runtime data directory
+(`config/config.yaml` under the path resolved by PAPER_FIREHOSE_DATA_DIR).
 
 Uses only the Python standard library.
 """

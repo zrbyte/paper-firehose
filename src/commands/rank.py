@@ -25,6 +25,7 @@ import re
 
 from core.config import ConfigManager
 from core.database import DatabaseManager
+from core.paths import get_system_path, resolve_data_dir
 from processors.st_ranker import STRanker
 
 logger = logging.getLogger(__name__)
@@ -56,14 +57,14 @@ def _ensure_local_model(model_spec: str) -> str:
     """
     from pathlib import Path
     import re
+    import shutil
 
     # Try local path directly if it's already valid
     if Path(model_spec).exists() and _has_model_files(model_spec):
         return model_spec
 
-    # Determine target local dir and repo id
-    models_root = Path("models")
-    models_root.mkdir(parents=True, exist_ok=True)
+    models_root = resolve_data_dir('models', ensure_exists=True)
+    system_models_root = get_system_path('models')
 
     repo_id: str | None = None
     target_dir: Path | None = None
@@ -94,6 +95,19 @@ def _ensure_local_model(model_spec: str) -> str:
     # If the target already looks valid, use it
     if _has_model_files(str(target_dir)):
         return str(target_dir)
+
+    # If the system bundle ships the model, copy it into the runtime directory
+    if system_models_root.exists():
+        system_candidate = system_models_root / target_dir.name
+        try:
+            if system_candidate.exists() and system_candidate.resolve() != target_dir.resolve():
+                shutil.copytree(system_candidate, target_dir)
+                if _has_model_files(str(target_dir)):
+                    return str(target_dir)
+        except FileExistsError:
+            pass
+        except Exception as e:
+            logger.debug("Model seed copy failed for %s -> %s: %s", system_candidate, target_dir, e)
 
     # Attempt download (best-effort)
     try:

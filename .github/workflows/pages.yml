@@ -18,6 +18,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PAPER_FIREHOSE_DATA_DIR: ${{ github.workspace }}/.paper_firehose
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,19 +74,19 @@ jobs:
       - name: Create secret files
         run: |
           set -euo pipefail
-          mkdir -p config/secrets
+          mkdir -p "$PAPER_FIREHOSE_DATA_DIR/config/secrets"
           # SMTP password used by cli/main.py email via processors/emailer.py
           if [ -n "${{ secrets.SMTP_PASSWORD || '' }}" ]; then
-            printf '%s' "${{ secrets.SMTP_PASSWORD }}" > config/secrets/email_password.env
-            chmod 600 config/secrets/email_password.env
+            printf '%s' "${{ secrets.SMTP_PASSWORD }}" > "$PAPER_FIREHOSE_DATA_DIR/config/secrets/email_password.env"
+            chmod 600 "$PAPER_FIREHOSE_DATA_DIR/config/secrets/email_password.env"
             echo "✅ Wrote SMTP password file"
           else
             echo "ℹ️  SMTP_PASSWORD secret not set; email step may fail"
           fi
           # Optional per-recipient routing file (YAML)
           if [ -n "${{ secrets.MAILING_LISTS_YAML || '' }}" ]; then
-            printf '%s\n' "${{ secrets.MAILING_LISTS_YAML }}" > config/secrets/mailing_lists.yaml
-            chmod 600 config/secrets/mailing_lists.yaml
+            printf '%s\n' "${{ secrets.MAILING_LISTS_YAML }}" > "$PAPER_FIREHOSE_DATA_DIR/config/secrets/mailing_lists.yaml"
+            chmod 600 "$PAPER_FIREHOSE_DATA_DIR/config/secrets/mailing_lists.yaml"
             echo "✅ Wrote mailing_lists.yaml from secret"
           else
             echo "ℹ️  MAILING_LISTS_YAML secret not set; will fall back to repo file if present"

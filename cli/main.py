@@ -36,7 +36,7 @@ logging.basicConfig(
     '--config',
     default=str(DEFAULT_CONFIG_PATH),
     show_default=True,
-    help='Path to config file (default: ~/.paper_firehose/config.yaml)',
+    help='Path to config file (defaults to data_dir/config/config.yaml)',
 )
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging')
 @click.pass_context

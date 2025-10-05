@@ -7,9 +7,8 @@ __pycache__/
 agents.md
 archive/
 *.html
-!html_template.html
-!llmsummary_template.html
 !history_viewer_cards.html
+!paper_firehose/system/templates/*.html
 
 *.db
 *.ipynb
@@ -20,10 +19,12 @@ assets/*.db  # ignore all files in assets dir. Actions will commit the DB files 
 assets/paperqa/*
 assets/paperqa_archive/*
 models/*
+paper_firehose/system/models/*
 assets/secrets/*
-config/secrets/*
-!config/secrets/README.md
-!config/secrets/email_password.env
-!config/secrets/mailing_lists.yaml
-!config/secrets/openaikulcs.env
+paper_firehose/system/config/secrets/*
+!paper_firehose/system/config/secrets/README.md
+!paper_firehose/system/config/secrets/email_password.env
+!paper_firehose/system/config/secrets/mailing_lists.yaml
+!paper_firehose/system/config/secrets/openaikulcs.env
+.paper_firehose/
 rg_papers_statistics/*
