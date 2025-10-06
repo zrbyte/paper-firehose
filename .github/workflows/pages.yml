@@ -11,6 +11,10 @@ on:
         description: "Send digest email at end"
         required: false
         default: "false" # false for not running the email part
+      purge_recent:
+        description: "Purge entries from the last day before running the pipeline"
+        required: false
+        default: "false"
   schedule:
     # Run every day at 6 AM UTC
     - cron: '0 6 * * *'
@@ -30,6 +34,7 @@ jobs:
     env:
       PAPER_FIREHOSE_DATA_DIR: ${{ github.workspace }}/.paper_firehose
       CONFIG_PATH: ${{ github.workspace }}/.paper_firehose/config/config.yaml
+      PURGE_RECENT: ${{ github.event.inputs.purge_recent || 'false' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -116,6 +121,14 @@ jobs:
           else
             echo "ℹ️  MAILING_LISTS_YAML secret not set; falling back to default"
           fi
+
+      - name: Purge recent entries
+        if: ${{ env.PURGE_RECENT == 'true' }}
+        run: |
+          set -euo pipefail
+          echo "=== Purging entries from the last day ==="
+          paper-firehose --config "$CONFIG_PATH" purge --days 1
+          echo "✅ Purge completed"
 
       - name: Run paper firehose pipeline
         run: |
