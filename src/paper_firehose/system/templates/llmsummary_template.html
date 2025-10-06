@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>%{title}</title>
+<script type="text/javascript">
+  MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
+      displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
+      processEscapes: true
+    }
+  };
+</script>
+<script type="text/javascript" id="MathJax-script" async
+  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+</script>
+<style>
+    body { 
+        font-family: Arial, sans-serif; 
+        margin: 20px; 
+        line-height: 1.6;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+    h1 { 
+        color: #2E8B57; 
+        border-bottom: 2px solid #2E8B57;
+        padding-bottom: 10px;
+    }
+    h2 { 
+        color: #4682B4; 
+        margin-top: 30px;
+        margin-bottom: 15px;
+        border-left: 4px solid #4682B4;
+        padding-left: 10px;
+    }
+    h3 { 
+        color: #2E8B57; 
+        margin-top: 20px;
+        margin-bottom: 10px;
+    }
+    .entry { 
+        margin-bottom: 25px; 
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        background-color: #fafafa;
+    }
+    .entry-title {
+        margin-bottom: 8px;
+    }
+    .entry-title a {
+        color: #2E8B57;
+        text-decoration: none;
+        font-weight: bold;
+    }
+    .entry-title a:hover {
+        text-decoration: underline;
+    }
+    .entry-authors {
+        color: #666;
+        font-style: italic;
+        margin-bottom: 10px;
+    }
+    .entry-published {
+        color: #888;
+        font-size: 0.9em;
+        margin-bottom: 10px;
+    }
+    .llm-summary {
+        background-color: #e8f5e8;
+        padding: 12px;
+        border-radius: 4px;
+        border-left: 4px solid #2E8B57;
+        margin-bottom: 10px;
+    }
+    .pqa-summary {
+        background-color: #fff8d5; /* light yellow */
+        padding: 12px;
+        border-radius: 4px;
+        border-left: 4px solid #d4b106; /* gold */
+        margin-bottom: 10px;
+    }
+    .pqa-heading {
+        color: #8a6d3b;
+        margin: 0 0 8px 0;
+        font-size: 1.05em;
+        font-weight: bold;
+    }
+    .abstract-toggle {
+        margin-top: 10px;
+    }
+    .abstract-toggle button {
+        background-color: #4682B4;
+        color: white;
+        border: none;
+        padding: 8px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9em;
+    }
+    .abstract-toggle button:hover {
+        background-color: #366092;
+    }
+    .abstract-content {
+        display: none;
+        background-color: #f0f8ff;
+        padding: 12px;
+        border-radius: 4px;
+        border-left: 4px solid #4682B4;
+        margin-top: 8px;
+        font-size: 0.95em;
+        line-height: 1.5;
+    }
+    .abstract-content.show {
+        display: block;
+    }
+    .no-entries { 
+        font-style: italic; 
+        color: #555; 
+        text-align: center;
+        padding: 20px;
+    }
+    .topic-section {
+        margin-bottom: 40px;
+    }
+    .entry-count {
+        color: #666;
+        font-size: 0.9em;
+        margin-bottom: 15px;
+    }
+    .badge {
+        background-color: #4682B4;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 0.8em;
+        font-weight: normal;
+        margin-left: 8px;
+    }
+    .summary-section {
+        margin-bottom: 15px;
+    }
+    .summary-section h4 {
+        color: #2E8B57;
+        margin: 0 0 5px 0;
+        font-size: 1.1em;
+        font-weight: bold;
+    }
+    .summary-section p {
+        margin: 0 0 10px 0;
+        line-height: 1.4;
+    }
+    .no-summary {
+        font-style: italic;
+        color: #666;
+    }
+</style>
+</head>
+<body>
+<h1>%{title}</h1>
+<h1>%{date}</h1>
+%{content}
+</body>
+</html>
