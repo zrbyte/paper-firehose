@@ -1,0 +1,229 @@
+name: Build and Deploy (Runtime Data Dir Test)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_pqa:
+        description: "Also run paper-qa summarization"
+        required: false
+        default: "false"
+      run_email:
+        description: "Send digest email at end"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-runtime-data
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PAPER_FIREHOSE_DATA_DIR: ${{ github.workspace }}/.paper_firehose
+      CONFIG_PATH: ${{ github.workspace }}/.paper_firehose/config/config.yaml
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache sentence transformer models
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/huggingface/hub
+          key: huggingface-models-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            huggingface-models-
+
+      - name: Load databases from data branch
+        run: |
+          set -euo pipefail
+          mkdir -p "$PAPER_FIREHOSE_DATA_DIR" assets
+
+          echo "=== Loading databases from data branch ==="
+          git fetch origin data
+
+          load_db() {
+            local remote_path="$1"
+            local dest="$2"
+            local label="$3"
+            if git show "origin/data:${remote_path}" >"${dest}" 2>/dev/null; then
+              echo "✅ Loaded ${label} from data branch into ${dest}"
+              ls -lh "${dest}"
+            else
+              echo "ℹ️  ${label} not found in data branch; starting fresh"
+              rm -f "${dest}"
+            fi
+          }
+
+          load_db "assets/all_feed_entries.latest.db" "$PAPER_FIREHOSE_DATA_DIR/all_feed_entries.db" "all_feed_entries.db"
+          load_db "assets/matched_entries_history.latest.db" "$PAPER_FIREHOSE_DATA_DIR/matched_entries_history.db" "matched_entries_history.db"
+          load_db "assets/papers.latest.db" "$PAPER_FIREHOSE_DATA_DIR/papers.db" "papers.db"
+
+          echo "=== Database loading complete ==="
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Create secret files
+        run: |
+          set -euo pipefail
+          mkdir -p "$PAPER_FIREHOSE_DATA_DIR/config/secrets"
+
+          if [ -n "${{ secrets.SMTP_PASSWORD || '' }}" ]; then
+            printf '%s' "${{ secrets.SMTP_PASSWORD }}" > "$PAPER_FIREHOSE_DATA_DIR/config/secrets/email_password.env"
+            chmod 600 "$PAPER_FIREHOSE_DATA_DIR/config/secrets/email_password.env"
+            echo "✅ Wrote SMTP password file"
+          else
+            echo "ℹ️  SMTP_PASSWORD secret not set; email step may fail"
+          fi
+
+          if [ -n "${{ secrets.MAILING_LISTS_YAML || '' }}" ]; then
+            printf '%s\n' "${{ secrets.MAILING_LISTS_YAML }}" > "$PAPER_FIREHOSE_DATA_DIR/config/secrets/mailing_lists.yaml"
+            chmod 600 "$PAPER_FIREHOSE_DATA_DIR/config/secrets/mailing_lists.yaml"
+            echo "✅ Wrote mailing_lists.yaml from secret"
+          else
+            echo "ℹ️  MAILING_LISTS_YAML secret not set; falling back to default"
+          fi
+
+      - name: Run paper firehose pipeline
+        run: |
+          set -euo pipefail
+
+          echo "=== Starting Paper Firehose pipeline (runtime data dir) ==="
+          echo "Data dir: $PAPER_FIREHOSE_DATA_DIR"
+
+          ls -la "$PAPER_FIREHOSE_DATA_DIR" || true
+
+          paper-firehose --config "$CONFIG_PATH" filter
+          paper-firehose --config "$CONFIG_PATH" rank
+          paper-firehose --config "$CONFIG_PATH" abstracts --mailto "github-actions@paper-firehose.com"
+
+          echo "Step 4: Abstract summarization skipped"
+
+          if [ "${{ github.event.inputs.run_pqa }}" = "true" ]; then
+            paper-firehose --config "$CONFIG_PATH" pqa_summary
+          else
+            echo "Step 5: pqa_summary skipped (run_pqa input=false)"
+          fi
+
+          if [ "${{ github.event.inputs.run_email }}" = "true" ]; then
+            paper-firehose --config "$CONFIG_PATH" email
+          else
+            echo "Step 6: Email sending skipped (run_email input=false)"
+          fi
+
+          paper-firehose --config "$CONFIG_PATH" html
+
+          echo "✅ Pipeline completed successfully"
+
+          echo "Post-pipeline database state:"
+          ls -lh "$PAPER_FIREHOSE_DATA_DIR"/*.db || true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Commit updated databases to data branch
+        env:
+          KEEP_SNAPSHOTS: "10"
+          SNAP_DIR: "assets/db_history"
+          DB_HISTORY: ".paper_firehose/matched_entries_history.db"
+          DB_SEEN: ".paper_firehose/all_feed_entries.db"
+          DB_CURRENT: ".paper_firehose/papers.db"
+        run: |
+          set -euo pipefail
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin --prune
+
+          if ! git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
+            git branch -f data HEAD
+            git push -u origin data || true
+          fi
+
+          WT=/tmp/data-wt
+          mkdir -p "$WT"
+          git worktree add -B data "$WT" origin/data
+          cleanup() { git worktree remove -f "$WT" || true; }
+          trap cleanup EXIT
+
+          pushd "$WT" >/dev/null
+            mkdir -p "$SNAP_DIR" assets
+            TS="$(date -u +%Y%m%dT%H%M%SZ)"
+
+            snapshot_one() {
+              local src="$1"; local stem="$2"
+              if [ -f "$GITHUB_WORKSPACE/$src" ]; then
+                local snap="$SNAP_DIR/${stem}_${TS}.db"
+                cp "$GITHUB_WORKSPACE/$src" "$snap"
+                cp "$GITHUB_WORKSPACE/$src" "assets/${stem}.latest.db"
+                git add -f "$snap" "assets/${stem}.latest.db"
+                echo "✅ Snapshot created: $snap and assets/${stem}.latest.db"
+              else
+                echo "Skip: $src not found"
+              fi
+            }
+
+            snapshot_one "$DB_HISTORY" "matched_entries_history"
+            snapshot_one "$DB_SEEN" "all_feed_entries"
+            snapshot_one "$DB_CURRENT" "papers"
+
+            retain() {
+              local stem="$1"
+              mapfile -t FILES < <(ls -1t "$SNAP_DIR"/${stem}_*.db 2>/dev/null || true)
+              if [ "${#FILES[@]}" -gt "${KEEP_SNAPSHOTS}" ]; then
+                for f in "${FILES[@]:${KEEP_SNAPSHOTS}}"; do rm -f "$f"; done
+                echo "🗑️  Retained ${KEEP_SNAPSHOTS} most recent snapshots for $stem"
+              fi
+            }
+            retain "matched_entries_history"
+            retain "all_feed_entries"
+            retain "papers"
+
+            git add -A "$SNAP_DIR" || true
+
+            if ! git diff --cached --quiet; then
+              git commit -m "Update database snapshots @ ${TS} [skip ci]"
+              git push origin data
+              echo "✅ Database snapshots committed and pushed to data branch"
+            else
+              echo "ℹ️  No changes to commit."
+            fi
+          popd >/dev/null
+
+      - name: Prepare site
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          if [ -d "$PAPER_FIREHOSE_DATA_DIR/html" ]; then
+            cp "$PAPER_FIREHOSE_DATA_DIR"/html/*.html site/ 2>/dev/null || true
+            cp -r "$PAPER_FIREHOSE_DATA_DIR"/html site/html || true
+          fi
+          cp history_viewer*.html site/ 2>/dev/null || true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
