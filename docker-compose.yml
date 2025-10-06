@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  # Base service for one-off commands. Use `docker compose run --rm firehose <subcommand>`
+  firehose:
+    build:
+      context: .
+      args:
+        # Options: pypi (default) or local
+        INSTALL_SRC: pypi
+        # PACKAGE_SPEC: "paper_firehose==0.1.0"  # optionally pin
+    image: paper-firehose:latest
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MAILTO: ${MAILTO:-you@example.com}
+      PAPER_FIREHOSE_DATA_DIR: /data
+    volumes:
+      # Share host home data dir with container
+      - ${HOME}/.paper_firehose:/data
+    # Default command just shows status; override with `compose run` for other subcommands
+    command: ["status"]
+    restart: "no"
+
+  # Convenience single-shot pipeline. Run with: `docker compose up --build pipeline`
+  pipeline:
+    image: paper-firehose:latest
+    depends_on:
+      - firehose
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MAILTO: ${MAILTO:-you@example.com}
+      PAPER_FIREHOSE_DATA_DIR: /data
+    volumes:
+      - ${HOME}/.paper_firehose:/data
+    command: >
+      sh -lc "
+        paper-firehose filter && \
+        paper-firehose rank && \
+        paper-firehose abstracts --rps 0.5 && \
+        paper-firehose summarize && \
+        paper-firehose html
+      "
+    restart: "no"

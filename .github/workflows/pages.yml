@@ -1,4 +1,4 @@
-name: Build and Deploy (Runtime Data Dir Test)
+name: Build and Deploy HTML
 
 on:
   workflow_dispatch:
