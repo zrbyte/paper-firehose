@@ -1,5 +1,7 @@
 # Paper Firehose
 
+Install: `pip install paper-firehose`
+
 - Fetches academic RSS feeds, filters entries with per-topic regex, and writes results into SQLite databases. HTML pages with the results are rendered directly from the database.
 - Results are ranked by cosine similarity to a set of user defined keywords. Configurable list of authors can get a ranking boost. So papers from your friends / competitors can be boosted in ranking.
 - Highest ranked results are summarized by an LLM. For summarization to work, you need an OpenAI API key. Full text summarization uses [Paper-qa](https://github.com/Future-House/paper-qa).
