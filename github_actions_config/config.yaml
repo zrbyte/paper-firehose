@@ -1,4 +1,3 @@
-# this is an example config file for paper_firehose. Edit with your own settings.
 # Main application configuration
 database:
   path: "papers.db" # resolved under the runtime data directory (defaults to ~/.paper_firehose)
@@ -208,7 +207,7 @@ defaults:
     # Max retries per item (with exponential backoff and Retry-After)
     max_retries: 3
     # Contact email included in UA and as Crossref mailto param
-    mailto: "foo@bar.com"
+    mailto: "nemesp@gmail.com"
 
 # Email delivery (Mailman list)
 email:
@@ -216,10 +215,10 @@ email:
   # Optional subject prefix
   subject_prefix: "paper firehose"
   # Sender address; defaults to smtp.username if omitted
-  from: "foo@bar.com"
+  from: "nemeslab@nemeslab.com"
   smtp:
-    host: "mail.foobar.com"
+    host: "mail.nemeslab.com"
     port: 465
-    username: "_mainaccount@foobar.com"
-    # Prefer file-based secret storage. Put the password in this file
+    username: "_mainaccount@nemeslab.com"
+    # Prefer file-based secret storage. Put the password in this file (gitignored by you).
     password_file: "secrets/email_password.env"

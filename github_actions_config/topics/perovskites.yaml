@@ -1,5 +1,3 @@
-# this is an example configuration file for a topic
-# see config.yaml for global configuration options
 name: "Perovskites"
 description: "Perovskite solar cells, photoelectrochemistry, etc"
 

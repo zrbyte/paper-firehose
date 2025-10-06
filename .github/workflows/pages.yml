@@ -11,6 +11,9 @@ on:
         description: "Send digest email at end"
         required: false
         default: "false" # false for not running the email part
+  schedule:
+    # Run every day at 6 AM UTC
+    - cron: '0 6 * * *'
 
 permissions:
   contents: write
@@ -66,6 +69,21 @@ jobs:
           load_db "assets/papers.latest.db" "$PAPER_FIREHOSE_DATA_DIR/papers.db" "papers.db"
 
           echo "=== Database loading complete ==="
+
+      - name: Populate runtime config
+        run: |
+          set -euo pipefail
+
+          CONFIG_SRC="$GITHUB_WORKSPACE/github_actions_config"
+          CONFIG_DEST="$PAPER_FIREHOSE_DATA_DIR/config"
+
+          if [ -d "$CONFIG_SRC" ]; then
+            mkdir -p "$CONFIG_DEST"
+            rsync -a --delete --exclude '.DS_Store' "$CONFIG_SRC"/ "$CONFIG_DEST"/
+            echo "✅ Copied workflow config from $CONFIG_SRC to $CONFIG_DEST"
+          else
+            echo "ℹ️  github_actions_config directory not found; using defaults bundled with the package"
+          fi
 
       - uses: actions/setup-python@v5
         with:

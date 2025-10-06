@@ -5,6 +5,7 @@
 - Highest ranked results are summarized by an LLM. For summarization to work, you need an OpenAI API key. Full text summarization uses [Paper-qa](https://github.com/Future-House/paper-qa).
 - New search terms can be created by simply adding a yaml config file under: `config/topics/your_topic_name.yaml`. Look at the other topics for guidance.
 - The repository ships a self-contained `system/` bundle (configs, templates, sample topics, vendored models). On first run these files are copied into your runtime data directory (default `~/.paper_firehose` or the path in `PAPER_FIREHOSE_DATA_DIR`) so you can customize them without touching the checked-in assets.
+- GitHub Actions–only YAML config lives in `github_actions_config/`. When the workflow sets `PAPER_FIREHOSE_DATA_DIR`, those files are synced into `${PAPER_FIREHOSE_DATA_DIR}/config/`, keeping the published package generic while letting CI runs use repo-specific overrides.
 - Daily automation runs through GitHub Actions (`.github/workflows/pages.yml`). The workflow restores database snapshots from the `data` branch, executes the CLI pipeline (`filter → rank → abstracts → html` plus optional `pqa_summary`/`email`), and publishes refreshed HTML/SQLite artifacts back to GitHub Pages and the `data` branch.
 
 Written using Python 3.11.
