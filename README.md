@@ -4,7 +4,8 @@
 - Results are ranked by cosine similarity to a set of user defined keywords. Configurable list of authors can get a ranking boost. So papers from your friends / competitors can be boosted in ranking.
 - Highest ranked results are summarized by an LLM. For summarization to work, you need an OpenAI API key. Full text summarization uses [Paper-qa](https://github.com/Future-House/paper-qa).
 - New search terms can be created by simply adding a yaml config file under: `config/topics/your_topic_name.yaml`. Look at the other topics for guidance.
-- The script is configured to run using Github actions each day at 6 AM to fetch new papers. For your own runs, configure the `.github/workflows/pages.yml` file.
+- The repository ships a self-contained `system/` bundle (configs, templates, sample topics, vendored models). On first run these files are copied into your runtime data directory (default `~/.paper_firehose` or the path in `PAPER_FIREHOSE_DATA_DIR`) so you can customize them without touching the checked-in assets.
+- Daily automation runs through GitHub Actions (`.github/workflows/pages.yml`). The workflow restores database snapshots from the `data` branch, executes the CLI pipeline (`filter → rank → abstracts → html` plus optional `pqa_summary`/`email`), and publishes refreshed HTML/SQLite artifacts back to GitHub Pages and the `data` branch.
 
 Written using Python 3.11.
 For dependencies check `requirements.txt`.
@@ -146,6 +147,17 @@ Functions
 - `history_viewer_cards.html` provides a cleaner, card‑style view of history entries with just the key fields (title, authors, feed name, abstract, matched date). It supports the same controls and query params as `history_viewer.html` (topic, order, search, `?db=<url>` and file drag‑and‑drop) but focuses on readability instead of tabular data.
 
 
+## Continuous delivery via GitHub Actions
+
+The workflow **Build and Deploy (Runtime Data Dir Test)** defined in `.github/workflows/pages.yml` drives the hosted pipeline:
+
+- Checks out the repository and prepares a runtime directory at `$GITHUB_WORKSPACE/.paper_firehose` (matching local defaults).
+- Restores cached SQLite databases from the `data` branch so runs build on prior state rather than starting from empty tables.
+- Installs dependencies, seeds secrets, and runs the CLI sequence: `filter`, `rank`, `abstracts`, optional `pqa_summary`, optional `email`, and finally `html` to refresh HTML artifacts.
+- Publishes generated HTML via GitHub Pages and commits the updated databases plus rotated history snapshots back to the `data` branch.
+- Accepts workflow dispatch inputs (`run_pqa`, `run_email`) so heavier steps can be toggled without editing the workflow.
+
+
 ## Architecture overview
 
 - Three-DB architecture:
@@ -155,6 +167,12 @@ Functions
 - YAML-driven configuration for feeds and topics.
 - HTML generated from `papers.db` so you can re-render without refetching.
 - Optional LLM summarization writes JSON summaries to DB and renders dedicated summary pages.
+
+### Bundled system assets
+
+- The directory `src/paper_firehose/system/` is the canonical source for starter config files, topic examples, HTML templates, and vendored models.
+- `paper_firehose.core.paths.ensure_data_dir()` provisions a runtime directory (default `~/.paper_firehose`). Missing files are copied from the system bundle exactly once, enabling local overrides that survive upgrades.
+- To refresh a single asset, delete it from the runtime directory and rerun any CLI command; the latest version from `system/` will be re-seeded automatically.
 
 ### Databases
 

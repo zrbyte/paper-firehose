@@ -123,18 +123,38 @@ class ConfigManager:
         
         return self._config
     
+    def _resolve_topic_path(self, topic_name: str) -> Path:
+        """Return the filesystem path for *topic_name* supporting .yaml and .yml."""
+        topics_dir = Path(self.base_dir) / "topics"
+        candidates = [topics_dir / f"{topic_name}.yaml", topics_dir / f"{topic_name}.yml"]
+
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+
+        # Final fallback: scan the directory in case the caller used mixed case
+        # or the file includes extra dots in its name (e.g., topic.test.yaml).
+        pattern = f"{topic_name}.*"
+        for candidate in topics_dir.glob(pattern):
+            if candidate.suffix.lower() in {".yaml", ".yml"}:
+                return candidate
+
+        raise FileNotFoundError(
+            f"Topic configuration file for '{topic_name}' not found (.yaml or .yml) in {topics_dir}"
+        )
+
     def load_topic_config(self, topic_name: str) -> Dict[str, Any]:
         """Load a topic-specific configuration file."""
         if topic_name not in self._topics:
-            topic_path = os.path.join(self.base_dir, "topics", f"{topic_name}.yaml")
+            topic_path = self._resolve_topic_path(topic_name)
             try:
                 with open(topic_path, 'r', encoding='utf-8') as f:
                     self._topics[topic_name] = yaml.safe_load(f)
-                logger.info(f"Loaded topic config for '{topic_name}' from {topic_path}")
+                logger.info("Loaded topic config for '%s' from %s", topic_name, topic_path)
             except Exception as e:
-                logger.error(f"Failed to load topic config from {topic_path}: {e}")
+                logger.error("Failed to load topic config from %s: %s", topic_path, e)
                 raise
-        
+
         return self._topics[topic_name]
 
     def _ensure_default_config(self) -> None:

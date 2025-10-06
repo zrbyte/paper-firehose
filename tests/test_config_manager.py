@@ -39,3 +39,42 @@ def test_config_manager_creates_defaults(tmp_path):
     # Ensure the manager can load the generated configuration without errors
     data = cfg.load_config()
     assert isinstance(data, dict)
+
+
+def test_load_topic_config_supports_yml_extension(tmp_path):
+    """Topics saved with a .yml suffix should load just like .yaml files."""
+
+    config_dir = tmp_path / "custom"
+    config_dir.mkdir()
+
+    config_path = config_dir / "config.yaml"
+    config_path.write_text(
+        (
+            "database:\n"
+            "  path: \"papers.db\"\n"
+            "  all_feeds_path: \"all_feed_entries.db\"\n"
+            "  history_path: \"matched_entries_history.db\"\n"
+            "feeds: {}\n"
+        ),
+        encoding="utf-8",
+    )
+
+    topics_dir = config_dir / "topics"
+    topics_dir.mkdir()
+    topic_path = topics_dir / "my_topic.yml"
+    topic_path.write_text(
+        (
+            "name: \"My Topic\"\n"
+            "feeds:\n"
+            "  - test-feed\n"
+            "filter:\n"
+            "  pattern: \"graphene\"\n"
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = ConfigManager(str(config_path))
+    data = cfg.load_topic_config("my_topic")
+
+    assert data["name"] == "My Topic"
+    assert data["feeds"] == ["test-feed"]
