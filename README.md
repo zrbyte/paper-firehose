@@ -4,8 +4,8 @@
 - Results are ranked by cosine similarity to a set of user defined keywords. Configurable list of authors can get a ranking boost. So papers from your friends / competitors can be boosted in ranking.
 - Highest ranked results are summarized by an LLM. For summarization to work, you need an OpenAI API key. Full text summarization uses [Paper-qa](https://github.com/Future-House/paper-qa).
 - New search terms can be created by simply adding a yaml config file under: `config/topics/your_topic_name.yaml`. Look at the other topics for guidance.
-- The repository ships a self-contained `system/` bundle (configs, templates, sample topics, vendored models). On first run these files are copied into your runtime data directory (default `~/.paper_firehose` or the path in `PAPER_FIREHOSE_DATA_DIR`) so you can customize them without touching the checked-in assets.
-- GitHub Actions–only YAML config lives in `github_actions_config/`. When the workflow sets `PAPER_FIREHOSE_DATA_DIR`, those files are synced into `${PAPER_FIREHOSE_DATA_DIR}/config/`, keeping the published package generic while letting CI runs use repo-specific overrides.
+- The repository ships a self-contained `system/` bundle (configs, templates, sample topics). On first run these files are copied into your runtime data directory (default `~/.paper_firehose` or the path in `PAPER_FIREHOSE_DATA_DIR`) so you can customize them with your own search terms, RSS feed sources, etc.
+- GitHub Actions–only YAML config lives in `github_actions_config/`. When the workflow sets `PAPER_FIREHOSE_DATA_DIR`, those files are synced into `${PAPER_FIREHOSE_DATA_DIR}/config/`, keeping the published package generic while letting GitHub Actions runs use repo-specific overrides. So if you want to use this via GA, set your preferences in this directory.
 - Daily automation runs through GitHub Actions (`.github/workflows/pages.yml`). The workflow restores database snapshots from the `data` branch, executes the CLI pipeline (`filter → rank → abstracts → html` plus optional `pqa_summary`/`email`), and publishes refreshed HTML/SQLite artifacts back to GitHub Pages and the `data` branch.
 
 Written using Python 3.11.
@@ -156,7 +156,7 @@ The workflow **Build and Deploy (Runtime Data Dir Test)** defined in `.github/wo
 - Restores cached SQLite databases from the `data` branch so runs build on prior state rather than starting from empty tables.
 - Installs dependencies, seeds secrets, and runs the CLI sequence: `filter`, `rank`, `abstracts`, optional `pqa_summary`, optional `email`, and finally `html` to refresh HTML artifacts.
 - Publishes generated HTML via GitHub Pages and commits the updated databases plus rotated history snapshots back to the `data` branch.
-- Accepts workflow dispatch inputs (`run_pqa`, `run_email`) so heavier steps can be toggled without editing the workflow.
+- Accepts workflow dispatch inputs (`run_pqa`, `run_email`) so heavier steps can be toggled without editing the workflow. Useful for debugging.
 
 
 ## Architecture overview
