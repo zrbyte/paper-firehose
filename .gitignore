@@ -8,7 +8,6 @@ agents.md
 archive/
 *.html
 !history_viewer_cards.html
-!paper_firehose/system/templates/*.html
 
 *.db
 *.ipynb
