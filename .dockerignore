@@ -1,0 +1,23 @@
+# Ignore VCS and OS cruft
+.git
+.gitignore
+.DS_Store
+
+# Python build artifacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+*.egg-info
+dist/
+build/
+
+# Project local data
+.paper_firehose/
+pf-data/
+
+# Jupyter
+*.ipynb_checkpoints
+testing.ipynb
+

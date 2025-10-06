@@ -1,232 +1,167 @@
 # Paper Firehose
 
-Install: `pip install paper-firehose`
+Filter, rank, and summarize research-paper RSS feeds. Stores results in SQLite and can generate HTML pages or an email digest. Optional LLM- and full‑text (paper-qa) summaries.
 
-- Fetches academic RSS feeds, filters entries with per-topic regex, and writes results into SQLite databases. HTML pages with the results are rendered directly from the database.
-- Results are ranked by cosine similarity to a set of user defined keywords. Configurable list of authors can get a ranking boost. So papers from your friends / competitors can be boosted in ranking.
-- Highest ranked results are summarized by an LLM. For summarization to work, you need an OpenAI API key. Full text summarization uses [Paper-qa](https://github.com/Future-House/paper-qa).
-- New search terms can be created by simply adding a yaml config file under: `config/topics/your_topic_name.yaml`. Look at the other topics for guidance.
-- The repository ships a self-contained `system/` bundle (configs, templates, sample topics). On first run these files are copied into your runtime data directory (default `~/.paper_firehose` or the path in `PAPER_FIREHOSE_DATA_DIR`) so you can customize them with your own search terms, RSS feed sources, etc.
-- GitHub Actions–only YAML config lives in `github_actions_config/`. When the workflow sets `PAPER_FIREHOSE_DATA_DIR`, those files are synced into `${PAPER_FIREHOSE_DATA_DIR}/config/`, keeping the published package generic while letting GitHub Actions runs use repo-specific overrides. So if you want to use this via GA, set your preferences in this directory.
-- Daily automation runs through GitHub Actions (`.github/workflows/pages.yml`). The workflow restores database snapshots from the `data` branch, executes the CLI pipeline (`filter → rank → abstracts → html` plus optional `pqa_summary`/`email`), and publishes refreshed HTML/SQLite artifacts back to GitHub Pages and the `data` branch.
+Quick install
+- `pip install paper_firehose` (package name as published)
+- CLI entrypoint: `paper-firehose`
 
-Written using Python 3.11.
-For dependencies check `requirements.txt`.
-OpenAI API key is searched for in the `openaikulcs.env` file in the repo root or `OPENAI_API_KEY` environment variable.
+On first run, default configs/templates are copied into your runtime data directory (defaults to `~/.paper_firehose`, override with `PAPER_FIREHOSE_DATA_DIR`). Edit those files to customize feeds and topics.
 
-## CLI
+## Quick Start
 
-- **Filter**: fetch from RSS feed list, dedup, match regex, write DBs, render HTML
-  - `python cli/main.py -v filter [--topic TOPIC]`
-  - Backs up `all_feed_entries.db` and `matched_entries_history.db` (keeps 3 latest backups).
-  - Clears `papers.db` working table before processing this run.
-  - Fetches configured feeds for each topic, dedups by title against `all_feed_entries.db`, filters by topic regex.
-  - Writes matches to `papers.db` (`status='filtered'`); optionally archives to `matched_entries_history.db` if `output.archive: true`.
-  - Saves ALL processed entries (matched and non-matched) to `all_feed_entries.db` for future dedup.
-  - Renders per-topic HTML from `papers.db`.
-
-- **Rank**: ranks fetched papers by title, wrt keywords in yaml config (optional)
-  - `python cli/main.py rank [--topic TOPIC]`
-  - Computes and writes `rank_score` for `papers.db` entries using sentence-transformers. HTML files with ranked entries are generated.
-  - Model selection: if `models/all-MiniLM-L6-v2` exists, it is used; otherwise it falls back to the Hugging Face repo id `all-MiniLM-L6-v2` and downloads once into cache. You can vendor the model with `python scripts/vendor_model.py`.
-  - Scoring details: applies a small penalty for `ranking.negative_queries` matches (title/summary). Optional boosts: per-topic `ranking.preferred_authors` with `ranking.priority_author_boost`, and global `priority_journal_boost` for feeds listed in `priority_journals`.
-
-- **Abstracts**: try to fetch abstracts
-  - `python cli/main.py abstracts [--topic TOPIC] [--mailto you@example.com] [--limit N] [--rps 1.0]`
-  - Order: 1) Fill arXiv/cond-mat abstracts from `summary` (no threshold)  2) Above-threshold: Crossref (DOI, then title)  3) Above-threshold: Semantic Scholar → OpenAlex → PubMed
-  - Threshold: topic `abstract_fetch.rank_threshold` else global `defaults.rank_threshold`.
-  - Only topics with `abstract_fetch.enabled: true` are processed.
-  - Writes to both `papers.db.entries.abstract` and `matched_entries_history.db.matched_entries.abstract`.
-  - Rate limiting: descriptive User-Agent (includes `--mailto` or `$MAILTO`), respects Retry-After; default ~1 req/sec via `--rps`.
-  - Populates the `entries.abstract` column; leaves other fields unchanged.
-  - Contact email: if `--mailto` is not provided, the command reads `$MAILTO` from the environment; if unset, it uses a safe default.
-
-- **Summarize** (optional)
-  - `python cli/main.py summarize [--topic TOPIC] [--rps 0.5]`
-  - Selects top entries per topic based on `llm_summary.score_cutoff` and `llm_summary.top_n`, builds input strictly from `title + abstract` (skips entries without an abstract), and calls the configured OpenAI chat model.
-  - Writes summaries to `papers.db.entries.llm_summary` and, when present, `matched_entries_history.db.matched_entries.llm_summary`.
-  - Uses `config.llm` settings. Supports JSON or plain-text responses; JSON is preferred and rendered with headings.
-  - Note: This command only updates databases. Use `html` to render pages.
-
-- **pqa_summary** (PDF-based summarization)
-  - `python cli/main.py pqa_summary [--topic TOPIC]`
-  - Selects preprints from arXiv in `papers.db` with `rank_score >= config.paperqa.download_rank_threshold`, detects arXiv IDs, and downloads PDFs (polite arXiv API usage).
-  - Runs paper-qa to summarize full text into JSON keys: `summary`, `methods`.
-  - Writes summaries to `papers.db.entries.paper_qa_summary` only for the specific topic row the item was selected under (no longer cross-updating all topics for the same entry id), and to `matched_entries_history.db.matched_entries.paper_qa_summary`.
-  - Prunes archived PDFs older than ~30 days from `assets/paperqa_archive/` after each run to keep storage manageable.
-  - Note: This command only updates databases. Use `html` to render pages.
-
-- **HTML** (render only; no fetching)
-  - `python cli/main.py html [--topic TOPIC]`
-  - Reads from `papers.db` and generates, per topic:
-    - Filtered page: `output.filename` (if configured)
-    - Ranked page: `output.filename_ranked` (if configured and entries exist)
-    - Summary page: `output.filename_summary` (if configured). Content priority: PDF summaries → LLM summaries → abstract-only fallback; always ordered by rank.
-
-### Summary pages
-
-- When `output.filename_summary` is set for a topic, summary pages prefer content in this order:
-  1) `paper_qa_summary` (PDF-based)
-  2) `llm_summary`
-  3) Fallback to ranked fields (abstract → summary)
-- Entries are ordered by descending `rank_score`.
-
-- **Purge**
-  - `python cli/main.py purge --days N` removes entries with `published_date` within the most recent N days in the seen entries DB.
-  - `python cli/main.py purge --all` deletes all DB files and reinitializes schemas (no confirmation prompt).
-
-- **Status**
-  - `python cli/main.py status`
-  - Validates config, lists topics/feeds, and shows DB paths.
-
-- **Email** (Mailman digest)
-  - `python cli/main.py email [--topic TOPIC] [--mode auto|ranked] [--limit N] [--dry-run]`
-  - Builds an email‑friendly HTML digest from `papers.db` and sends via SMTP (SSL).
-  - `--mode auto` renders a ranked‑style list directly from `papers.db`; `--mode ranked` embeds the pre‑generated ranked HTML if present, otherwise falls back to the ranked‑style list.
-  - `--dry-run` writes a preview HTML to `assets/` instead of sending.
-  - Per‑recipient routing: `python cli/main.py email --recipients config/secrets/mailing_lists.yaml` or set `config.email.recipients_file`.
-
-### Email configuration
-
-Add an `email` section in `config/config.yaml` (secrets in a separate file):
-
+1) Seed and inspect config
 ```
-email:
-  to: "LIST_ADDRESS@yourdomain"             # Mailman list address
-  subject_prefix: "Paper Firehose"           # Optional
-  from: "mail@xyz.com"          # Defaults to smtp.username
-  smtp:
-    host: "mail.xyz.com"
-    port: 465
-    username: "youraccount"
-    password_file: "config/secrets/email_password.txt"  # store only the password here
+paper-firehose status
 ```
 
-Notes
-- Store the SMTP password in `config/secrets/email_password.txt` (gitignored).
-- The command prefers to be run after `filter`, `rank`, `abstracts`, and `summarize` so it can include LLM summaries when available.
+2) Run the core pipeline for one topic
+```
+paper-firehose filter --topic perovskites
+paper-firehose rank --topic perovskites
+paper-firehose abstracts --topic perovskites --mailto you@example.com --rps 1.0
+paper-firehose summarize --topic perovskites --rps 0.5   # optional (needs OpenAI key)
+paper-firehose html --topic perovskites                   # write HTML from DB
+```
 
-Per‑recipient YAML (config/secrets/mailing_lists.yaml)
-Example:
+3) Optional: full‑text summaries via paper‑qa and email digest
 ```
-recipients:
-  - to: "materials-list@nemeslab.com"
-    topics: ["primary", "perovskites"]
-    min_rank_score: 0.40
-  - to: "2d-list@nemeslab.com"
-    topics: ["rg", "2d_metals"]
-    min_rank_score: 0.35
+# Download arXiv PDFs for high‑ranked entries and summarize with paper‑qa
+paper-firehose pqa_summary --topic perovskites --rps 0.33 --limit 20 --summarize
+
+# Send a ranked email digest (SMTP config required)
+paper-firehose email --limit 10 --dry-run                # writes preview HTML under data dir
 ```
+
+## CLI Reference
+
+Global options
+- `--config PATH` use a specific YAML config (defaults to `~/.paper_firehose/config/config.yaml`)
+- `-v/--verbose` enable debug logging
+
+Commands
+- `filter [--topic TOPIC]`
+  - Fetch RSS feeds, dedup by title, apply per‑topic regex, write matches to databases.
+  - Backs up `all_feed_entries.db` and `matched_entries_history.db`, then clears current `papers.db` working table.
+
+- `rank [--topic TOPIC]`
+  - Compute `rank_score` using Sentence‑Transformers similarity to `ranking.query`.
+  - Optional boosts: per‑topic `ranking.preferred_authors` (`priority_author_boost`) and global `priority_journals` (`priority_journal_boost`).
+  - Models can be vendored under the data dir `models/`. The default alias `all-MiniLM-L6-v2` is supported.
+
+- `abstracts [--topic TOPIC] [--mailto EMAIL] [--limit N] [--rps FLOAT]`
+  - Fetch abstracts above a rank threshold (topic `abstract_fetch.rank_threshold` or global `defaults.rank_threshold`).
+  - Uses polite rate limits; sets a descriptive arXiv/Crossref User‑Agent including your contact email.
+
+- `summarize [--topic TOPIC] [--rps FLOAT]`
+  - LLM summaries for top‑ranked entries using `config.llm` and per‑topic `llm_summary` settings.
+  - Requires an OpenAI API key. Writes JSON or text into `entries.llm_summary`.
+
+- `html [--topic TOPIC]`
+  - Generate HTML page(s) directly from `papers.db`. For a single topic, `output.filename` is used unless you override via the Python API (see below).
+
+- `pqa_summary [--topic TOPIC] [--rps FLOAT] [--limit N] [--arxiv ID|URL ...] [--entry-id ID ...] [--use-history] [--history-date YYYY-MM-DD] [--history-feed-like STR] [--summarize]`
+  - Download arXiv PDFs for ranked entries (or explicit IDs/URLs) with polite rate limiting, archive them, optionally run paper‑qa, and write normalized JSON into DBs.
+  - Accepts `--arxiv` values like `2501.12345`, `2501.12345v2`, `https://arxiv.org/abs/2501.12345`, or `https://arxiv.org/pdf/2501.12345.pdf`.
+
+- `email [--topic TOPIC] [--mode auto|ranked] [--limit N] [--recipients PATH] [--dry-run]`
+  - Send a compact HTML digest via SMTP (SSL). In dry‑run, writes a preview HTML to the data dir.
+  - `--recipients` points to a YAML file with per‑recipient overrides (see Configuration).
+
+- `purge (--days N | --all)`
+  - Remove entries by date from databases, or clear all and reinitialize schemas (`--all`).
+
+- `status`
+  - Validate configuration and list available topics, enabled feeds, and database paths.
 
 ## Python API
 
-You can call the main steps programmatically via `paper_firehose`.
+Import functions directly from the package for programmatic workflows:
 
-Basics
-- `import paper_firehose as pf`
-- All functions default to `config/config.yaml`; override with `config_path="..."`.
+```python
+from paper_firehose import (
+    filter, rank, abstracts, summarize, pqa_summary, email, purge, status, html,
+)
 
-Functions
-- `pf.filter(topic=None, config_path=None)`: Runs the filter step for one topic or all.
-- `pf.rank(topic=None, config_path=None)`: Computes and writes `rank_score` for entries.
-- `pf.abstracts(topic=None, *, mailto=None, limit=None, rps=None, config_path=None)`: Fetches abstracts for above‑threshold entries and writes to DBs.
-- `pf.summarize(topic=None, *, rps=None, config_path=None)`: Runs LLM summarization for top‐ranked entries per topic, writing JSON (or text) to `llm_summary`.
-- `pf.pqa_summary(topic=None, *, rps=None, limit=None, arxiv=None, entry_ids=None, use_history=False, history_date=None, history_feed_like=None, config_path=None)`: Runs the paper-qa PDF summarizer with the same parameters as the CLI command.
-- `pf.html(topic=None, output_path=None, config_path=None)`: Regenerates the HTML pages directly from `papers.db`. When `topic` is omitted, all topics are rendered to their configured filenames.
-- `pf.email(topic=None, *, mode='auto', limit=None, recipients_file=None, dry_run=False, config_path=None)`: Sends the digest email (or writes a preview on `dry_run`).
-- `pf.purge(days=None, all_data=False, config_path=None)`: Purges entries based on publication date. When `days` is provided, removes entries from the most recent N days (including today) across all DBs; when `all_data=True`, reinitializes all DBs.
-- `pf.status(config_path=None) -> dict`: Returns configuration validity, available topics, enabled feed count, and database paths.
+# Run steps
+filter(topic="perovskites")
+rank(topic="perovskites")
+abstracts(topic="perovskites", mailto="you@example.com", rps=1.0)
+summarize(topic="perovskites", rps=0.5)
 
-## History Viewer
+# Generate HTML (single topic can override output path)
+html(topic="perovskites")
+html(topic="perovskites", output_path="results_perovskites.html")
 
-- `history_viewer.html` is a static browser viewer for `assets/matched_entries_history.db` (table `matched_entries`).
-- By default it auto-loads the latest history DB from GitHub:
-  - Displayed: `https://github.com/zrbyte/paper-firehose/tree/data/assets/matched_entries_history.latest.db`
-  - The viewer automatically normalizes GitHub page links to their raw content (e.g., `raw.githubusercontent.com`) before fetching.
-- You can override with a query param or local file:
-  - `history_viewer.html?db=<url>` to load a specific remote DB
-  - Use the file input or drag-and-drop a local `matched_entries_history.db`
+# Paper‑QA download + summarize
+pqa_summary(topic="perovskites", rps=0.33, limit=10)
+pqa_summary(arxiv=["2501.12345", "https://arxiv.org/abs/2501.12345v2"], summarize=True)
 
-- `history_viewer_cards.html` provides a cleaner, card‑style view of history entries with just the key fields (title, authors, feed name, abstract, matched date). It supports the same controls and query params as `history_viewer.html` (topic, order, search, `?db=<url>` and file drag‑and‑drop) but focuses on readability instead of tabular data.
+# Email digest
+email(limit=10, dry_run=True)
 
+# Maintenance
+purge(days=7)
+info = status()
+print(info["valid"], info["topics"])  # dict with config + paths
+```
 
-## Continuous delivery via GitHub Actions
-
-The workflow **Build and Deploy (Runtime Data Dir Test)** defined in `.github/workflows/pages.yml` drives the hosted pipeline:
-
-- Checks out the repository and prepares a runtime directory at `$GITHUB_WORKSPACE/.paper_firehose` (matching local defaults).
-- Restores cached SQLite databases from the `data` branch so runs build on prior state rather than starting from empty tables.
-- Installs dependencies, seeds secrets, and runs the CLI sequence: `filter`, `rank`, `abstracts`, optional `pqa_summary`, optional `email`, and finally `html` to refresh HTML artifacts.
-- Publishes generated HTML via GitHub Pages and commits the updated databases plus rotated history snapshots back to the `data` branch.
-- Accepts workflow dispatch inputs (`run_pqa`, `run_email`) so heavier steps can be toggled without editing the workflow. Useful for debugging.
-
-
-## Architecture overview
-
-- Three-DB architecture:
-  - `assets/all_feed_entries.db`: Every fetched item (for deduplication).
-  - `assets/matched_entries_history.db`: All matched items across topics and runs (historical archive).
-  - `assets/papers.db`: Current-run working set (filtered → ranked → summarized).
-- YAML-driven configuration for feeds and topics.
-- HTML generated from `papers.db` so you can re-render without refetching.
-- Optional LLM summarization writes JSON summaries to DB and renders dedicated summary pages.
-
-### Bundled system assets
-
-- The directory `src/paper_firehose/system/` is the canonical source for starter config files, topic examples, HTML templates, and vendored models.
-- `paper_firehose.core.paths.ensure_data_dir()` provisions a runtime directory (default `~/.paper_firehose`). Missing files are copied from the system bundle exactly once, enabling local overrides that survive upgrades.
-- To refresh a single asset, delete it from the runtime directory and rerun any CLI command; the latest version from `system/` will be re-seeded automatically.
-
-### Databases
-
-- `all_feed_entries.db` (table `feed_entries`)
-  - Keys: `entry_id` (pk), `feed_name` (display name from `config.yaml`), `title`, `link`.
-  - Metadata: `summary`, `authors`, `published_date`, `first_seen`, `last_seen`, `raw_data` (JSON).
-  - Used only for dedup; populated after filtering completes.
-
-- `matched_entries_history.db` (table `matched_entries`)
-  - Keys: `entry_id` (pk), `feed_name`, `topics` (CSV of topic names).
-  - Metadata: `title`, `link`, `summary`, `authors`, `abstract` (nullable), `doi` (nullable), `published_date`, `matched_date`, `raw_data` (JSON), `llm_summary` (nullable), `paper_qa_summary` (nullable).
-  - Written only when a topic’s `output.archive: true`.
-
-- `papers.db` (table `entries`)
-  - Primary key: composite `PRIMARY KEY(id, topic)` so the same entry can appear once per topic.
-  - Columns: `id`, `topic`, `feed_name` (display name), `title`, `link`, `summary`, `authors`, `abstract` (nullable), `doi` (nullable), `published_date`, `discovered_date`, `status` (`filtered|ranked|summarized`), `rank_score`, `rank_reasoning`, `llm_summary`, `raw_data` (JSON).
-
-Notes
-- `feed_name` is the human-readable name from `config.yaml -> feeds.<key>.name` (e.g., "Nature Physics").
-- `doi` is best-effort, fetched from RSS feed and can be found in `doi`, `dc:identifier`, `prism:doi`, `id`, `link`, `summary`, `summary_detail.value`, or embedded `content[].value`. arXiv feeds may not include DOIs; no external lookup is performed (by design for now).
-- `abstract` populated via Crossref API or publisher APIs.
-
+Aliases
+- `paperqa_summary` is available as an alias of `pqa_summary`.
+- `generate_html` is an alias of `html`.
 
 ## Configuration
 
-- `config/config.yaml` (feeds, DB paths, defaults)
-  - Each feed has a key and a display `name`; the key is used in topic files, the name is stored in DBs.
-  - `paperqa`: settings for the arXiv downloader (Phase 1)
-    - `download_rank_threshold`: minimum `rank_score` to download (default 0.35)
-    - `rps`: requests/second throttle (default 0.3; ~1 request/3.3s per arXiv API guidance)
-    - `max_retries`: per-item retry attempts on transient errors
-    - `prompt`: paper-qa question used for summarization; should instruct the model to return only JSON with keys `summary`, `methods` (supports `{ranking_query}` placeholder)
-- `config/topics/<topic>.yaml`
-  - `feeds`: list of feed keys from `config.yaml`.
-  - `filter.pattern` and `filter.fields`: regex and fields to match (defaults include `title` and `summary`).
-  - `ranking`: optional `query`, `model`, cutoffs, etc. (for the rank command).
-    - Optional: `negative_queries` (list), `preferred_authors` (list of names), `priority_author_boost` (float, e.g., 0.1).
-  - `output.filename` and `output.filename_ranked`: HTML output; `archive: true` enables history DB writes.
-  - `llm_summary`: topic-level controls for LLM summarization.
-    - `enabled: true|false`
-    - `prompt`: instruction given to the model. You can reference `{ranking_query}` and it will be replaced with the topic’s `ranking.query`.
-    - `score_cutoff`: minimum `rank_score` to consider (0.0–1.0)
-    - `top_n`: hard cap on the number of entries considered (after filtering by score)
-    - Works together with global `config.llm` below.
+Runtime data dir
+- Default: `~/.paper_firehose`
+- Override with `PAPER_FIREHOSE_DATA_DIR` environment variable
+- First run seeds `config/`, `templates/`, and optional `models/` from the bundled `system/` directory.
 
-- `config.llm` (global model settings)
-  - `model`: preferred chat model id
-  - `model_fallback`: secondary model if the primary is unsupported/unavailable
-  - `api_key_env`: environment variable name to read if `openaikulcs.env` is missing
-  - `rps`: default requests/second throttle for summarization
-  - `max_retries`: retry attempts per item on transient errors
-  - Optional GPT‑5 parameters: `verbosity`, `reasoning_effort` (used when the model starts with `gpt-5`)
+Files to edit
+- `config/config.yaml`: global settings (DB paths, feeds, LLM, paper‑qa, defaults, optional email/SMTP)
+- `config/topics/<topic>.yaml`: topic name/description, feeds, regex filter, ranking, abstract fetch, LLM summary, and output filenames
+- `config/secrets/`: secret material that should not be committed
+  - `openaikulcs.env`: OpenAI API key for `summarize`
+  - `email_password.env`: SMTP password (referenced by `email.smtp.password_file`)
+  - `mailing_lists.yaml`: optional per‑recipient overrides for `email`:
+    ```yaml
+    recipients:
+      - to: person@example.com
+        topics: [perovskites, batteries]   # subset of topics for this person
+        mode: ranked                       # currently always renders ranked from DB
+        limit: 10                          # per‑recipient cap
+        min_rank_score: 0.4                # optional cutoff
+    ```
 
-Thank you to arXiv for use of its open access interoperability. The script does not serve pdf's or arxiv preprints, but serves up a link to the filtered article.
+Key config fields
+- `feeds`: mapping of feed keys to `{name, url, enabled}`. Feed keys are referenced in topic files; `name` is stored in DBs and used in HTML.
+- `priority_journals` and `priority_journal_boost`: optional global score boost by feed key.
+- Topic `ranking`: `query`, `model`, optional `negative_queries`, `preferred_authors`, `priority_author_boost`.
+- Topic `output`: `filename`, `filename_ranked`, optional `filename_summary`, `archive: true|false`.
+- Topic `llm_summary`: `enabled`, `prompt` (can reference `{ranking_query}`), `score_cutoff`, `top_n`.
+- `paperqa`: `download_rank_threshold`, `rps` (≤ 0.33 recommended), `max_retries`, and `prompt` for JSON‑only answers.
+- `llm`: `model`, `model_fallback`, `api_key_env`, default `rps`, `max_retries`, plus optional GPT‑5 `verbosity` and `reasoning_effort`.
+
+Environment variables
+- `PAPER_FIREHOSE_DATA_DIR` select/override the runtime data location
+- `OPENAI_API_KEY` (or `config.llm.api_key_env`) for `summarize`
+- `MAILTO` used for polite arXiv/Crossref User‑Agent when not specified on CLI
+
+## Data & Outputs
+
+Databases (under the data dir unless absolute paths are used)
+- `all_feed_entries.db` (table `feed_entries`): every fetched item for deduplication
+- `matched_entries_history.db` (table `matched_entries`): historical archive of matches, optional JSON summaries
+- `papers.db` (table `entries`): current‑run working set with `status`, `rank_score`, `llm_summary`, `paper_qa_summary`
+
+HTML
+- Generated by the `html` command from `papers.db` using templates in `templates/`. Ranked and LLM‑summary pages are produced when configured.
+
+Email
+- Requires `email.smtp` config: `host`, `port`, `username`, and either `password` or `password_file`. Uses SSL.
+
+## Notes and Thanks
+
+- Python 3.11+ recommended. See `pyproject.toml` for dependencies.
+- Thank you to arXiv for use of its open access interoperability. This project links to arXiv/publisher pages and does not serve PDFs.
+

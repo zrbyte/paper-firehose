@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  paper-firehose:
+    # Use a locally built image (builds from Dockerfile in this repo)
+    build:
+      context: .
+      args:
+        # Options: pypi (default) or local
+        INSTALL_SRC: pypi
+        # PACKAGE_SPEC: "paper_firehose==0.1.0"  # optionally pin
+    image: paper-firehose:latest
+    environment:
+      # Set your API key in your shell: export OPENAI_API_KEY=sk-...
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Optional: Crossref contact email for polite requests
+      MAILTO: ${MAILTO:-you@example.com}
+      # Ensure app writes under /data (persisted via volume below)
+      PAPER_FIREHOSE_DATA_DIR: /data
+    volumes:
+      # Persist configuration, DBs, and generated HTML
+      - ./pf-data:/data
+    # Example pipeline: fetch, rank, fetch abstracts, summarize, render html
+    # For a dry-run email preview add: && paper-firehose email --dry-run
+    command: >
+      sh -lc "
+        paper-firehose filter && \
+        paper-firehose rank && \
+        paper-firehose abstracts && \
+        paper-firehose pqa_summary && \
+        paper-firehose html
+      "
+    restart: "no"  # change to unless-stopped if you later run a long-lived service
+
