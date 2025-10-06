@@ -1,18 +1,24 @@
-name: Build and Deploy
+name: Build and Deploy (Runtime Data Dir Test)
 
 on:
-  workflow_dispatch:  # Manual trigger
-  schedule:
-    - cron: '0 4 * * *'  # 04:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      run_pqa:
+        description: "Also run paper-qa summarization"
+        required: false
+        default: "false" # false for not running pqa summarization
+      run_email:
+        description: "Send digest email at end"
+        required: false
+        default: "false" # false for not running the email part
 
 permissions:
-  contents: write # Required for uploading DB snapshots to data branch
+  contents: write
   pages: write
   id-token: write
 
-# Prevent concurrent runs from corrupting the SQLite database
 concurrency:
-  group: pages-db
+  group: pages-runtime-data
   cancel-in-progress: true
 
 jobs:
@@ -20,12 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PAPER_FIREHOSE_DATA_DIR: ${{ github.workspace }}/.paper_firehose
+      CONFIG_PATH: ${{ github.workspace }}/.paper_firehose/config/config.yaml
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0    # ensure all branches/refs available
+          fetch-depth: 0
 
-      # Cache the sentence transformer models
       - name: Cache sentence transformer models
         uses: actions/cache@v3
         with:
@@ -34,48 +40,49 @@ jobs:
           restore-keys: |
             huggingface-models-
 
-      # Load databases from data branch
       - name: Load databases from data branch
         run: |
           set -euo pipefail
-          mkdir -p assets
-          
+          mkdir -p "$PAPER_FIREHOSE_DATA_DIR" assets
+
           echo "=== Loading databases from data branch ==="
-          echo "Current branch: $(git branch --show-current)"
-          
-          # Fetch the data branch
           git fetch origin data
-          
-          # Load all_feed_entries.db from data branch
-          if git show origin/data:assets/all_feed_entries.latest.db > assets/all_feed_entries.db 2>/dev/null; then
-            echo "✅ Loaded all_feed_entries.db from data branch"
-            ls -lh assets/all_feed_entries.db
-          else
-            echo "ℹ️  No all_feed_entries.db found in data branch, will initialize fresh"
-          fi
-          
-          # Load matched_entries_history.db from data branch
-          if git show origin/data:assets/matched_entries_history.latest.db > assets/matched_entries_history.db 2>/dev/null; then
-            echo "✅ Loaded matched_entries_history.db from data branch"
-            ls -lh assets/matched_entries_history.db
-          else
-            echo "ℹ️  No matched_entries_history.db found in data branch, will initialize fresh"
-          fi
-          
+
+          load_db() {
+            local remote_path="$1"
+            local dest="$2"
+            local label="$3"
+            if git show "origin/data:${remote_path}" >"${dest}" 2>/dev/null; then
+              echo "✅ Loaded ${label} from data branch into ${dest}"
+              ls -lh "${dest}"
+            else
+              echo "ℹ️  ${label} not found in data branch; starting fresh"
+              rm -f "${dest}"
+            fi
+          }
+
+          load_db "assets/all_feed_entries.latest.db" "$PAPER_FIREHOSE_DATA_DIR/all_feed_entries.db" "all_feed_entries.db"
+          load_db "assets/matched_entries_history.latest.db" "$PAPER_FIREHOSE_DATA_DIR/matched_entries_history.db" "matched_entries_history.db"
+          load_db "assets/papers.latest.db" "$PAPER_FIREHOSE_DATA_DIR/papers.db" "papers.db"
+
           echo "=== Database loading complete ==="
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
 
-      # Inject secrets into expected file locations (never committed)
       - name: Create secret files
         run: |
           set -euo pipefail
           mkdir -p "$PAPER_FIREHOSE_DATA_DIR/config/secrets"
-          # SMTP password used by cli/main.py email via processors/emailer.py
+
           if [ -n "${{ secrets.SMTP_PASSWORD || '' }}" ]; then
             printf '%s' "${{ secrets.SMTP_PASSWORD }}" > "$PAPER_FIREHOSE_DATA_DIR/config/secrets/email_password.env"
             chmod 600 "$PAPER_FIREHOSE_DATA_DIR/config/secrets/email_password.env"
@@ -83,71 +90,58 @@ jobs:
           else
             echo "ℹ️  SMTP_PASSWORD secret not set; email step may fail"
           fi
-          # Optional per-recipient routing file (YAML)
+
           if [ -n "${{ secrets.MAILING_LISTS_YAML || '' }}" ]; then
             printf '%s\n' "${{ secrets.MAILING_LISTS_YAML }}" > "$PAPER_FIREHOSE_DATA_DIR/config/secrets/mailing_lists.yaml"
             chmod 600 "$PAPER_FIREHOSE_DATA_DIR/config/secrets/mailing_lists.yaml"
             echo "✅ Wrote mailing_lists.yaml from secret"
           else
-            echo "ℹ️  MAILING_LISTS_YAML secret not set; will fall back to repo file if present"
+            echo "ℹ️  MAILING_LISTS_YAML secret not set; falling back to default"
           fi
 
-      # Run the paper firehose pipeline
       - name: Run paper firehose pipeline
         run: |
           set -euo pipefail
-          
-          echo "=== Starting Paper Firehose Pipeline ==="
-          echo "Current branch: $(git branch --show-current)"
-          
-          # Ensure we're on main branch (should be by default from checkout)
-          if [ "$(git branch --show-current)" != "main" ]; then
-            echo "⚠️  Not on main branch, switching to main"
-            git checkout main
-          fi
-          
-          # Check database state before starting
-          echo "Pre-pipeline database check:"
-          ls -la assets/*.db 2>/dev/null || echo "No database files found"
-          
-          # Run the complete pipeline
-          echo "Step 1: Running filter command..."
-          python cli/main.py filter
-          
-          echo "Step 2: Running rank command..."
-          python cli/main.py rank
-          
-          echo "Step 3: Running abstracts command..."
-          python cli/main.py abstracts --mailto "github-actions@paper-firehose.com"
-          
+
+          echo "=== Starting Paper Firehose pipeline (runtime data dir) ==="
+          echo "Data dir: $PAPER_FIREHOSE_DATA_DIR"
+
+          ls -la "$PAPER_FIREHOSE_DATA_DIR" || true
+
+          paper-firehose --config "$CONFIG_PATH" filter
+          paper-firehose --config "$CONFIG_PATH" rank
+          paper-firehose --config "$CONFIG_PATH" abstracts --mailto "github-actions@paper-firehose.com"
+
           echo "Step 4: Abstract summarization skipped"
-          # python cli/main.py summarize
 
-          echo "Step 5: Running pqa_summary (PDF-based summarization) ..."
-          python cli/main.py pqa_summary
-          
-          echo "Step 6: Running email command..."
-          python cli/main.py email
+          if [ "${{ github.event.inputs.run_pqa }}" = "true" ]; then
+            paper-firehose --config "$CONFIG_PATH" pqa_summary
+          else
+            echo "Step 5: pqa_summary skipped (run_pqa input=false)"
+          fi
 
-          echo "Step 7: Running HTML generation..."
-          python cli/main.py html
-          
+          if [ "${{ github.event.inputs.run_email }}" = "true" ]; then
+            paper-firehose --config "$CONFIG_PATH" email
+          else
+            echo "Step 6: Email sending skipped (run_email input=false)"
+          fi
+
+          paper-firehose --config "$CONFIG_PATH" html
+
           echo "✅ Pipeline completed successfully"
-          
-          # Show final database state
-          echo "Post-pipeline database check:"
-          ls -la assets/*.db 2>/dev/null || echo "No database files found"
+
+          echo "Post-pipeline database state:"
+          ls -lh "$PAPER_FIREHOSE_DATA_DIR"/*.db || true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      # Commit updated databases to data branch
       - name: Commit updated databases to data branch
         env:
           KEEP_SNAPSHOTS: "10"
           SNAP_DIR: "assets/db_history"
-          DB_HISTORY: "assets/matched_entries_history.db"
-          DB_SEEN: "assets/all_feed_entries.db"
-          DB_CURRENT: "assets/papers.db"
+          DB_HISTORY: ".paper_firehose/matched_entries_history.db"
+          DB_SEEN: ".paper_firehose/all_feed_entries.db"
+          DB_CURRENT: ".paper_firehose/papers.db"
         run: |
           set -euo pipefail
 
@@ -155,13 +149,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin --prune
 
-          # Ensure remote data branch exists; create from current HEAD if missing
           if ! git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
             git branch -f data HEAD
             git push -u origin data || true
           fi
 
-          # Worktree on data branch (create/reset local branch to origin/data)
           WT=/tmp/data-wt
           mkdir -p "$WT"
           git worktree add -B data "$WT" origin/data
@@ -185,12 +177,10 @@ jobs:
               fi
             }
 
-            # All three DBs
             snapshot_one "$DB_HISTORY" "matched_entries_history"
             snapshot_one "$DB_SEEN" "all_feed_entries"
             snapshot_one "$DB_CURRENT" "papers"
 
-            # Retention per DB
             retain() {
               local stem="$1"
               mapfile -t FILES < <(ls -1t "$SNAP_DIR"/${stem}_*.db 2>/dev/null || true)
@@ -203,11 +193,10 @@ jobs:
             retain "all_feed_entries"
             retain "papers"
 
-            # Stage deletions from retention
             git add -A "$SNAP_DIR" || true
 
             if ! git diff --cached --quiet; then
-              git commit -m "Update database snapshots @ ${TS} [skip ci] - Updated all database snapshots with latest data - Retained ${KEEP_SNAPSHOTS} most recent snapshots per database - Generated timestamped snapshots in assets/db_history/ - Updated latest database references in assets/"
+              git commit -m "Update database snapshots @ ${TS} [skip ci]"
               git push origin data
               echo "✅ Database snapshots committed and pushed to data branch"
             else
@@ -215,12 +204,15 @@ jobs:
             fi
           popd >/dev/null
 
-      # Prepare files for GitHub Pages deployment
       - name: Prepare site
         run: |
-          mkdir site
-          cp -r archive site/ || true
-          cp *.html site/ || true
+          set -euo pipefail
+          mkdir -p site
+          if [ -d "$PAPER_FIREHOSE_DATA_DIR/html" ]; then
+            cp "$PAPER_FIREHOSE_DATA_DIR"/html/*.html site/ 2>/dev/null || true
+            cp -r "$PAPER_FIREHOSE_DATA_DIR"/html site/html || true
+          fi
+          cp history_viewer*.html site/ 2>/dev/null || true
 
       - uses: actions/upload-pages-artifact@v3
         with:
