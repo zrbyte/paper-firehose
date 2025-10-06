@@ -5,7 +5,8 @@ Filter, rank, and summarize research-paper RSS feeds. Stores results in SQLite a
 Quick install
 - `pip install paper_firehose`
 - CLI entrypoint: `paper-firehose`
-after install, run `paper-firehose --help` for available command line options
+
+After install, run `paper-firehose --help` for available command line options
 
 Configuration is done using only YAML text files. On first run the default YAML configs are copied into your runtime data directory (defaults to `~/.paper_firehose`, override with `PAPER_FIREHOSE_DATA_DIR`) from `src/paper_firehose/system/config`. Edit those files to customize feeds and topics.
 
@@ -24,6 +25,7 @@ paper-firehose abstracts --topic perovskites --mailto you@example.com --rps 1.0
 paper-firehose pqa_summary --topic perovskites    # optional (needs OpenAI key)
 paper-firehose html --topic perovskites           # write HTML from DB
 ```
+If no topic is specified, all topics are processed.
 
 3) Optional: full‑text summaries via [paper‑qa](https://futurehouse.gitbook.io/futurehouse-cookbook/paperqa) and email digest
 ```
