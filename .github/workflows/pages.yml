@@ -10,7 +10,7 @@ on:
       run_email:
         description: "Send digest email at end"
         required: false
-        default: "false" # false for not running the email part
+        default: "true" # false for not running the email part
       purge_recent:
         description: "Purge entries from the last day before running the pipeline"
         required: false
