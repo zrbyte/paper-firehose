@@ -8,9 +8,10 @@ using entries already stored in papers.db (status='filtered').
 import logging
 from typing import Optional
 
-from core.config import ConfigManager
-from core.database import DatabaseManager
-from processors.html_generator import HTMLGenerator
+from ..core.config import ConfigManager
+from ..core.database import DatabaseManager
+from ..core.paths import resolve_data_path
+from ..processors.html_generator import HTMLGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
             topic_config = config_manager.load_topic_config(topic_name)
             output_config = topic_config.get('output', {})
             output_filename = output_config.get('filename', f'{topic_name}_filtered_articles.html')
+            output_path = resolve_data_path('html', output_filename, ensure_parent=True)
 
             # Use the topic's display name and description
             heading = topic_config.get('name', topic_name)
@@ -57,20 +59,21 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
             html_generator.generate_html_from_database(
                 db_manager,
                 topic_name,
-                output_filename,
+                str(output_path),
                 heading,
                 subheading,
             )
 
-            logger.info(f"Generated HTML for topic '{topic_name}': {output_filename}")
+            logger.info(f"Generated HTML for topic '{topic_name}': {output_path}")
 
             # Always generate ranked HTML from current DB state to avoid stale files
             try:
                 ranked_filename = output_config.get('filename_ranked') or f'results_{topic_name}_ranked.html'
+                ranked_path = resolve_data_path('html', ranked_filename, ensure_parent=True)
                 ranked_template = 'ranked_template.html'
                 ranked_gen = HTMLGenerator(template_path=ranked_template)
-                ranked_gen.generate_ranked_html_from_database(db_manager, topic_name, ranked_filename, heading, subheading)
-                logger.info(f"Generated ranked HTML for topic '{topic_name}': {ranked_filename}")
+                ranked_gen.generate_ranked_html_from_database(db_manager, topic_name, str(ranked_path), heading, subheading)
+                logger.info(f"Generated ranked HTML for topic '{topic_name}': {ranked_path}")
             except Exception as e:
                 logger.error(f"Failed to generate ranked HTML for topic '{topic_name}': {e}")
         except Exception as e:
@@ -88,16 +91,17 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
                 summary_filename = output_config.get('filename_summary')
                 
                 if summary_filename:
+                    summary_path = resolve_data_path('html', summary_filename, ensure_parent=True)
                     topic_display_name = topic_config.get('name', topic_name)
                     # Always generate the summary page. The generator prefers PQA/LLM summaries
                     # and falls back to ranked fields when none are available.
                     html_gen.generate_summarized_html_from_database(
                         db_manager,
                         topic_name,
-                        summary_filename,
+                        str(summary_path),
                         f"LLM Summaries - {topic_display_name}"
                     )
-                    logger.info("Generated summarized HTML for topic '%s': %s", topic_name, summary_filename)
+                    logger.info("Generated summarized HTML for topic '%s': %s", topic_name, summary_path)
             except Exception as e:
                 logger.error("Failed to generate summarized HTML for topic '%s': %s", topic_name, e)
     except Exception as e:

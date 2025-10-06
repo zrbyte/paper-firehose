@@ -3,12 +3,15 @@ HTML output generation for filtered articles.
 Based on the original feedfilter.py HTML generation logic.
 """
 
-import os
 import html
 import datetime
+import logging
+import shutil
+from pathlib import Path
 from string import Template
 from typing import Dict, List, Any, Optional
-import logging
+
+from ..core.paths import get_system_path, resolve_data_path
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +20,7 @@ class HTMLGenerator:
     """Generates HTML output files for filtered articles."""
     
     def __init__(self, template_path: str = "html_template.html"):
-        self.template_path = template_path
+        self.template_path = self._resolve_template(template_path)
     
     def process_text(self, text: str) -> str:
         """Process text to escape HTML characters and handle LaTeX code."""
@@ -476,74 +479,113 @@ function toggleAbstract(id) {
     
     def _create_new_html_file(self, output_path: str, title_text: str, subtitle_text: str = None) -> None:
         """Create a new HTML file using the template."""
-        if not os.path.exists(self.template_path):
-            # Create a basic template if the original doesn't exist
-            self._create_basic_template()
-        
+        template_path = Path(self.template_path)
+        if not template_path.exists():
+            template_path = self._ensure_template_available(template_path.name)
+
         class PercentTemplate(Template):
             delimiter = '%'
-        
-        with open(self.template_path, 'r', encoding='utf-8') as tmpl:
+
+        with open(template_path, 'r', encoding='utf-8') as tmpl:
             template = PercentTemplate(tmpl.read())
-        
+
         title = title_text or "Filtered Articles"
         current_date = datetime.date.today()
         rendered = template.substitute(title=html.escape(title), date=current_date, content="")
 
-        # Inject subtitle (topic description) as a subheading below the main title
         if subtitle_text:
             sub = f"\n<h2>{html.escape(subtitle_text)}</h2>\n"
-            # insert after first <h1>...</h1>
             end_h1 = rendered.find('</h1>')
             if end_h1 != -1:
                 rendered = rendered[: end_h1 + 5] + sub + rendered[end_h1 + 5 :]
-        
-        # Ensure output directory exists
-        output_dir = os.path.dirname(output_path)
-        if output_dir:  # Only create directory if path contains a directory component
-            os.makedirs(output_dir, exist_ok=True)
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
+
+        output_path_obj = Path(output_path)
+        if output_path_obj.parent:
+            output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_path_obj, 'w', encoding='utf-8') as f:
             f.write(rendered)
-    
-    def _create_basic_template(self) -> None:
+
+    def _create_basic_template(self, target: Optional[Path] = None) -> None:
         """Create a basic HTML template if none exists."""
-        basic_template = '''<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>%{title}</title>
-<script type="text/javascript">
-  MathJax = {
-    tex: {
-      inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
-      displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
-      processEscapes: true
-    }
-  };
-</script>
-<script type="text/javascript" id="MathJax-script" async
-  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
-</script>
-<style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    .entry { margin-bottom: 20px; }
-    h2 { color: #2E8B57; }
-    h3 { color: #4682B4; }
-    hr { border: 0; border-top: 1px solid #ccc; }
-    .no-entries { font-style: italic; color: #555; }
-</style>
-</head>
-<body>
-<h1>%{title}</h1>
-<h1>New papers on %{date}</h1>
-<hr>
-%{content}
-</body>
-</html>'''
-        
-        with open(self.template_path, 'w', encoding='utf-8') as f:
+        basic_template = (
+            "<!DOCTYPE html>\n"
+            "<html>\n"
+            "<head>\n"
+            "<meta charset=\"UTF-8\">\n"
+            "<title>%{title}</title>\n"
+            "<script type=\"text/javascript\">\n"
+            "  MathJax = {\n"
+            "    tex: {\n"
+            "      inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],\n"
+            "      displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],\n"
+            "      processEscapes: true\n"
+            "    }\n"
+            "  };\n"
+            "</script>\n"
+            "<script type=\"text/javascript\" id=\"MathJax-script\" async\n"
+            "  src=\"https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js\">\n"
+            "</script>\n"
+            "<style>\n"
+            "    body { font-family: Arial, sans-serif; margin: 20px; }\n"
+            "    .entry { margin-bottom: 20px; }\n"
+            "    h2 { color: #2E8B57; }\n"
+            "    h3 { color: #4682B4; }\n"
+            "    hr { border: 0; border-top: 1px solid #ccc; }\n"
+            "    .no-entries { font-style: italic; color: #555; }\n"
+            "</style>\n"
+            "</head>\n"
+            "<body>\n"
+            "<h1>%{title}</h1>\n"
+            "<h1>New papers on %{date}</h1>\n"
+            "<hr>\n"
+            "%{content}\n"
+            "</body>\n"
+            "</html>\n"
+        )
+
+        target_path = target or Path(self.template_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(target_path, 'w', encoding='utf-8') as f:
             f.write(basic_template)
+
+    def _ensure_template_available(self, template_name: str) -> Path:
+        """Ensure a template is present in the runtime data directory."""
+        data_template = resolve_data_path('templates', template_name)
+        if data_template.exists():
+            return data_template
+
+        system_template = get_system_path('templates', template_name)
+        if system_template.exists():
+            data_template.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(system_template, data_template)
+            return data_template
+
+        self._create_basic_template(data_template)
+        return data_template
+
+    def _resolve_template(self, template_path: str) -> str:
+        candidate = Path(template_path)
+
+        if candidate.is_absolute() and candidate.exists():
+            return str(candidate)
+
+        data_candidate = resolve_data_path('templates', *candidate.parts)
+        if data_candidate.exists():
+            return str(data_candidate)
+
+        system_candidate = get_system_path('templates', *candidate.parts)
+        if system_candidate.exists():
+            data_candidate.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(system_candidate, data_candidate)
+            return str(data_candidate)
+
+        if candidate.exists():
+            return str(candidate)
+
+        fallback = resolve_data_path('templates', candidate.name)
+        self._create_basic_template(fallback)
+        return str(fallback)
     
     def _generate_entries_html_from_db(self, entries_per_feed: Dict[str, List[Dict[str, Any]]]) -> List[str]:
         """Generate HTML content for database entries organized by feed."""

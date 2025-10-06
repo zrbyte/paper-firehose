@@ -72,7 +72,7 @@
     <h1>All matched papers for all topics</h1>
     <div class="controls">
       <label for="dburl">DB URL:</label>
-      <input id="dburl" type="text" size="50" placeholder="https://raw.githubusercontent.com/<org>/<repo>/path/assets/matched_entries_history.db" />
+      <input id="dburl" type="text" size="50" placeholder="https://raw.githubusercontent.com/<org>/<repo>/path/.paper_firehose/matched_entries_history.db" />
       <input id="dbfile" type="file" accept=".db" />
       <button id="loadBtn">Load</button>
       <span class="hint">or drop a local matched_entries_history.db file</span>
@@ -108,7 +108,7 @@
     let db = null;
     let allRows = [];
 
-    const DEFAULT_DB_URL_DISPLAY = 'https://raw.githubusercontent.com/zrbyte/paper-firehose/data/assets/matched_entries_history.latest.db';
+    const DEFAULT_DB_URL_DISPLAY = 'https://raw.githubusercontent.com/zrbyte/paper-firehose/data/.paper_firehose/matched_entries_history.latest.db';
     let SQL_WASM_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/';
 
     function $(id){ return document.getElementById(id); }

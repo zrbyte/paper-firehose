@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 Merge historical databases and HTML entries from assets_old/ into a backup copy
-of the current assets/matched_entries_history.db.
+of the current `matched_entries_history.db` stored under the runtime data
+directory (defaults to `~/.paper_firehose/`).
 
 Steps:
-1) Create a timestamped backup copy of assets/matched_entries_history.db.
+1) Create a timestamped backup copy of the active history DB in the data dir.
 2) Merge entries from assets_old/matched_entries_history.latest.db into the backup.
 3) Merge entries from assets_old/matched_entries_history_ek-server.db into the backup.
 4) Parse assets_old/rg_filtered_articles.html and add entries (topic = 'rg')
@@ -29,10 +30,19 @@ import urllib.parse
 from datetime import datetime
 from typing import Dict, Any, Tuple, Optional
 import html as htmllib
+from pathlib import Path
+import sys
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = REPO_ROOT / 'src'
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
 
-ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets')
-ASSETS_OLD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets_old')
+from paper_firehose.core.paths import ensure_data_dir
+
+DATA_DIR = ensure_data_dir()
+ASSETS_DIR = str(DATA_DIR)
+ASSETS_OLD_DIR = os.path.join(str(REPO_ROOT), 'assets_old')
 
 
 def timestamp() -> str:
@@ -599,8 +609,8 @@ def deduplicate_by_title(dest_path: str) -> int:
 
 def main():
     ap = argparse.ArgumentParser(description='Merge assets_old DBs and rg HTML into a backup copy of the current history DB')
-    ap.add_argument('--assets', default=ASSETS_DIR, help='Path to assets directory (default: assets)')
-    ap.add_argument('--assets-old', default=ASSETS_OLD_DIR, help='Path to assets_old directory (default: assets_old)')
+    ap.add_argument('--assets', default=ASSETS_DIR, help=f'Path to data directory (default: {ASSETS_DIR})')
+    ap.add_argument('--assets-old', default=ASSETS_OLD_DIR, help=f'Path to legacy assets directory (default: {ASSETS_OLD_DIR})')
     ap.add_argument('--current', default='matched_entries_history.db', help='Current DB filename in assets (default: matched_entries_history.db)')
     ap.add_argument('--old-latest', default='matched_entries_history.latest.db', help='Old latest DB filename in assets_old')
     ap.add_argument('--old-ek', default='matched_entries_history_ek-server.db', help='Old ek-server DB filename in assets_old')

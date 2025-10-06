@@ -8,9 +8,9 @@ import os
 import logging
 from typing import Optional
 
-from core.config import ConfigManager
-from core.database import DatabaseManager
-from processors.feed_processor import FeedProcessor
+from ..core.config import ConfigManager
+from ..core.database import DatabaseManager
+from ..processors.feed_processor import FeedProcessor
 
 logger = logging.getLogger(__name__)
 

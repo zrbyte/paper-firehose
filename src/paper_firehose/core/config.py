@@ -1,24 +1,114 @@
-"""
-Configuration management for YAML-based config files.
-"""
+"""Configuration management for YAML-based config files."""
 
-import yaml
 import os
-from typing import Dict, Any, List
 import logging
 import re
+import shutil
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import yaml
+
+from .paths import get_data_dir, get_system_path
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_CONFIG_DIR = get_data_dir() / "config"
+DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.yaml"
+_TEMPLATE_DIR = get_system_path("config")
+_TEMPLATE_CONFIG = _TEMPLATE_DIR / "config.yaml"
+_TEMPLATE_TOPICS_DIR = _TEMPLATE_DIR / "topics"
+_TEMPLATE_SECRETS_DIR = _TEMPLATE_DIR / "secrets"
+
+_DEFAULT_CONFIG_TEMPLATE = """# Auto-generated default configuration for paper-firehose
+database:
+  path: "papers.db"
+  all_feeds_path: "all_feed_entries.db"
+  history_path: "matched_entries_history.db"
+
+llm:
+  model: "gpt-5-mini"
+  api_key_env: "OPENAI_API_KEY"
+  model_fallback: "gpt-5-nano"
+  rps: 0.5
+  max_retries: 3
+
+paperqa:
+  download_rank_threshold: 0.35
+  rps: 0.3
+  max_retries: 3
+  prompt: >
+    Provide a concise summary of the paper in JSON with keys "summary" and "methods".
+
+feeds:
+  cond-mat:
+    name: "arXiv cond-mat"
+    url: "https://rss.arxiv.org/rss/cond-mat"
+    enabled: true
+
+priority_journals: []
+
+defaults:
+  time_window_days: 365
+  top_n_per_topic: 10
+  rank_threshold: 0.3
+  ranking_negative_penalty: 0.25
+"""
+
+_DEFAULT_TOPIC_TEMPLATE = """name: "example"
+description: "Auto-generated starter topic. Update the regex and feeds for your workflow."
+
+feeds:
+  - "cond-mat"
+
+filter:
+  pattern: "graphene"
+  fields: ["title", "summary"]
+
+ranking:
+  query: >
+    graphene
+    condensed matter
+"""
+
+
+def _write_template(path: Path, content: str) -> None:
+    path.write_text(content.strip() + "\n", encoding="utf-8")
+
+
+def _copy_tree(src: Path, dest: Path) -> bool:
+    """Copy files from *src* to *dest* without overwriting existing files."""
+
+    if not src.exists():
+        return False
+
+    created = False
+    for item in src.iterdir():
+        target = dest / item.name
+        if item.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            if _copy_tree(item, target):
+                created = True
+        else:
+            if not target.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(item, target)
+                created = True
+    return created
 
 
 class ConfigManager:
     """Manages loading and validation of YAML configuration files."""
-    
-    def __init__(self, config_path: str = "config/config.yaml"):
-        self.config_path = config_path
-        self.base_dir = os.path.dirname(config_path)
+
+    def __init__(self, config_path: Optional[str] = None):
+        path = Path(config_path or DEFAULT_CONFIG_PATH).expanduser()
+        if not path.is_absolute():
+            path = path.resolve()
+        self.config_path = str(path)
+        self.base_dir = str(path.parent)
         self._config = None
         self._topics = {}
+        self._ensure_default_config()
     
     def load_config(self) -> Dict[str, Any]:
         """Load the main configuration file."""
@@ -46,6 +136,61 @@ class ConfigManager:
                 raise
         
         return self._topics[topic_name]
+
+    def _ensure_default_config(self) -> None:
+        """Create default configuration files if they are missing."""
+
+        config_file = Path(self.config_path)
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+
+        if not config_file.exists():
+            if _TEMPLATE_CONFIG.exists():
+                try:
+                    shutil.copyfile(_TEMPLATE_CONFIG, config_file)
+                    logger.info("Created default config.yaml at %s", config_file)
+                except Exception as exc:
+                    logger.warning("Failed to copy template config: %s", exc)
+                    _write_template(config_file, _DEFAULT_CONFIG_TEMPLATE)
+            else:
+                _write_template(config_file, _DEFAULT_CONFIG_TEMPLATE)
+                logger.info("Created fallback default config.yaml at %s", config_file)
+
+        topics_dir = Path(self.base_dir) / "topics"
+        topics_dir.mkdir(parents=True, exist_ok=True)
+        secrets_dir = Path(self.base_dir) / "secrets"
+        secrets_dir.mkdir(parents=True, exist_ok=True)
+
+        created_topic = False
+        try:
+            if _copy_tree(_TEMPLATE_TOPICS_DIR, topics_dir):
+                created_topic = True
+        except Exception as exc:
+            logger.warning("Failed to copy topics template tree: %s", exc)
+
+        try:
+            _copy_tree(_TEMPLATE_SECRETS_DIR, secrets_dir)
+        except Exception as exc:
+            logger.warning("Failed to copy secrets template tree: %s", exc)
+
+        if not any(topics_dir.glob("*.yml")) and not any(topics_dir.glob("*.yaml")):
+            default_topic_path = topics_dir / "example.yaml"
+            _write_template(default_topic_path, _DEFAULT_TOPIC_TEMPLATE)
+            created_topic = True
+            logger.info("Created fallback default topic config at %s", default_topic_path)
+
+        if _TEMPLATE_DIR.exists():
+            for item in _TEMPLATE_DIR.iterdir():
+                if not item.is_dir() or item.name in {"topics", "secrets"}:
+                    continue
+                dest_dir = Path(self.base_dir) / item.name
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    _copy_tree(item, dest_dir)
+                except Exception as exc:
+                    logger.warning("Failed to copy template directory %s: %s", item, exc)
+
+        if created_topic:
+            self._topics.clear()
     
     def get_available_topics(self) -> List[str]:
         """Get list of available topic configuration files."""
@@ -173,3 +318,10 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"Configuration validation failed: {e}")
             return False
+
+
+__all__ = [
+    "ConfigManager",
+    "DEFAULT_CONFIG_PATH",
+    "DEFAULT_CONFIG_DIR",
+]

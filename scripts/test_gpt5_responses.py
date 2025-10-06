@@ -7,7 +7,8 @@ Usage examples:
   python scripts/test_gpt5_responses.py --prompt "Hello" --model gpt-4o-mini
 
 API key resolution:
-  - Tries ./openaikulcs.env (raw key or OPENAI_API_KEY=...)
+  - Prefers ~/.paper_firehose/secrets/openaikulcs.env (managed config directory)
+  - Falls back to ./openaikulcs.env (repo root) for backwards compatibility
   - Else uses env var OPENAI_API_KEY
 """
 
@@ -17,6 +18,7 @@ import argparse
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Optional, Any, List
 
 from openai import OpenAI
@@ -41,17 +43,32 @@ def load_key_from_file(path: str) -> Optional[str]:
         return None
 
 
+DEFAULT_CONFIG_DIR = Path.home() / ".paper_firehose"
+
+
 def resolve_api_key() -> str:
-    key = load_key_from_file('openaikulcs.env')
-    if not key:
-        here = os.path.dirname(__file__)
-        root_guess = os.path.abspath(os.path.join(here, '..'))
-        key = load_key_from_file(os.path.join(root_guess, 'openaikulcs.env'))
-    if not key:
-        key = os.environ.get('OPENAI_API_KEY')
-    if not key:
-        raise SystemExit("OPENAI_API_KEY not found (env) and openaikulcs.env missing")
-    return key
+    candidates = [
+        DEFAULT_CONFIG_DIR / "secrets" / "openaikulcs.env",
+        DEFAULT_CONFIG_DIR / "openaikulcs.env",
+    ]
+
+    # Repo-root fallbacks
+    candidates.append(Path.cwd() / "openaikulcs.env")
+    here = Path(__file__).resolve().parent
+    candidates.append((here.parent / "openaikulcs.env"))
+
+    for path in candidates:
+        key = load_key_from_file(str(path))
+        if key:
+            return key
+
+    key = os.environ.get('OPENAI_API_KEY')
+    if key:
+        return key
+
+    raise SystemExit(
+        "OPENAI_API_KEY not found (env) and no openaikulcs.env in ~/.paper_firehose/secrets or repo"
+    )
 
 
 def extract_responses_text(resp_obj: Any) -> str:

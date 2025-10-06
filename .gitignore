@@ -7,19 +7,13 @@ __pycache__/
 agents.md
 archive/
 *.html
-!html_template.html
-!llmsummary_template.html
 !history_viewer_cards.html
+!paper_firehose/system/templates/*.html
 
 *.db
 *.ipynb
 *.env
 .DS_Store
 .cursor/*
-assets/*.db  # ignore all files in assets dir. Actions will commit the DB files to GitHub. Will not be downloaded so as to not create conflicts with test runs.
-assets/paperqa/*
-assets/paperqa_archive/*
-models/*
-assets/secrets/*
-config/secrets/*
-rg_papers_statistics/*
+paper_firehose/system/models/*
+.paper_firehose/*

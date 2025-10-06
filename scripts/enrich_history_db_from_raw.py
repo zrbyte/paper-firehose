@@ -4,7 +4,7 @@ Enrich an existing matched_entries_history SQLite DB by filling empty columns
 from JSON stored in raw_data.
 
 Usage:
-  python scripts/enrich_history_db_from_raw.py --db assets/matched_entries_history.XXXX.backup.db
+  python scripts/enrich_history_db_from_raw.py --db ~/.paper_firehose/matched_entries_history.<timestamp>.backup.db
 """
 
 import argparse
@@ -128,4 +128,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

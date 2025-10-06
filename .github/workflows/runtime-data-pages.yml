@@ -6,11 +6,11 @@ on:
       run_pqa:
         description: "Also run paper-qa summarization"
         required: false
-        default: "false" # false for not running pqa summarization
+        default: "false"
       run_email:
         description: "Send digest email at end"
         required: false
-        default: "false" # false for not running the email part
+        default: "true"
 
 permissions:
   contents: write

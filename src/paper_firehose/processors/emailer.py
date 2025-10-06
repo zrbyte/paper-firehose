@@ -2,7 +2,8 @@
 Email rendering and sending utilities for Paper Firehose.
 
 Generates a simple, email-friendly HTML digest from papers.db and sends it via
-SMTP (SSL) based on configuration in config/config.yaml under `email`.
+SMTP (SSL) based on configuration stored in the runtime data directory
+(`config/config.yaml` under the path resolved by PAPER_FIREHOSE_DATA_DIR).
 
 Uses only the Python standard library.
 """
@@ -17,6 +18,7 @@ import smtplib
 import ssl
 from email.message import EmailMessage
 from html.parser import HTMLParser
+from pathlib import Path
 
 
 def _fmt_score_badge(score: Optional[float]) -> str:
@@ -372,20 +374,23 @@ class EmailRenderer:
 class SMTPSender:
     """Send emails via SMTP (SSL) using settings under config['email']['smtp']."""
 
-    def __init__(self, smtp_cfg: Dict[str, Any]) -> None:
+    def __init__(self, smtp_cfg: Dict[str, Any], config_dir: Optional[str] = None) -> None:
         self.host = str(smtp_cfg.get('host') or '')
         self.port = int(smtp_cfg.get('port') or 465)
         self.username = str(smtp_cfg.get('username') or '')
         self.password = str(smtp_cfg.get('password') or '')  # discouraged; prefer file
         self.password_file = smtp_cfg.get('password_file')
+        self._config_dir = Path(config_dir).expanduser().resolve() if config_dir else None
 
     def _load_password(self) -> str:
         if self.password:
             return self.password
         if self.password_file:
-            path = str(self.password_file)
-            if os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f:
+            candidate = Path(str(self.password_file)).expanduser()
+            if not candidate.is_absolute() and self._config_dir:
+                candidate = (self._config_dir / candidate).resolve()
+            if os.path.exists(candidate):
+                with open(candidate, 'r', encoding='utf-8') as f:
                     return f.read().strip()
         # Last resort: env var based on username
         env_name = 'SMTP_PASSWORD'
