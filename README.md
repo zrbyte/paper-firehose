@@ -3,10 +3,11 @@
 Filter, rank, and summarize research-paper RSS feeds. Stores results in SQLite and can generate HTML pages or an email digest. Optional LLM- and full‑text (paper-qa) summaries.
 
 Quick install
-- `pip install paper_firehose` (package name as published)
+- `pip install paper_firehose`
 - CLI entrypoint: `paper-firehose`
+after install, run `paper-firehose --help` for available command line options
 
-On first run, default configs/templates are copied into your runtime data directory (defaults to `~/.paper_firehose`, override with `PAPER_FIREHOSE_DATA_DIR`). Edit those files to customize feeds and topics.
+Configuration is done using only YAML text files. On first run the default YAML configs are copied into your runtime data directory (defaults to `~/.paper_firehose`, override with `PAPER_FIREHOSE_DATA_DIR`) from `src/paper_firehose/system/config`. Edit those files to customize feeds and topics.
 
 ## Quick Start
 
@@ -20,11 +21,11 @@ paper-firehose status
 paper-firehose filter --topic perovskites
 paper-firehose rank --topic perovskites
 paper-firehose abstracts --topic perovskites --mailto you@example.com --rps 1.0
-paper-firehose summarize --topic perovskites --rps 0.5   # optional (needs OpenAI key)
-paper-firehose html --topic perovskites                   # write HTML from DB
+paper-firehose pqa_summary --topic perovskites    # optional (needs OpenAI key)
+paper-firehose html --topic perovskites           # write HTML from DB
 ```
 
-3) Optional: full‑text summaries via paper‑qa and email digest
+3) Optional: full‑text summaries via [paper‑qa](https://futurehouse.gitbook.io/futurehouse-cookbook/paperqa) and email digest
 ```
 # Download arXiv PDFs for high‑ranked entries and summarize with paper‑qa
 paper-firehose pqa_summary --topic perovskites --rps 0.33 --limit 20 --summarize
