@@ -6,7 +6,7 @@ on:
       run_pqa:
         description: "Also run paper-qa summarization"
         required: false
-        default: "false" # false for not running pqa summarization
+        default: "true" # false for not running pqa summarization
       run_email:
         description: "Send digest email at end"
         required: false
