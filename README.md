@@ -57,14 +57,14 @@ Commands
   - Uses polite rate limits; sets a descriptive arXiv/Crossref User‑Agent including your contact email.
 
 - `summarize [--topic TOPIC] [--rps FLOAT]`
-  - LLM summaries for top‑ranked entries using `config.llm` and per‑topic `llm_summary` settings.
-  - Requires an OpenAI API key. Writes JSON or text into `entries.llm_summary`.
+  - LLM summaries of abstracts for top‑ranked entries using `config.llm` and per‑topic `llm_summary` settings.
+  - Requires an OpenAI API key.
 
 - `html [--topic TOPIC]`
   - Generate HTML page(s) directly from `papers.db`. For a single topic, `output.filename` is used unless you override via the Python API (see below).
 
 - `pqa_summary [--topic TOPIC] [--rps FLOAT] [--limit N] [--arxiv ID|URL ...] [--entry-id ID ...] [--use-history] [--history-date YYYY-MM-DD] [--history-feed-like STR] [--summarize]`
-  - Download arXiv PDFs for ranked entries (or explicit IDs/URLs) with polite rate limiting, archive them, optionally run paper‑qa, and write normalized JSON into DBs.
+  - Download arXiv PDFs for ranked entries (or explicit IDs/URLs) with polite rate limiting, archive them, optionally run paper‑qa, and write normalized JSON into DBs. Old pdfs are discarded from the archive. We don't do scraping.
   - Accepts `--arxiv` values like `2501.12345`, `2501.12345v2`, `https://arxiv.org/abs/2501.12345`, or `https://arxiv.org/pdf/2501.12345.pdf`.
 
 - `email [--topic TOPIC] [--mode auto|ranked] [--limit N] [--recipients PATH] [--dry-run]`
@@ -116,7 +116,7 @@ Aliases
 ## Configuration
 
 Runtime data dir
-- Default: `~/.paper_firehose`
+- Default: `~/.paper_firehose` on your home folder on MacOS or Linux. On Windows it's: `C:\Users\<YourUser>\.paper_firehose`.
 - Override with `PAPER_FIREHOSE_DATA_DIR` environment variable
 - First run seeds `config/`, `templates/`, and optional `models/` from the bundled `system/` directory.
 
@@ -124,7 +124,7 @@ Files to edit
 - `config/config.yaml`: global settings (DB paths, feeds, LLM, paper‑qa, defaults, optional email/SMTP)
 - `config/topics/<topic>.yaml`: topic name/description, feeds, regex filter, ranking, abstract fetch, LLM summary, and output filenames
 - `config/secrets/`: secret material that should not be committed
-  - `openaikulcs.env`: OpenAI API key for `summarize`
+  - `openaikulcs.env`: OpenAI API key for `summarize` and `pqa_summary`
   - `email_password.env`: SMTP password (referenced by `email.smtp.password_file`)
   - `mailing_lists.yaml`: optional per‑recipient overrides for `email`:
     ```yaml
@@ -163,7 +163,12 @@ HTML
 Email
 - Requires `email.smtp` config: `host`, `port`, `username`, and either `password` or `password_file`. Uses SSL.
 
-## Notes and Thanks
+## Future dev
+- Improve the history browser HTML interface.
+- Run ranking on the historic database, with a unique query. To search for specific papers.
+- The abstract summarizer doesn't make much sense at this point, might remove it in the future.
+
+## Final notes
 
 - Python 3.11+ recommended. See `pyproject.toml` for dependencies.
 - Thank you to arXiv for use of its open access interoperability. This project links to arXiv/publisher pages and does not serve PDFs.
