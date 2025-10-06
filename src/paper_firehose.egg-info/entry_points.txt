@@ -1,0 +1,2 @@
+[console_scripts]
+paper-firehose = paper_firehose.cli:cli

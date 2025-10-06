@@ -1,0 +1,11 @@
+feedparser
+PyYAML
+click
+sentence-transformers>=2.2.2
+requests
+openai>=1.30.0
+paper-qa
+
+[dev]
+pytest>=7.0
+pytest-cov
