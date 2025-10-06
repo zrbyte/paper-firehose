@@ -37,7 +37,7 @@ services:
         paper-firehose filter && \
         paper-firehose rank && \
         paper-firehose abstracts --rps 0.5 && \
-        paper-firehose summarize && \
+        paper-firehose pqa_summary && \
         paper-firehose html
       "
     restart: "no"
