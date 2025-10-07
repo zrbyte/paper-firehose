@@ -91,7 +91,7 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install -e .
+          pip install -e .[docs]
 
       - name: Create secret files
         run: |
@@ -218,15 +218,25 @@ jobs:
             fi
           popd >/dev/null
 
+      - name: Build documentation
+        run: |
+          set -euo pipefail
+          sphinx-build -b html docs docs/_build/html
+
       - name: Prepare site
         run: |
           set -euo pipefail
+          rm -rf site
           mkdir -p site
+          if [ -d docs/_build/html ]; then
+            cp -R docs/_build/html/. site/
+          fi
           if [ -d "$PAPER_FIREHOSE_DATA_DIR/html" ]; then
             cp "$PAPER_FIREHOSE_DATA_DIR"/html/*.html site/ 2>/dev/null || true
             cp -r "$PAPER_FIREHOSE_DATA_DIR"/html site/html || true
           fi
           cp history_viewer*.html site/ 2>/dev/null || true
+          touch site/.nojekyll
 
       - uses: actions/upload-pages-artifact@v3
         with:
