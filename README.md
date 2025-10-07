@@ -1,14 +1,29 @@
 # Paper Firehose
 
-Filter, rank, and summarize research-paper RSS feeds. Stores results in SQLite and can generate HTML pages or an email digest. Optional LLM- and full‑text (paper-qa) summaries.
+Filter, rank, and summarize research-paper RSS feeds. Stores results in SQLite and can generate HTML pages or an email digest. Optional full‑text (paper-qa) summaries of preprints from arXiv.
 
-Quick install
+## How to use:
+
+### Install locally
 - `pip install paper_firehose`
 - CLI entrypoint: `paper-firehose`
-
-After install, run `paper-firehose --help` for available command line options
+- After install, run `paper-firehose --help` for available command line options.
+- In Jupyter or a Python file: `import paper_firehose as pf`
 
 Configuration is done using only YAML text files. On first run the default YAML configs are copied into your runtime data directory (defaults to `~/.paper_firehose`, override with `PAPER_FIREHOSE_DATA_DIR`) from `src/paper_firehose/system/config`. Edit those files to customize feeds and topics.
+
+Set up an OpenAI API key environment variable for summarization to work.
+
+### Automated run using GitHub Actions
+- Fork the repo.
+- Copy the example yaml config files as is, from the `src/paper_firehose/system/config` folder to `<repo root>/github_actions_config`. Edit them to set up your own search terms and configuration.
+- Edit the `pages.yml` file in the `schedule.cron` part to set when the automated job runs.
+- Set up GitHub Secrets under Secrets and Variables / Actions. You don't need this step if you're only running the `filter` and `rank` commands. If you want the summarization and email alert functionality, you will need:
+  - `OPENAI_API_KEY`. This is optional if you want to run the paper-qa full text summarization.
+  - `MAILING_LISTS_YAML`. This contains the emails and other config that the email alert functionality needs. Just copy the contents of your `mailing_lists.yaml` file. This is a secret so you don't expose user info to the outside world in the repo.
+  - `SMTP_PASSWORD`. The password for your email server.
+
+The `html` command in GitHub Actions (see `pages.yml`), generates HTML files (name of which is set in the YAML config) with your results. The GitHub Actions runner then pushes these generated HTML files to `https://<your GH username>.github.io/paper-firehose/<your results>.html`, where they can be accessed on the open web.
 
 ## Quick Start
 
@@ -17,15 +32,15 @@ Configuration is done using only YAML text files. On first run the default YAML 
 paper-firehose status
 ```
 
-2) Run the core pipeline for one topic
+2) Run the core pipeline for all topics
 ```
-paper-firehose filter --topic perovskites
-paper-firehose rank --topic perovskites
-paper-firehose abstracts --topic perovskites --mailto you@example.com --rps 1.0
-paper-firehose pqa_summary --topic perovskites    # optional (needs OpenAI key)
-paper-firehose html --topic perovskites           # write HTML from DB
+paper-firehose filter
+paper-firehose rank
+paper-firehose abstracts --mailto you@example.com --rps 1.0
+paper-firehose pqa_summary    # optional (needs OpenAI key)
+paper-firehose html           # write HTML from DB
 ```
-If no topic is specified, all topics are processed.
+You can specify to run a specific topic, with the `--topic YOUR_TOPIC` option.
 
 3) Optional: full‑text summaries via [paper‑qa](https://futurehouse.gitbook.io/futurehouse-cookbook/paperqa) and email digest
 ```
@@ -33,7 +48,7 @@ If no topic is specified, all topics are processed.
 paper-firehose pqa_summary --topic perovskites --rps 0.33 --limit 20 --summarize
 
 # Send a ranked email digest (SMTP config required)
-paper-firehose email --limit 10 --dry-run                # writes preview HTML under data dir
+paper-firehose email
 ```
 
 ## CLI Reference
@@ -109,10 +124,6 @@ info = status()
 print(info["valid"], info["topics"])  # dict with config + paths
 ```
 
-Aliases
-- `paperqa_summary` is available as an alias of `pqa_summary`.
-- `generate_html` is an alias of `html`.
-
 ## Configuration
 
 Runtime data dir
@@ -123,7 +134,7 @@ Runtime data dir
 Files to edit
 - `config/config.yaml`: global settings (DB paths, feeds, LLM, paper‑qa, defaults, optional email/SMTP)
 - `config/topics/<topic>.yaml`: topic name/description, feeds, regex filter, ranking, abstract fetch, LLM summary, and output filenames
-- `config/secrets/`: secret material that should not be committed
+- `config/secrets/`: secret material that should not be committed. These secrets can be either stored as `*.env` files or as environment variables.
   - `openaikulcs.env`: OpenAI API key for `summarize` and `pqa_summary`
   - `email_password.env`: SMTP password (referenced by `email.smtp.password_file`)
   - `mailing_lists.yaml`: optional per‑recipient overrides for `email`:
@@ -133,10 +144,12 @@ Files to edit
         topics: [perovskites, batteries]   # subset of topics for this person
         mode: ranked                       # currently always renders ranked from DB
         limit: 10                          # per‑recipient cap
-        min_rank_score: 0.4                # optional cutoff
+        min_rank_score: 0.3                # optional cutoff
     ```
 
 Key config fields
+- `filter.pattern`: This is the regular expression that does the heavy lifting of "casting a wide net" and trying to capture papers from the RSS feeds which are related to your topic of interest. The point of using regular expressions is that they can capture the many ways in which certain terms can be written. For example: the regexp `(scan[a-z]+ tunne[a-z]+ micr[a-z]+)` will match “scanning tunneling microscopy” as well as “scanned tunneling microscopies”, as well as the British and US English spellings of 'tunnelling' and 'tunneling'. The results of the regexp match can then be ranked by similarity to the keyword list under `ranking.query`. It takes a bit of thought to set this up, but it is powerful.
+- `ranking.query`: List of keywords that are used by an embedding model to rank the results. Asking an LLM to generate regex patterns from your keywords might be an easy way to set up `filter.pattern`.
 - `feeds`: mapping of feed keys to `{name, url, enabled}`. Feed keys are referenced in topic files; `name` is stored in DBs and used in HTML.
 - `priority_journals` and `priority_journal_boost`: optional global score boost by feed key.
 - Topic `ranking`: `query`, `model`, optional `negative_queries`, `preferred_authors`, `priority_author_boost`.
