@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 class STRanker:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+        """Lazy-load a SentenceTransformer model, logging a warning on failure."""
         self.model_name = model_name
         self._model = None
         self._util = None
@@ -38,6 +39,7 @@ class STRanker:
             )
 
     def available(self) -> bool:
+        """Return True when the embedding model loaded successfully."""
         return self._model is not None and self._util is not None
 
     def score_entries(

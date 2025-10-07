@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 def _load_key_from_file(path: str) -> Optional[str]:
+    """Read an API key from a file, tolerating KEY=value or raw key formats."""
     try:
         if not os.path.exists(path):
             return None
@@ -97,11 +98,13 @@ def _resolve_api_key(config: Dict[str, Any], config_base_dir: Optional[str]) -> 
 
 
 def _resolve_model(config: Dict[str, Any]) -> str:
+    """Return the configured LLM model ID, defaulting to gpt-5."""
     llm = config.get('llm') or {}
     return llm.get('model') or 'gpt-5'
 
 
 def _iter_candidates(db: DatabaseManager, topic: str, score_cutoff: float, top_n: int) -> List[Dict[str, Any]]:
+    """Fetch top-ranked entries with abstracts for summarization."""
     import sqlite3
     conn = sqlite3.connect(db.db_paths['current'])
     cur = conn.cursor()
@@ -282,6 +285,7 @@ def _call_openai(api_key: str, models: List[str], prompt: str, title: str, abstr
 
 
 def run(config_path: str, topic: Optional[str] = None, *, rps: Optional[float] = None) -> None:
+    """Generate LLM summaries for ranked entries and persist them to both databases."""
     logger.info("Starting LLM summarization")
     cfg_mgr = ConfigManager(config_path)
     if not cfg_mgr.validate_config():

@@ -24,6 +24,7 @@ class DatabaseManager:
     """Manages the three-database system for feed processing."""
     
     def __init__(self, config: Dict[str, Any]):
+        """Resolve database file paths from config and ensure schemas exist."""
         self.config = config
         self.db_paths = {
             'all_feeds': str(resolve_data_file(config['database']['all_feeds_path'], ensure_parent=True)),
@@ -617,6 +618,7 @@ class DatabaseManager:
         doi_re = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", re.IGNORECASE)
 
         def find_in_text(text: str | None) -> Optional[str]:
+            """Search a text blob for a DOI pattern, stripping common prefixes first."""
             if not text:
                 return None
             # Strip common prefixes like 'doi:'

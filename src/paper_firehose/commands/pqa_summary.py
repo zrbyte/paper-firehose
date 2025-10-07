@@ -37,11 +37,13 @@ ARXIV_API = "https://export.arxiv.org/api/query"
 
 
 def _ensure_dirs(download_dir: str, archive_dir: str) -> None:
+    """Ensure the working download/archive directories exist before use."""
     os.makedirs(download_dir, exist_ok=True)
     os.makedirs(archive_dir, exist_ok=True)
 
 
 def _resolve_mailto(config: Dict[str, Any]) -> str:
+    """Resolve contact email for API requests from config/env fallbacks."""
     # Reuse abstracts mailto if available; otherwise fallback to env or placeholder
     defaults = (config.get('defaults') or {})
     abstracts = (defaults.get('abstracts') or {})
@@ -50,11 +52,13 @@ def _resolve_mailto(config: Dict[str, Any]) -> str:
 
 
 def _arxiv_user_agent(mailto: str) -> str:
+    """Build an arXiv-compliant User-Agent string with contact information."""
     # Include contact per arXiv API guidance
     return f"paper-firehose/pqa-summary (+mailto:{mailto})"
 
 
 def _iter_ranked_entries(db: DatabaseManager, topic: str, min_rank: float) -> List[Dict[str, Any]]:
+    """Fetch ranked DB rows for a topic sorted descending by score."""
     conn = sqlite3.connect(db.db_paths['current'])
     cur = conn.cursor()
     cur.execute(
@@ -115,6 +119,7 @@ _ARXIV_ID_RE = re.compile(r"\b(\d{4}\.\d{4,5})(v\d+)?\b")
 
 
 def _extract_arxiv_id_from_link(link: str | None) -> Optional[str]:
+    """Pull an arXiv identifier out of common arXiv link patterns."""
     if not link:
         return None
     try:
@@ -130,6 +135,7 @@ def _extract_arxiv_id_from_link(link: str | None) -> Optional[str]:
 
 
 def _extract_arxiv_id_from_doi(doi: str | None) -> Optional[str]:
+    """Derive an arXiv identifier from the canonical arXiv DOI form."""
     if not doi:
         return None
     # Crossref canonical DOI for arXiv looks like: 10.48550/arXiv.2509.09390
@@ -143,6 +149,7 @@ def _extract_arxiv_id_from_doi(doi: str | None) -> Optional[str]:
 
 
 def _extract_arxiv_id_from_text(text: str | None) -> Optional[str]:
+    """Scan arbitrary text for arXiv-style identifier tokens."""
     if not text:
         return None
     # Capture e.g. arXiv:2509.09390v1 or bare 2509.09390
@@ -161,6 +168,7 @@ def _extract_arxiv_id_from_text(text: str | None) -> Optional[str]:
 
 
 def _resolve_arxiv_id(entry: Dict[str, Any]) -> Optional[str]:
+    """Best-effort arXiv ID detection using link, DOI, summary, then title."""
     # Priority: link -> doi -> summary -> title
     arx = _extract_arxiv_id_from_link(entry.get('link'))
     if arx:
@@ -255,6 +263,7 @@ def _query_arxiv_api_for_pdf(arxiv_id: str, *, mailto: str, session: Optional[re
 
 
 def _download_pdf(pdf_url: str, dest_path: str, *, mailto: str, session: Optional[requests.Session] = None, max_retries: int = 3) -> bool:
+    """Download a PDF with polite retry/backoff behavior; returns True on success."""
     sess = session or requests.Session()
     headers = {"User-Agent": _arxiv_user_agent(mailto)}
     backoff = 1.0
@@ -290,6 +299,7 @@ def _download_pdf(pdf_url: str, dest_path: str, *, mailto: str, session: Optiona
 
 
 def _move_to_archive(paths: List[str], archive_dir: str) -> None:
+    """Move downloaded PDFs into the archive directory, avoiding overwrite collisions."""
     for p in paths:
         try:
             if not os.path.exists(p):
@@ -343,6 +353,7 @@ def _call_paperqa_on_pdf(pdf_path: str, *, question: str) -> Optional[str]:
         return None
 
     def _extract_answer(ans_obj: Any) -> Optional[str]:
+        """Normalize paper-qa answer objects down to a clean string, if present."""
         for attr in ("answer", "formatted_answer"):
             val = getattr(ans_obj, attr, None)
             if isinstance(val, str) and val.strip():
@@ -356,6 +367,7 @@ def _call_paperqa_on_pdf(pdf_path: str, *, question: str) -> Optional[str]:
             return None
 
     async def _run_async() -> Any:
+        """Run the paper-qa pipeline using async APIs when available."""
         docs = Docs()
         # Prefer async methods when available; fall back to sync versions.
         add_fn = getattr(docs, "aadd", None)
@@ -386,6 +398,7 @@ def _call_paperqa_on_pdf(pdf_path: str, *, question: str) -> Optional[str]:
         error: Dict[str, BaseException] = {}
 
         def _worker() -> None:
+            """Bridge paper-qa async calls into a background event loop."""
             new_loop = asyncio.new_event_loop()
             try:
                 asyncio.set_event_loop(new_loop)
@@ -419,6 +432,7 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
     import json
 
     def _strip_fences(s: str) -> str:
+        """Remove Markdown code fences from LLM output, preserving inner text."""
         s2 = (s or '').strip()
         if s2.startswith('```'):
             # Drop first line (``` or ```json)
@@ -430,6 +444,7 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
         return s2
 
     def _parse_obj(txt: str) -> Optional[dict]:
+        """Parse a JSON object string, returning None on failure or non-dict values."""
         try:
             obj = json.loads(txt)
             return obj if isinstance(obj, dict) else None
@@ -437,6 +452,7 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
             return None
 
     def _coerce_str(v) -> str:
+        """Coerce values into strings while tolerating None."""
         if v is None:
             return ''
         return v if isinstance(v, str) else str(v)
@@ -459,6 +475,7 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
         return json.dumps(out, ensure_ascii=False)
 
     def _first_nonempty(keys: Tuple[str, ...]) -> str:
+        """Return the first non-empty string value from data for the provided keys."""
         for key in keys:
             if key in data:
                 val = _coerce_str(data.get(key))

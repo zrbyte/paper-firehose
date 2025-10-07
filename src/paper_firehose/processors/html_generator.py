@@ -20,6 +20,7 @@ class HTMLGenerator:
     """Generates HTML output files for filtered articles."""
     
     def __init__(self, template_path: str = "html_template.html"):
+        """Prepare the generator, resolving the template path into the data directory."""
         self.template_path = self._resolve_template(template_path)
     
     def process_text(self, text: str) -> str:
@@ -565,6 +566,7 @@ function toggleAbstract(id) {
         return data_template
 
     def _resolve_template(self, template_path: str) -> str:
+        """Locate a template by checking runtime, system, and fallback locations."""
         candidate = Path(template_path)
 
         if candidate.is_absolute() and candidate.exists():

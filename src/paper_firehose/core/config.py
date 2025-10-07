@@ -73,6 +73,7 @@ ranking:
 
 
 def _write_template(path: Path, content: str) -> None:
+    """Write templated YAML content to disk with a trailing newline."""
     path.write_text(content.strip() + "\n", encoding="utf-8")
 
 
@@ -101,6 +102,7 @@ class ConfigManager:
     """Manages loading and validation of YAML configuration files."""
 
     def __init__(self, config_path: Optional[str] = None):
+        """Initialize the manager and ensure baseline config/topic files exist."""
         path = Path(config_path or DEFAULT_CONFIG_PATH).expanduser()
         if not path.is_absolute():
             path = path.resolve()

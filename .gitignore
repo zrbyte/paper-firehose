@@ -17,3 +17,4 @@ archive/
 .cursor/*
 paper_firehose/system/models/*
 .paper_firehose/*
+docs/_build/

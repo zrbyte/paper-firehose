@@ -41,6 +41,11 @@ dev = [
     "pytest>=7.0",
     "pytest-cov",
 ]
+docs = [
+    "sphinx>=7.3",
+    "sphinx-autodoc-typehints>=1.25",
+    "furo>=2024.1.29",
+]
 
 [project.scripts]
 paper-firehose = "paper_firehose.cli:cli"

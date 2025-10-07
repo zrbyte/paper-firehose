@@ -22,6 +22,7 @@ from pathlib import Path
 
 
 def _fmt_score_badge(score: Optional[float]) -> str:
+    """Render a small inline badge showing the rank score, or empty string on failure."""
     if score is None:
         return ""
     try:
@@ -36,6 +37,7 @@ class EmailRenderer:
     """Create compact HTML suitable for email clients (no external JS/CSS)."""
 
     def __init__(self) -> None:
+        """Construct the renderer; currently stateless but kept for symmetry."""
         pass
 
     def render_topic_digest(
@@ -123,6 +125,7 @@ class EmailRenderer:
         }
 
         def is_http_url(url: str) -> bool:
+            """Return True when the URL is an http(s) link; reject mailto/javascript/etc."""
             u = (url or '').strip().lower()
             return u.startswith('http://') or u.startswith('https://')
 
@@ -132,6 +135,7 @@ class EmailRenderer:
 
         class Sanitizer(HTMLParser):
             def handle_starttag(self, tag, attrs):
+                """Emit sanitized start tags or replace with safe alternatives."""
                 # If entering a skip-only tag, push and ignore until endtag
                 if tag in skip_tags:
                     skip_stack.append(tag)
@@ -177,6 +181,7 @@ class EmailRenderer:
                     out.append(f'<{tag}{attr_str}>')
 
             def handle_endtag(self, tag):
+                """Emit matching end tags for allowed elements, respecting replacements."""
                 if skip_stack and tag == skip_stack[-1]:
                     skip_stack.pop()
                     return
@@ -192,6 +197,7 @@ class EmailRenderer:
                     out.append(f'</{tag}>')
 
             def handle_data(self, data):
+                """Append escaped text content, dropping boilerplate like DOI references."""
                 # Skip data if we're inside a skipped tag
                 if skip_stack:
                     return
@@ -205,9 +211,11 @@ class EmailRenderer:
                 out.append(html.escape(data))
 
             def handle_entityref(self, name):
+                """Preserve HTML entity references such as &alpha;."""
                 out.append(f'&{name};')
 
             def handle_charref(self, name):
+                """Preserve numeric character references such as &#8217;."""
                 out.append(f'&#{name};')
 
         try:
@@ -254,6 +262,7 @@ class EmailRenderer:
         return "\n".join(body_parts)
 
     def _format_llm_summary(self, llm_summary_raw: Optional[str]) -> Optional[str]:
+        """Convert llm_summary JSON/text into a small HTML block, or None if empty."""
         if not llm_summary_raw:
             return None
         try:
@@ -375,6 +384,7 @@ class SMTPSender:
     """Send emails via SMTP (SSL) using settings under config['email']['smtp']."""
 
     def __init__(self, smtp_cfg: Dict[str, Any], config_dir: Optional[str] = None) -> None:
+        """Initialize SMTP connection parameters and optional password lookup directory."""
         self.host = str(smtp_cfg.get('host') or '')
         self.port = int(smtp_cfg.get('port') or 465)
         self.username = str(smtp_cfg.get('username') or '')
@@ -383,6 +393,7 @@ class SMTPSender:
         self._config_dir = Path(config_dir).expanduser().resolve() if config_dir else None
 
     def _load_password(self) -> str:
+        """Fetch SMTP password via inline config, password file, or environment fallback."""
         if self.password:
             return self.password
         if self.password_file:
@@ -397,6 +408,7 @@ class SMTPSender:
         return os.environ.get(env_name, '')
 
     def send(self, *, subject: str, from_addr: str, to_addrs: List[str], html_body: str, text_body: Optional[str] = None) -> None:
+        """Send a multipart email with HTML alternative using SMTP over SSL."""
         if not self.host or not self.port or not self.username:
             raise RuntimeError("SMTP configuration incomplete: host/port/username required")
         password = self._load_password()

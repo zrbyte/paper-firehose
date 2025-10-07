@@ -34,6 +34,7 @@ CROSSREF_API = "https://api.crossref.org/works/"
 
 
 def _strip_jats(text: str | None) -> Optional[str]:
+    """Remove JATS/HTML tags and unescape entities in Crossref-style strings."""
     if not text:
         return text
     # remove <jats:...> and regular HTML tags
@@ -73,6 +74,7 @@ def _clean_for_db(text: Optional[str]) -> Optional[str]:
 
 
 def _find_doi_in_text(text: Optional[str]) -> Optional[str]:
+    """Return the first DOI-like token found in the provided string."""
     if not text:
         return None
     t = str(text).strip()
@@ -83,6 +85,7 @@ def _find_doi_in_text(text: Optional[str]) -> Optional[str]:
 
 
 def _extract_doi_from_raw(raw: Optional[str]) -> Optional[str]:
+    """Try to locate a DOI within the feed's raw JSON payload."""
     if not raw:
         return None
     try:
@@ -223,6 +226,7 @@ def get_semantic_scholar_abstract(doi: str, *, session: Optional[requests.Sessio
 
 
 def _reconstruct_openalex(ii: Dict[str, Any]) -> Optional[str]:
+    """Reassemble OpenAlex's inverted-index abstract representation."""
     try:
         idx_pairs = []
         max_pos = -1
@@ -242,6 +246,7 @@ def _reconstruct_openalex(ii: Dict[str, Any]) -> Optional[str]:
 
 
 def get_openalex_abstract(doi: str, *, mailto: str, session: Optional[requests.Session] = None) -> Optional[str]:
+    """Fetch an abstract from OpenAlex by DOI, reconstructing when inverted-indexed."""
     if not doi:
         return None
     sess = session or requests.Session()
@@ -264,6 +269,7 @@ def get_openalex_abstract(doi: str, *, mailto: str, session: Optional[requests.S
 
 
 def get_pubmed_abstract_by_doi(doi: str, *, session: Optional[requests.Session] = None) -> Optional[str]:
+    """Look up a DOI in PubMed and return the combined abstract text if available."""
     if not doi:
         return None
     sess = session or requests.Session()
@@ -322,6 +328,7 @@ def try_publisher_apis(doi: Optional[str], feed_name: str, link: str, *, mailto:
 
 
 def _iter_targets(db: DatabaseManager, topic: str, threshold: float) -> Iterable[Dict[str, Any]]:
+    """Yield ranked DB rows lacking abstracts for the given topic, highest score first."""
     # Query directly for performance
     import sqlite3
     conn = sqlite3.connect(db.db_paths['current'])

@@ -23,6 +23,7 @@ class FeedProcessor:
     """Processes RSS feeds with regex filtering and database storage."""
     
     def __init__(self, db_manager: DatabaseManager, config_manager: ConfigManager):
+        """Bind database/config managers and derive the time window constraint."""
         self.db = db_manager
         self.config = config_manager
         # Resolve time window from config (defaults.time_window_days)

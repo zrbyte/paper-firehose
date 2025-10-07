@@ -132,10 +132,12 @@ def _build_entry_text(entry: Dict[str, Any]) -> str:
 
 
 def _strip_accents(text: str) -> str:
+    """Return ASCII-ish text by removing accent marks via Unicode normalization."""
     return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
 
 
 def _norm_name(text: str) -> str:
+    """Normalize a human name for loose matching (strip accents/punctuation/case)."""
     t = _strip_accents(text or "").lower()
     t = re.sub(r"[^a-z\s\-]", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
@@ -165,6 +167,7 @@ def _parse_name_parts(name: str) -> tuple[str, List[str]]:
 
 
 def _names_match(a: str, b: str) -> bool:
+    """Heuristic author-name comparator supporting initials and comma forms."""
     la, ia = _parse_name_parts(a)
     lb, ib = _parse_name_parts(b)
     if not la or not lb:
@@ -177,6 +180,7 @@ def _names_match(a: str, b: str) -> bool:
 
 
 def _entry_has_preferred_author(entry: Dict[str, Any], preferred_authors: List[str]) -> bool:
+    """Return True when entry authors overlap with the preferred author patterns."""
     if not preferred_authors:
         return False
     authors_blob = entry.get("authors") or ""

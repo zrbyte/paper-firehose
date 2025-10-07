@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def _select_entries(db: DatabaseManager, topic: str, *, only_with_summary: bool, limit: Optional[int], min_rank_score: Optional[float]) -> List[Dict[str, Any]]:
+    """Return ranked entries for a topic honoring summary/rank filters and limit."""
     entries = db.get_current_entries(topic=topic)
     # Prefer items with non-empty llm_summary when requested
     if only_with_summary:
@@ -43,6 +44,7 @@ def _select_entries(db: DatabaseManager, topic: str, *, only_with_summary: bool,
 
 
 def _resolve_email_settings(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize email configuration and validate required SMTP fields."""
     email_cfg = (config.get('email') or {})
     # Provide minimal structure defaults
     email_cfg.setdefault('from', email_cfg.get('from_address'))
@@ -139,6 +141,7 @@ def run(
     topics = [topic] if topic else cfg_mgr.get_available_topics()
     renderer = EmailRenderer()
     def build_sections(chosen_topics: List[str], *, mode_choice: str, rank_cutoff: Optional[float]) -> tuple[List[tuple[str, str]], int]:
+        """Render ranked sections for the requested topics and return HTML fragments."""
         sections: List[tuple[str, str]] = []
         included_count = 0
         for t in chosen_topics:
