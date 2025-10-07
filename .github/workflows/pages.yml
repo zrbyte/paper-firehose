@@ -3,14 +3,6 @@ name: Build and Deploy HTML
 on:
   workflow_dispatch:
     inputs:
-      run_pqa:
-        description: "Also run paper-qa summarization"
-        required: false
-        default: "true" # false for not running pqa summarization
-      run_email:
-        description: "Send digest email at end"
-        required: false
-        default: "true" # false for not running the email part
       purge_recent:
         description: "Purge entries from the last day before running the pipeline"
         required: false
@@ -145,17 +137,8 @@ jobs:
 
           echo "Step 4: Abstract summarization skipped"
 
-          if [ "${{ github.event.inputs.run_pqa }}" = "true" ]; then
-            paper-firehose --config "$CONFIG_PATH" pqa_summary
-          else
-            echo "Step 5: pqa_summary skipped (run_pqa input=false)"
-          fi
-
-          if [ "${{ github.event.inputs.run_email }}" = "true" ]; then
-            paper-firehose --config "$CONFIG_PATH" email
-          else
-            echo "Step 6: Email sending skipped (run_email input=false)"
-          fi
+          paper-firehose --config "$CONFIG_PATH" pqa_summary
+          paper-firehose --config "$CONFIG_PATH" email
 
           paper-firehose --config "$CONFIG_PATH" html
 
