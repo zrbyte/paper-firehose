@@ -75,14 +75,15 @@ jobs:
             echo "ℹ️  github_actions_config directory not found; using defaults bundled with the package"
           fi
 
-      - name: Run minimal pipeline for HTML outputs
+      - name: Render HTML outputs from loaded databases
         run: |
           set -euo pipefail
-
-          echo "=== Running Paper Firehose pipeline prior to docs build ==="
-          paper-firehose --config "$CONFIG_PATH" filter
-          paper-firehose --config "$CONFIG_PATH" rank
-          paper-firehose --config "$CONFIG_PATH" html
+          if [ -f "$PAPER_FIREHOSE_DATA_DIR/papers.db" ]; then
+            echo "=== Generating HTML from preloaded databases ==="
+            paper-firehose --config "$CONFIG_PATH" html
+          else
+            echo "⚠️  papers.db not found; skipping HTML generation"
+          fi
 
       - name: Build Sphinx HTML
         run: sphinx-build -b html docs docs/_build/html
