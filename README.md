@@ -1,6 +1,6 @@
 # Paper Firehose
 
-Filter, rank, and summarize research-paper RSS feeds. Stores results in SQLite and can generate HTML pages or an email digest. Optional full‑text (paper-qa) summaries of preprints from arXiv.
+Filter, rank, and summarize research-paper RSS feeds. Stores results in SQLite and can generate HTML pages or an email digest. Optional full‑text (paper-qa) summaries of preprints from arXiv. Documentation: [zrbyte.github.io/paper-firehose](https://zrbyte.github.io/paper-firehose/index.html)
 
 ## How to use:
 
