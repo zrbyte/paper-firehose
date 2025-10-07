@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # Base service for one-off commands. Use `docker compose run --rm firehose <subcommand>`
   firehose:
