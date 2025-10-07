@@ -75,9 +75,13 @@ jobs:
             echo "ℹ️  github_actions_config directory not found; using defaults bundled with the package"
           fi
 
-      - name: Render HTML outputs from databases
+      - name: Run minimal pipeline for HTML outputs
         run: |
           set -euo pipefail
+
+          echo "=== Running Paper Firehose pipeline prior to docs build ==="
+          paper-firehose --config "$CONFIG_PATH" filter
+          paper-firehose --config "$CONFIG_PATH" rank
           paper-firehose --config "$CONFIG_PATH" html
 
       - name: Build Sphinx HTML
