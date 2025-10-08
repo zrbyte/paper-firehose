@@ -16,7 +16,7 @@ Set up an OpenAI API key environment variable for summarization to work.
 
 ### Automated run using GitHub Actions
 - Fork the repo.
-- Copy the example yaml config files as is, from the `src/paper_firehose/system/config` folder to `<repo root>/github_actions_config`. Edit them to set up your own search terms and configuration.
+- Edit the yaml config files in `<repo root>/github_actions_config` to set up your own topics. Each topic yaml file creates a html file when running the `html` command.
 - Edit the `pages.yml` file in the `schedule.cron` part to set when the automated job runs.
 - Set up GitHub Secrets under Secrets and Variables / Actions. You don't need this step if you're only running the `filter` and `rank` commands. If you want the summarization and email alert functionality, you will need:
   - `OPENAI_API_KEY`. This is optional if you want to run the paper-qa full text summarization.
