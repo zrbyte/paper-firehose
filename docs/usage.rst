@@ -4,19 +4,11 @@ Usage Guide
 Installation
 ------------
 
-Install Paper Firehose into a virtual environment. For local development
-the editable install is convenient because it exposes the CLI entry point:
+Install via pip:
 
 .. code-block:: bash
 
-   python -m pip install -e .[dev]
-
-To build the documentation locally add the ``docs`` extra:
-
-.. code-block:: bash
-
-   python -m pip install -e .[docs]
-
+   pip install paper_firehose
 
 Runtime Data Directory
 ----------------------
