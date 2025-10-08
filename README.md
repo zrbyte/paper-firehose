@@ -16,7 +16,7 @@ Set up an OpenAI API key environment variable for summarization to work.
 
 ### Automated run using GitHub Actions
 - Fork the repo.
-- Edit the yaml config files in `<repo root>/github_actions_config` to set up your own topics. Each topic yaml file creates a html file when running the `html` command.
+- Edit the YAML config files in `<repo root>/github_actions_config` to set up your own topics. Each topic YAML file creates an HTML file with the results when running the `html` command.
 - Edit the `pages.yml` file in the `schedule.cron` part to set when the automated job runs.
 - Set up GitHub Secrets under Secrets and Variables / Actions. You don't need this step if you're only running the `filter` and `rank` commands. If you want the summarization and email alert functionality, you will need:
   - `OPENAI_API_KEY`. This is optional if you want to run the paper-qa full text summarization.
@@ -79,7 +79,7 @@ Commands
   - Generate HTML page(s) directly from `papers.db`. For a single topic, `output.filename` is used unless you override via the Python API (see below).
 
 - `pqa_summary [--topic TOPIC] [--rps FLOAT] [--limit N] [--arxiv ID|URL ...] [--entry-id ID ...] [--use-history] [--history-date YYYY-MM-DD] [--history-feed-like STR] [--summarize]`
-  - Download arXiv PDFs for ranked entries (or explicit IDs/URLs) with polite rate limiting, archive them, optionally run paper‑qa, and write normalized JSON into DBs. Old pdfs are discarded from the archive. We don't do scraping.
+  - Download arXiv PDFs for ranked entries (or explicit IDs/URLs) with polite rate limiting, archive them, optionally run paper‑qa, and write normalized JSON into DBs. Old PDFs are discarded from the archive. We don't do scraping.
   - Accepts `--arxiv` values like `2501.12345`, `2501.12345v2`, `https://arxiv.org/abs/2501.12345`, or `https://arxiv.org/pdf/2501.12345.pdf`.
 
 - `email [--topic TOPIC] [--mode auto|ranked] [--limit N] [--recipients PATH] [--dry-run]`
@@ -127,7 +127,7 @@ print(info["valid"], info["topics"])  # dict with config + paths
 ## Configuration
 
 Runtime data dir
-- Default: `~/.paper_firehose` on your home folder on MacOS or Linux. On Windows it's: `C:\Users\<YourUser>\.paper_firehose`.
+- Default: `~/.paper_firehose` on your home folder on macOS or Linux. On Windows it's: `C:\Users\<YourUser>\.paper_firehose`.
 - Override with `PAPER_FIREHOSE_DATA_DIR` environment variable
 - First run seeds `config/`, `templates/`, and optional `models/` from the bundled `system/` directory.
 
@@ -185,4 +185,3 @@ Email
 
 - Python 3.11+ recommended. See `pyproject.toml` for dependencies.
 - Thank you to arXiv for use of its open access interoperability. This project links to arXiv/publisher pages and does not serve PDFs.
-
