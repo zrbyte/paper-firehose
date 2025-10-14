@@ -87,7 +87,7 @@ ranking:
   negative_queries: [erratum, correction, reply, corrigendum]
 
   # Preferred authors. Names in this list get a ranking boost. Order: First name (or initial), Last name.
-  preferred_authors: [Chen Guorui, A Yazdani, Avram Nurit, Markus Morgenstern, Ivan Brihuega]
+  preferred_authors: [Chen Guorui, A Yazdani, Avram Nurit, Markus Morgenstern, Ivan Brihuega, Pierre Mallet]
   priority_author_boost: 0.1
 
   # Sentence-Transformers model used for ranking (can be overridden per topic)
