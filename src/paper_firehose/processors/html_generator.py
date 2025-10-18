@@ -11,6 +11,8 @@ from pathlib import Path
 from string import Template
 from typing import Dict, List, Any, Optional
 
+CUSTOM_TEMPLATE_MARKER = "paper-firehose:custom-template"
+
 from ..core.paths import get_system_path, resolve_data_path
 
 logger = logging.getLogger(__name__)
@@ -100,42 +102,75 @@ class HTMLGenerator:
         display_title = heading or f"Ranked Articles - {topic_name}"
         self._create_new_html_file(output_path, display_title, description)
 
-        # Load entries from DB and sort by rank_score desc (only those with a score)
         entries = db_manager.get_current_entries(topic=topic_name)
         ranked = [e for e in entries if e.get('rank_score') is not None]
         ranked.sort(key=lambda e: (e.get('rank_score') or 0.0), reverse=True)
 
-        # Build ranked entries HTML
         html_parts: List[str] = []
         if not ranked:
             html_parts.append('<p class="no-entries">No ranked entries available.</p>')
         else:
-            html_parts.append('<h2>Ranked Entries</h2>')
-            for idx, e in enumerate(ranked, 1):
-                title = self.process_text(e.get('title', 'No title'))
-                link = e.get('link', '#')
-                authors = self.process_text(e.get('authors', ''))
-                published = e.get('published_date', '')
-                abstract_raw = e.get('abstract', '')
-                summary_raw = e.get('summary', '')
+            html_parts.append(f'<div class="entry-count" data-entry-counter="true">{len(ranked)} ranked entries (highest score first)</div>')
+            for idx, entry in enumerate(ranked, 1):
+                title = self.process_text(entry.get('title', 'No title'))
+                link = entry.get('link', '#')
+                authors = self.process_text(entry.get('authors', ''))
+                published = entry.get('published_date', '')
+                abstract_raw = entry.get('abstract', '')
+                summary_raw = entry.get('summary', '')
                 body_text = self.process_text(abstract_raw if (abstract_raw and abstract_raw.strip()) else summary_raw)
-                feed_name_entry = self.process_text(e.get('feed_name', ''))
-                score = float(e.get('rank_score') or 0.0)
-                # Truncate to two decimals (not round)
+                feed_name_entry = self.process_text(entry.get('feed_name', ''))
+                score = float(entry.get('rank_score') or 0.0)
                 score_trunc = int(score * 100) / 100.0
                 score_str = f"{score_trunc:.2f}"
-                entry_html = (
-                    '<div class="entry">\n'
-                    f'  <h3><a href="{link}">{title}</a> <span class="badge">Score {score_str}</span></h3>\n'
-                    f'  <p><strong>Authors:</strong> {authors}</p>\n'
-                    f'  <p><em>Published: {published}</em></p>\n'
-                    f'  <p>{body_text}</p>\n'
-                    f'  <p><strong>{feed_name_entry}</strong></p>\n'
-                )
-                entry_html += '</div>\n<hr>'
-                html_parts.append(entry_html)
 
-        # Insert into template
+                # Optional image preview if present on the entry payload
+                image_url = (
+                    entry.get('image_url')
+                    or entry.get('thumbnail')
+                    or entry.get('thumbnail_url')
+                    or entry.get('image')
+                )
+                image_html = ""
+                if image_url:
+                    image_safe = html.escape(str(image_url), quote=True)
+                    image_html = (
+                        f'<div class="entry-figure">'
+                        f'<img src="{image_safe}" alt="Preview image for {title}">'
+                        "</div>"
+                    )
+
+                entry_html = [
+                    '<div class="entry" data-entry-type="ranked">',
+                    '  <div class="entry-grid">',
+                    '    <div class="entry-info">',
+                    '      <div class="entry-title">',
+                    f'        <h3><a href="{link}" target="_blank" rel="noopener noreferrer">{title}</a> <span class="badge">Score {score_str}</span></h3>',
+                    '      </div>',
+                    '      <div class="entry-meta">',
+                    f'        <span class="meta-item"><strong>Authors:</strong> {authors}</span>',
+                    f'        <span class="meta-item"><em>Published:</em> {published}</span>',
+                    '      </div>',
+                    '      <div class="entry-tags">',
+                    f'        <span class="tag tag-feed">{feed_name_entry or "Unknown feed"}</span>',
+                    '        <span class="tag tag-ranked">Ranked</span>',
+                    '      </div>',
+                    '      <div class="entry-actions">',
+                    f'        <a class="action-link" href="{link}" target="_blank" rel="noopener noreferrer">Open article</a>',
+                    '      </div>',
+                    '    </div>',
+                    '    <div class="entry-content">',
+                    image_html,
+                    '      <div class="summary-section ranked-summary">',
+                    f'        <p>{body_text}</p>',
+                    '      </div>',
+                    '    </div>',
+                    '  </div>',
+                    '</div>'
+                ]
+
+                html_parts.append('\n'.join(line for line in entry_html if line.strip() != ""))
+
         with open(output_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
         insert_position = html_content.rfind('</body>')
@@ -171,7 +206,7 @@ class HTMLGenerator:
             base_entries.sort(key=lambda e: (e.get('rank_score') or 0.0), reverse=True)
 
             html_parts = []
-            html_parts.append(f'<div class="entry-count">{len(base_entries)} summarized entries (sorted by rank score)</div>')
+            html_parts.append(f'<div class="entry-count" data-entry-counter="true">{len(base_entries)} summarized entries (sorted by rank score)</div>')
 
             # Entries for this topic
             for idx, entry in enumerate(base_entries):
@@ -208,50 +243,91 @@ class HTMLGenerator:
                 # 2) Else use LLM summary
                 # 3) Else fall back to ranked fields (abstract -> summary)
                 used_fallback = False
+                summary_tag = '<span class="tag tag-fallback">Abstract</span>'
                 if (pqa_summary_raw or '').strip():
                     summary_block_html = f'''<div class="pqa-summary">
         <h4 class="pqa-heading">Fulltext summary</h4>
         {self._format_pqa_summary(pqa_summary_raw)}
     </div>'''
+                    summary_tag = '<span class="tag tag-pqa">PDF summary</span>'
                 elif (llm_summary_raw or '').strip():
-                    # Parse LLM summary JSON if possible, otherwise display as plain text
                     summary_block_html = f'''<div class="llm-summary">
         {self._format_llm_summary(llm_summary_raw)}
     </div>'''
+                    summary_tag = '<span class="tag tag-llm">LLM summary</span>'
                 else:
                     used_fallback = True
-                    # Only show the abstract from DB; do not use the RSS summary
                     fallback_text = abstract_text_only if abstract_text_only else 'No abstract available.'
                     summary_block_html = f'''<div class="llm-summary">
         <p>{fallback_text}</p>
     </div>'''
                 
-                entry_html = f'''
-<div class="entry">
-    <div class="entry-title">
-        <h3><a href="{link}" target="_blank">{title_text}</a>{score_badge}</h3>
-    </div>
-    <div class="entry-authors"><strong>Authors:</strong> {authors}</div>
-    <div class="entry-feed"><strong>{feed_name_entry}</strong></div>
-    <div class="entry-published"><em>Published:</em> {published}</div>
-    {summary_block_html}'''
-                
-                # Only show the dropdown if we are not already showing the context as the main block
+                image_url = (
+                    entry.get('image_url')
+                    or entry.get('thumbnail')
+                    or entry.get('thumbnail_url')
+                    or entry.get('image')
+                )
+                image_html = ""
+                if image_url:
+                    image_safe = html.escape(str(image_url), quote=True)
+                    image_html = (
+                        f'<div class="entry-figure">'
+                        f'<img src="{image_safe}" alt="Preview image for {title_text}">'
+                        "</div>"
+                    )
+
+                body_segments: List[str] = []
+                if image_html:
+                    body_segments.append(image_html)
+                body_segments.append(summary_block_html)
+
                 if context_text and not used_fallback:
-                    # Feed name shown below the abstract/summary inside the dropdown
                     feed_name_entry = self.process_text(entry.get('feed_name', ''))
-                    entry_html += f'''
-    <div class="abstract-toggle">
-        <button onclick="toggleAbstract('{dropdown_id}')">Show/Hide Original Abstract</button>
-    </div>
-    <div id="{dropdown_id}" class="abstract-content">
-        <strong>Original Abstract/Summary:</strong><br>
-        {context_text}
-        <div class="entry-feed"><strong>{feed_name_entry}</strong></div>
-    </div>'''
+                    body_segments.append(f'''
+<div class="abstract-toggle">
+    <button onclick="toggleAbstract('{dropdown_id}')">Show/Hide Original Abstract</button>
+</div>
+<div id="{dropdown_id}" class="abstract-content">
+    <strong>Original Abstract/Summary:</strong><br>
+    {context_text}
+    <div class="entry-feed"><strong>{feed_name_entry}</strong></div>
+</div>''')
                 
-                entry_html += '</div>'
-                html_parts.append(entry_html)
+                entry_sections = [
+                    '<div class="entry" data-entry-type="summarized">',
+                    '  <div class="entry-grid">',
+                    '    <div class="entry-info">',
+                    '      <div class="entry-title">',
+                    f'        <h3><a href="{link}" target="_blank" rel="noopener noreferrer">{title_text}</a>{score_badge}</h3>',
+                    '      </div>',
+                    '      <div class="entry-meta">',
+                    f'        <span class="meta-item"><strong>Authors:</strong> {authors}</span>',
+                    f'        <span class="meta-item"><em>Published:</em> {published}</span>',
+                    '      </div>',
+                    '      <div class="entry-tags">',
+                    f'        <span class="tag tag-feed">{feed_name_entry}</span>',
+                    f'        {summary_tag}',
+                    '      </div>',
+                    '      <div class="entry-actions">',
+                    f'        <a class="action-link" href="{link}" target="_blank" rel="noopener noreferrer">Open article</a>',
+                    '      </div>',
+                    '    </div>',
+                    '    <div class="entry-content">',
+                ]
+
+                for segment in body_segments:
+                    lines = [line for line in segment.strip().splitlines() if line.strip()]
+                    for line in lines:
+                        entry_sections.append(f'      {line}')
+
+                entry_sections.extend([
+                    '    </div>',
+                    '  </div>',
+                    '</div>'
+                ])
+
+                html_parts.append('\n'.join(entry_sections))
         
         # Add JavaScript for dropdown functionality
         js_script = '''
@@ -480,25 +556,26 @@ function toggleAbstract(id) {
     
     def _create_new_html_file(self, output_path: str, title_text: str, subtitle_text: str = None) -> None:
         """Create a new HTML file using the template."""
-        template_path = Path(self.template_path)
-        if not template_path.exists():
-            template_path = self._ensure_template_available(template_path.name)
-
-        class PercentTemplate(Template):
-            delimiter = '%'
+        template_path = self._ensure_template_available(Path(self.template_path))
 
         with open(template_path, 'r', encoding='utf-8') as tmpl:
-            template = PercentTemplate(tmpl.read())
+            template = tmpl.read()
 
-        title = title_text or "Filtered Articles"
-        current_date = datetime.date.today()
-        rendered = template.substitute(title=html.escape(title), date=current_date, content="")
+        title = html.escape(title_text or "Filtered Articles")
+        current_date = html.escape(str(datetime.date.today()))
+
+        rendered = (
+            template
+            .replace("%{title}", title)
+            .replace("%{date}", current_date)
+            .replace("%{content}", "")
+        )
 
         if subtitle_text:
-            sub = f"\n<h2>{html.escape(subtitle_text)}</h2>\n"
-            end_h1 = rendered.find('</h1>')
-            if end_h1 != -1:
-                rendered = rendered[: end_h1 + 5] + sub + rendered[end_h1 + 5 :]
+            sub = f"\n<p class=\"site-subtitle\">{html.escape(subtitle_text)}</p>\n"
+            end_header = rendered.find('</header>')
+            if end_header != -1:
+                rendered = rendered[: end_header] + sub + rendered[end_header:]
 
         output_path_obj = Path(output_path)
         if output_path_obj.parent:
@@ -550,16 +627,52 @@ function toggleAbstract(id) {
         with open(target_path, 'w', encoding='utf-8') as f:
             f.write(basic_template)
 
-    def _ensure_template_available(self, template_name: str) -> Path:
-        """Ensure a template is present in the runtime data directory."""
-        data_template = resolve_data_path('templates', template_name)
-        if data_template.exists():
-            return data_template
+    def _ensure_template_available(self, template_path: Path) -> Path:
+        """
+        Ensure a template is present in the runtime data directory.
 
-        system_template = get_system_path('templates', template_name)
+        If a system template exists and the runtime copy differs, overwrite it unless the
+        runtime template carries the custom-template marker comment. This keeps user
+        customisations stable while still propagating updated built-in templates.
+        """
+        if template_path.is_absolute():
+            if template_path.exists():
+                return template_path
+            # For non-existent absolute paths, fall back to basic template in data dir.
+            return self._ensure_template_available(Path(template_path.name))
+
+        data_template = resolve_data_path('templates', *template_path.parts)
+        system_template = get_system_path('templates', *template_path.parts)
+
         if system_template.exists():
             data_template.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(system_template, data_template)
+
+            runtime_has_marker = False
+            if data_template.exists():
+                try:
+                    runtime_contents = data_template.read_text(encoding='utf-8')
+                    runtime_has_marker = CUSTOM_TEMPLATE_MARKER in runtime_contents
+                except (OSError, UnicodeDecodeError):
+                    runtime_has_marker = False
+
+            if runtime_has_marker:
+                logger.debug("Skipping template refresh for %s (custom marker present)", data_template)
+                return data_template
+
+            needs_copy = True
+            if data_template.exists():
+                try:
+                    needs_copy = data_template.read_bytes() != system_template.read_bytes()
+                except OSError:
+                    needs_copy = True
+
+            if needs_copy:
+                shutil.copyfile(system_template, data_template)
+                logger.info("Refreshed HTML template %s from system copy", data_template.name)
+
+            return data_template
+
+        if data_template.exists():
             return data_template
 
         self._create_basic_template(data_template)
@@ -569,18 +682,9 @@ function toggleAbstract(id) {
         """Locate a template by checking runtime, system, and fallback locations."""
         candidate = Path(template_path)
 
-        if candidate.is_absolute() and candidate.exists():
-            return str(candidate)
-
-        data_candidate = resolve_data_path('templates', *candidate.parts)
-        if data_candidate.exists():
-            return str(data_candidate)
-
-        system_candidate = get_system_path('templates', *candidate.parts)
-        if system_candidate.exists():
-            data_candidate.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(system_candidate, data_candidate)
-            return str(data_candidate)
+        resolved = self._ensure_template_available(candidate)
+        if resolved.exists():
+            return str(resolved)
 
         if candidate.exists():
             return str(candidate)
