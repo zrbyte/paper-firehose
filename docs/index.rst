@@ -11,4 +11,5 @@ module-level API reference.
    :caption: Contents
 
    usage
+   github_actions_setup
    api

@@ -14,13 +14,13 @@ Documentation: [zrbyte.github.io/paper-firehose](https://zrbyte.github.io/paper-
 - After install, run `paper-firehose --help` for available command line options.
 - In Jupyter or a Python file: `import paper_firehose as pf`
 
-Configuration is done using only YAML text files. On first run the default YAML configs are copied into your runtime data directory (defaults to `~/.paper_firehose`, override with `PAPER_FIREHOSE_DATA_DIR`) from `src/paper_firehose/system/config`. Edit those files to customize feeds and topics.
+Configuration is done using only YAML text files. On first run the default YAML configs are copied into your runtime data directory (defaults to `~/.paper_firehose`, override with `PAPER_FIREHOSE_DATA_DIR`) from `src/paper_firehose/system/config`. Edit those files to customize feeds and topics. To reuse the GitHub Actions config locally, run `python scripts/bootstrap_config.py` – it copies `github_actions_config/` into your data directory so you work with the same files as the scheduled GitHub Actions workflow.
 
 Set up an OpenAI API key environment variable for summarization to work.
 
 ### Automated run using GitHub Actions
 - Fork the repo.
-- Edit the YAML config files in `<repo root>/github_actions_config` to set up your own topics. Each topic YAML file creates an HTML file with the results when running the `html` command.
+- Copy `github_actions_config/topics/topic-template.yaml` to create topic files, or tweak the existing ones. See `github_actions_config/README.md` for a guided walkthrough.
 - Edit the `pages.yml` file in the `schedule.cron` part to set when the automated job runs.
 - Set up GitHub Secrets under Secrets and Variables / Actions. You don't need this step if you're only running the `filter` and `rank` commands. If you want the summarization and email alert functionality, you will need:
   - `OPENAI_API_KEY`. This is optional if you want to run the paper-qa full text summarization.
