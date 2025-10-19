@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>%{title}</title>
 <script type="text/javascript">
   MathJax = {
@@ -16,12 +17,30 @@
   src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
 </script>
 <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
     .entry { margin-bottom: 20px; }
-    h2 { color: #2E8B57; }
-    h3 { color: #4682B4; }
+    h1 { font-size: 2.05rem; }
+    h2 { color: #2E8B57; font-size: 1.6rem; }
+    h3 { color: #4682B4; font-size: 1.25rem; }
     hr { border: 0; border-top: 1px solid #ccc; }
     .no-entries { font-style: italic; color: #555; }
+    @media (min-width: 1200px) {
+      body { font-size: 0.9rem; }
+      h1 { font-size: 1.9rem; }
+      h2 { font-size: 1.45rem; }
+      h3 { font-size: 1.18rem; }
+    }
+    @media (max-width: 640px) {
+      body { font-size: 0.85rem; margin: 16px; }
+      h1 { font-size: 2.0rem; }
+      h2 { font-size: 1.5rem; }
+      h3 { font-size: 1.2rem; }
+    }
 </style>
 </head>
 <body>

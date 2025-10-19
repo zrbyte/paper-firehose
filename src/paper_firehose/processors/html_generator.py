@@ -164,6 +164,9 @@ class HTMLGenerator:
                     '      <div class="summary-section ranked-summary">',
                     f'        <p>{body_text}</p>',
                     '      </div>',
+                    '      <div class="entry-actions entry-actions--mobile">',
+                    f'        <a class="action-link" href="{link}" target="_blank" rel="noopener noreferrer">Open article</a>',
+                    '      </div>',
                     '    </div>',
                     '  </div>',
                     '</div>'
@@ -320,6 +323,12 @@ class HTMLGenerator:
                     lines = [line for line in segment.strip().splitlines() if line.strip()]
                     for line in lines:
                         entry_sections.append(f'      {line}')
+
+                entry_sections.extend([
+                    '      <div class="entry-actions entry-actions--mobile">',
+                    f'        <a class="action-link" href="{link}" target="_blank" rel="noopener noreferrer">Open article</a>',
+                    '      </div>',
+                ])
 
                 entry_sections.extend([
                     '    </div>',
