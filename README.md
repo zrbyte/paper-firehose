@@ -169,7 +169,7 @@ Key config fields
 
 Environment variables
 - `PAPER_FIREHOSE_DATA_DIR` select/override the runtime data location
-- `OPENAI_API_KEY` (or `config.llm.api_key_env`) for `summarize`
+- `OPENAI_API_KEY` (or `config.llm.api_key_env`) for `pqa_summary`
 - `MAILTO` used for polite arXiv/Crossref User‑Agent when not specified on CLI
 
 ## Data & Outputs
