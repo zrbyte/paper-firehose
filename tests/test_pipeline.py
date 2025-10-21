@@ -1,8 +1,8 @@
-import os
 import sqlite3
 from pathlib import Path
 import textwrap
 import sys
+import json
 
 import pytest
 
@@ -13,8 +13,10 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from paper_firehose.commands import abstracts as abstracts_cmd
 from paper_firehose.commands import filter as filter_cmd
 from paper_firehose.commands import generate_html as html_cmd
+from paper_firehose.commands import pqa_summary as pqa_cmd
 from paper_firehose.commands import rank as rank_cmd
 import paper_firehose.core.config as core_config
 
@@ -63,6 +65,13 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
         priority_journals: []
         defaults:
           time_window_days: 365
+          abstracts:
+            mailto: "testing@example.com"
+        paperqa:
+          download_rank_threshold: 0.0
+          rps: 1.0
+          prompt: |
+            Summarize papers about {{ranking_query}} as concise JSON.
         """
     ).strip() + "\n"
 
@@ -78,6 +87,9 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
         ranking:
           query: "graphene materials"
           model: "dummy-model"
+        abstract_fetch:
+          enabled: true
+          rank_threshold: 0.0
         output:
           filename: "test_topic_filtered.html"
           filename_ranked: "test_topic_ranked.html"
@@ -99,6 +111,55 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
     monkeypatch.setattr(rank_cmd, "_ensure_local_model", lambda spec: spec)
     monkeypatch.setattr(rank_cmd, "STRanker", DummyRanker)
 
+    def fake_fill_arxiv_summaries(db_manager, topics=None):
+        conn = sqlite3.connect(db_manager.db_paths["current"])
+        conn.execute("UPDATE entries SET abstract = 'Filled abstract'")
+        conn.commit()
+        conn.close()
+        return 1
+
+    def fake_crossref_pass(
+        db_manager,
+        topic_name,
+        threshold,
+        *,
+        mailto,
+        session,
+        min_interval,
+        max_per_topic,
+        max_retries=3,
+    ):
+        return 0
+
+    def fake_fallback_pass(
+        db_manager,
+        topic_name,
+        threshold,
+        *,
+        mailto,
+        session,
+        min_interval,
+        max_per_topic,
+    ):
+        return 0
+
+    monkeypatch.setattr(abstracts_cmd, "_fill_arxiv_summaries", fake_fill_arxiv_summaries)
+    monkeypatch.setattr(abstracts_cmd, "_crossref_pass", fake_crossref_pass)
+    monkeypatch.setattr(abstracts_cmd, "_fallback_pass", fake_fallback_pass)
+
+    def fake_download_pdf(pdf_url, dest_path, *, mailto, session=None, max_retries=3):
+        Path(dest_path).write_bytes(b"0" * 12000)
+        return True
+
+    def fake_call_paperqa_on_pdf(pdf_path, *, question):
+        return json.dumps({"summary": "Graphene summary for experts", "methods": "Graphene methods"})
+
+    monkeypatch.setattr(pqa_cmd, "_download_pdf", fake_download_pdf)
+    monkeypatch.setattr(pqa_cmd, "_query_arxiv_api_for_pdf", lambda arxiv_id, *, mailto, session=None: f"https://arxiv.org/pdf/{arxiv_id}.pdf")
+    monkeypatch.setattr(pqa_cmd, "_call_paperqa_on_pdf", fake_call_paperqa_on_pdf)
+    monkeypatch.setattr(pqa_cmd, "_resolve_arxiv_id", lambda entry: "2501.12345v1")
+    monkeypatch.setattr(pqa_cmd.time, "sleep", lambda *_args, **_kwargs: None)
+
     config_path_str = str(config_path)
 
     # Purge recent entries to start with a clean slate
@@ -117,6 +178,22 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
 
     # Rank the filtered entries using the deterministic ranker
     rank_cmd.run(config_path_str)
+
+    # Populate abstracts using the patched helpers
+    abstracts_cmd.run(config_path_str)
+
+    with sqlite3.connect(db_path) as conn:
+        abstracts = conn.execute("SELECT abstract FROM entries WHERE abstract IS NOT NULL").fetchall()
+    assert abstracts and abstracts[0][0] == "Filled abstract"
+
+    # Generate paper-qa summaries with deterministic stubs
+    pqa_cmd.run(config_path_str, limit=1)
+
+    with sqlite3.connect(db_path) as conn:
+        summary_rows = conn.execute("SELECT paper_qa_summary FROM entries WHERE paper_qa_summary IS NOT NULL").fetchall()
+    assert summary_rows
+    summary_payload = json.loads(summary_rows[0][0])
+    assert summary_payload["summary"] == "Graphene summary for experts"
 
     # Generate all HTML outputs from the populated database
     html_cmd.run(config_path_str)
@@ -142,7 +219,7 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
 
     # Summary page should still list the entry and note the fallback text
     assert "Graphene breakthroughs in materials science" in summary_html
-    assert "No abstract available." in summary_html
+    assert "Graphene summary for experts" in summary_html
 
     # Ensure the environment override directed outputs into the temporary directory
     assert filtered_path.is_file() and str(filtered_path).startswith(str(data_dir))

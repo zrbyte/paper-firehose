@@ -142,7 +142,12 @@ def _extract_arxiv_id_from_doi(doi: str | None) -> Optional[str]:
     try:
         doi_l = doi.lower().strip()
         if doi_l.startswith("10.48550/arxiv."):
-            return doi.split(".", 1)[1].replace("arXiv.", "") if "." in doi else doi.split("/", 1)[1].replace("arxiv.", "")
+            match = re.search(r"arxiv\.(.+)$", doi, flags=re.IGNORECASE)
+            if match:
+                return match.group(1)
+            parts = doi.split("/", 1)
+            if len(parts) > 1:
+                return parts[1]
     except Exception:
         return None
     return None

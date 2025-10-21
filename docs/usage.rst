@@ -8,7 +8,7 @@ Install via pip:
 
 .. code-block:: bash
 
-   pip install paper_firehose
+   pip install paper-firehose
 
 Runtime Data Directory
 ----------------------
