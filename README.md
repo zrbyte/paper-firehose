@@ -9,7 +9,7 @@ Documentation: [zrbyte.github.io/paper-firehose](https://zrbyte.github.io/paper-
 ## How to use:
 
 ### Install locally
-- `pip install paper_firehose`
+- `pip install paper-firehose`
 - CLI entrypoint: `paper-firehose`
 - After install, run `paper-firehose --help` for available command line options.
 - In Jupyter or a Python file: `import paper_firehose as pf`
@@ -22,10 +22,10 @@ Set up an OpenAI API key environment variable for summarization to work.
 - Fork the repo.
 - Copy `github_actions_config/topics/topic-template.yaml` to create topic files, or tweak the existing ones. See `github_actions_config/README.md` for a guided walkthrough.
 - Edit the `pages.yml` file in the `schedule.cron` part to set when the automated job runs.
-- Set up GitHub Secrets under Secrets and Variables / Actions. You don't need this step if you're only running the `filter` and `rank` commands. If you want the summarization and email alert functionality, you will need:
-  - `OPENAI_API_KEY`. This is optional if you want to run the paper-qa full text summarization.
-  - `MAILING_LISTS_YAML`. This contains the emails and other config that the email alert functionality needs. Just copy the contents of your `mailing_lists.yaml` file. This is a secret so you don't expose user info to the outside world in the repo.
-  - `SMTP_PASSWORD`. The password for your email server.
+- Set up GitHub Secrets under Secrets and Variables / Actions. You don't need this step if you're only running the `filter` and `rank` commands. If you want the summarization to work setup an `OPENAI_API_KEY` environment variable. For email alert functionality, you will need `MAILING_LISTS_YAML` and `SMTP_PASSWORD` env variables.
+  - `OPENAI_API_KEY`. This is optional if you want to run the paper-qa full text summarization. Set up as a GitHub actions environment secret.
+  - `MAILING_LISTS_YAML`. This contains the emails and other config that the email alert functionality needs. Just copy the contents of your `mailing_lists.yaml` file. This is a GitHub actions secret so you don't expose user info to the outside world in the repo.
+  - `SMTP_PASSWORD`. The password for your email server. Set up as a GitHub actions secret.
 
 The `html` command in GitHub Actions (see `pages.yml`), generates HTML files (name of which is set in the YAML config) with your results. The GitHub Actions runner then pushes these generated HTML files to `https://<your GH username>.github.io/paper-firehose/<your results>.html`, where they can be accessed on the open web.
 
@@ -41,16 +41,20 @@ paper-firehose status
 paper-firehose filter
 paper-firehose rank
 paper-firehose abstracts --mailto you@example.com --rps 1.0
-paper-firehose pqa_summary    # optional (needs OpenAI key)
+paper-firehose pqa_summary    # optional (needs OpenAI key, thus you have to bear the API costs)
 paper-firehose html           # write HTML from DB
 ```
 You can specify to run a specific topic, with the `--topic YOUR_TOPIC` option.
 
-3) Optional: full‑text summaries via [paper‑qa](https://futurehouse.gitbook.io/futurehouse-cookbook/paperqa) and email digest
+3) Optional: full‑text summaries via [paper‑qa](https://futurehouse.gitbook.io/futurehouse-cookbook/paperqa)
 ```
 # Download arXiv PDFs for high‑ranked entries and summarize with paper‑qa
-paper-firehose pqa_summary --topic perovskites --rps 0.33 --limit 20 --summarize
+paper-firehose pqa_summary
+```
+Costs are dependent on which model you use, but generally are less than 0.1 USD per run for one topic.
 
+4) Email newsletter
+```
 # Send a ranked email digest (SMTP config required)
 paper-firehose email
 ```
@@ -77,6 +81,7 @@ Commands
 
 - `summarize [--topic TOPIC] [--rps FLOAT]`
   - LLM summaries of abstracts for top‑ranked entries using `config.llm` and per‑topic `llm_summary` settings.
+  - Not very useful, will removed it in the near future with a major version update. Paper-qa fulltext summaries are much more valuable.
   - Requires an OpenAI API key.
 
 - `html [--topic TOPIC]`
@@ -181,7 +186,6 @@ Email
 - Requires `email.smtp` config: `host`, `port`, `username`, and either `password` or `password_file`. Uses SSL.
 
 ## Future dev
-- Improve the history browser HTML interface.
 - Run ranking on the historic database, with a unique query. To search for specific papers.
 - The abstract summarizer doesn't make much sense at this point, might remove it in the future.
 
