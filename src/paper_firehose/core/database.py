@@ -166,7 +166,7 @@ class DatabaseManager:
         required_columns = {
             'entry_id', 'feed_name', 'topics', 'title', 'link', 'summary',
             'authors', 'abstract', 'doi', 'published_date', 'matched_date', 'raw_data',
-            'llm_summary', 'paper_qa_summary'
+            'llm_summary', 'paper_qa_summary', 'rank_score'
         }
 
         # If table exists, try lightweight migrations for new columns; otherwise recreate
@@ -182,6 +182,12 @@ class DatabaseManager:
                 try:
                     cursor.execute("ALTER TABLE matched_entries ADD COLUMN paper_qa_summary TEXT")
                     columns.add('paper_qa_summary')
+                except Exception:
+                    pass
+            if 'rank_score' not in columns:
+                try:
+                    cursor.execute("ALTER TABLE matched_entries ADD COLUMN rank_score REAL")
+                    columns.add('rank_score')
                 except Exception:
                     pass
 
@@ -204,7 +210,8 @@ class DatabaseManager:
                     matched_date TEXT DEFAULT (datetime('now')),
                     raw_data TEXT,
                     llm_summary TEXT,
-                    paper_qa_summary TEXT
+                    paper_qa_summary TEXT,
+                    rank_score REAL
                 )
             ''')
         
@@ -392,12 +399,18 @@ class DatabaseManager:
             raw_data = json.dumps(entry, default=str)
             published_date = self._format_published_date(entry)
             doi = self._extract_doi(entry)
+            rank_value = entry.get('rank_score')
+            if rank_value is not None:
+                try:
+                    rank_value = float(rank_value)
+                except (TypeError, ValueError):
+                    rank_value = None
             
             cursor.execute('''
                 INSERT INTO matched_entries 
                 (entry_id, feed_name, topics, title, link, summary, authors, abstract, doi,
-                 published_date, matched_date, raw_data)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+                 published_date, matched_date, raw_data, rank_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)
             ''', (
                 entry_id, feed_name, topic,
                 entry.get('title', ''),
@@ -407,7 +420,8 @@ class DatabaseManager:
                 None,  # abstract to be populated later (Crossref)
                 doi,
                 published_date,
-                raw_data
+                raw_data,
+                rank_value
             ))
             
             logger.debug(f"Added new entry {entry_id[:8]}... to history database with topic: {topic}")
@@ -504,9 +518,37 @@ class DatabaseManager:
             cursor.execute(
                 "UPDATE entries SET rank_score = ?, rank_reasoning = ? WHERE id = ? AND topic = ?",
                 (score, reasoning, entry_id, topic),
-            )
+        )
         conn.commit()
         conn.close()
+
+    def update_history_rank(self, entry_id: str, score: float | None) -> None:
+        """Update the historical rank_score, keeping the highest score seen."""
+        conn = sqlite3.connect(self.db_paths['history'])
+        cursor = conn.cursor()
+        try:
+            if score is None:
+                cursor.execute(
+                    "UPDATE matched_entries SET rank_score = NULL WHERE entry_id = ?",
+                    (entry_id,),
+                )
+            else:
+                score_val = float(score)
+                cursor.execute(
+                    """
+                    UPDATE matched_entries
+                    SET rank_score = CASE
+                        WHEN rank_score IS NULL OR rank_score < ?
+                        THEN ?
+                        ELSE rank_score
+                    END
+                    WHERE entry_id = ?
+                    """,
+                    (score_val, score_val, entry_id),
+                )
+        finally:
+            conn.commit()
+            conn.close()
     
     def purge_old_entries(self, days: int):
         """Remove entries from the most recent N days (including today) based on publication date (YYYY-MM-DD)."""

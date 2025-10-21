@@ -322,6 +322,15 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
             s = max(0.0, min(1.0, s))
             try:
                 db.update_entry_rank(eid, tname, s)
+                try:
+                    db.update_history_rank(eid, s)
+                except Exception as history_err:
+                    logger.debug(
+                        "Topic '%s': failed to persist rank_score to history for %s: %s",
+                        tname,
+                        eid[:8],
+                        history_err,
+                    )
                 updated += 1
             except Exception as e:
                 logger.error("Failed to update rank for %s/%s: %s", eid[:8], tname, e)
