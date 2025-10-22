@@ -41,10 +41,10 @@ def test_ranker_scores_entries_with_fastembed(monkeypatch):
 
     monkeypatch.setattr(st_ranker, "_load_text_embedding", fake_loader)
 
-    ranker = st_ranker.STRanker(model_name="all-MiniLM-L6-v2")
+    ranker = st_ranker.STRanker(model_name="BAAI/bge-base-en-v1.5")
     assert ranker.available()
     assert ranker.backend == "fastembed"
-    assert called["name"] == "BAAI/bge-small-en-v1.5"
+    assert called["name"] == "BAAI/bge-base-en-v1.5"
 
     entries = [("1", "topic", "doc one"), ("2", "topic", "doc two")]
 
@@ -60,7 +60,7 @@ def test_ranker_handles_loader_failure(monkeypatch):
 
     monkeypatch.setattr(st_ranker, "_load_text_embedding", boom)
 
-    ranker = st_ranker.STRanker(model_name="BAAI/bge-small-en-v1.5")
+    ranker = st_ranker.STRanker(model_name="BAAI/bge-base-en-v1.5")
     assert not ranker.available()
     assert ranker.backend is None
     assert ranker.score_entries("alpha", [("1", "topic", "text")]) == []

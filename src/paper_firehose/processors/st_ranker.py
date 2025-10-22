@@ -25,15 +25,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-_MODEL_ALIASES = {
-    # Historical defaults from the SentenceTransformers era.  Keeping them in
-    # place means topic configs can continue to reference the old names without
-    # noticing the backend swap.  Each entry maps a legacy identifier to the
-    # FastEmbed model we now ship with, while ``STRanker`` still records the
-    # original request for logging.
-    "all-MiniLM-L6-v2": "BAAI/bge-small-en-v1.5",
-    "sentence-transformers/all-MiniLM-L6-v2": "BAAI/bge-small-en-v1.5",
-}
+_MODEL_ALIASES: dict[str, str] = {}
 
 
 def _load_text_embedding(model_name: str):
@@ -44,13 +36,12 @@ def _load_text_embedding(model_name: str):
 
 
 class STRanker:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+    def __init__(self, model_name: str = "BAAI/bge-base-en-v1.5") -> None:
         """Lazy-load a FastEmbed text embedding model, logging a warning on failure."""
 
         # ``model_name`` reflects whatever the caller configured in their topic
-        # YAML.  We translate it through ``_MODEL_ALIASES`` so legacy configs keep
-        # functioning even though the backend swapped out from
-        # ``SentenceTransformer`` to FastEmbed.
+        # YAML.  We translate it through ``_MODEL_ALIASES`` so future remappings
+        # can be handled centrally; currently this is an identity mapping.
         resolved_name = _MODEL_ALIASES.get(model_name, model_name)
         # ``model_name`` captures the config value verbatim; ``_resolved_name``
         # is the concrete FastEmbed identifier we will attempt to load.  Keeping

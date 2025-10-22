@@ -10,6 +10,8 @@ Initial minimal version:
 Notes:
 - If FastEmbed is unavailable or model download fails, the command logs a warning
   and skips scoring without raising.
+- Similarity scores can be calibrated per FastEmbed model via
+  ``ranking.score_calibration`` if you need to mimic legacy distributions.
 """
 
 from __future__ import annotations
@@ -29,20 +31,20 @@ from ..processors.st_ranker import STRanker
 
 logger = logging.getLogger(__name__)
 
+# Default similarity calibrations per FastEmbed model. Empty by default; topics
+# can request local adjustments via ``ranking.score_calibration`` if needed.
+_MODEL_CALIBRATIONS: Dict[str, Dict[str, float]] = {}
+
 
 def _ensure_local_model(model_spec: str) -> str:
     """Return a model identifier compatible with FastEmbed.
 
-    The command retains legacy defaults by mapping former
-    Sentence-Transformers aliases onto FastEmbed model names. For any
-    unrecognised spec, the value is returned unchanged and delegated to
-    :class:`~paper_firehose.processors.st_ranker.STRanker`.
+    Model identifiers are now expected to reference FastEmbed models directly.
+    The helper is retained for future compatibility; at present it simply
+    returns the provided value.
     """
 
-    alias_map = {
-        "all-MiniLM-L6-v2": "BAAI/bge-small-en-v1.5",
-        "sentence-transformers/all-MiniLM-L6-v2": "BAAI/bge-small-en-v1.5",
-    }
+    alias_map: Dict[str, str] = {}
 
     return alias_map.get(model_spec, model_spec)
 
@@ -150,7 +152,7 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
 
         ranking_cfg = (tcfg.get("ranking") or {}) if isinstance(tcfg, dict) else {}
         query = ranking_cfg.get("query") or ""
-        model_spec = ranking_cfg.get("model") or "all-MiniLM-L6-v2"
+        model_spec = ranking_cfg.get("model") or "BAAI/bge-base-en-v1.5"
         # Resolve legacy aliases to concrete FastEmbed model identifiers.  The
         # ``STRanker`` module keeps the same mapping table so both layers agree
         # on which backend gets loaded.  Doing the resolution in the command as
@@ -201,13 +203,24 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         batch = [(e["id"], e["topic"], _build_entry_text(e)) for e in entries]
         scores = ranker.score_entries(query, batch)
 
+        # Optional per-topic calibration is still supported via ranking.score_calibration.
+        calibration_cfg = ranking_cfg.get("score_calibration")
+        if calibration_cfg:
+            shift = float(calibration_cfg.get("shift", 0.0))
+            scale = float(calibration_cfg.get("scale", 1.0))
+            if shift != 0.0 or scale != 1.0:
+                adjusted_scores = []
+                for eid, tname, score in scores:
+                    s = (float(score) + shift) * scale
+                    adjusted_scores.append((eid, tname, s))
+                scores = adjusted_scores
+
         # Apply simple downweight for entries containing any negative term in title or summary
         # ------------------------------------------------------------------------------------
-        # The FastEmbed switch kept the score scaling identical to the previous
-        # Sentence-Transformers backend, which means the existing penalty slider
-        # still behaves as "subtract a fixed amount from the cosine score".  We
-        # call this out explicitly so future maintainers know this post-processing
-        # happens *after* embedding similarity, not inside the model itself.
+        # Calibrated similarities keep the legacy behaviour where the penalty slider
+        # subtracts a fixed amount from the post-embedding cosine score. This
+        # adjustment happens after we compute similarities so its impact stays easy
+        # to reason about.
         if negative_terms:
             neg_set = {t.lower() for t in negative_terms}
             # Build quick lookup from (id, topic) -> entry for text access
