@@ -8,7 +8,8 @@ Initial minimal version:
 - Writes scores to `rank_score` (no status change)
 
 Notes:
-- If FastEmbed is unavailable or model download fails, the command logs and skips scoring
+- If FastEmbed is unavailable or model download fails, the command falls back to
+  ``sentence_transformers`` when available; otherwise it logs and skips scoring
   without raising.
 """
 
@@ -156,10 +157,10 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         # on which backend gets loaded.  Doing the resolution in the command as
         # well lets us log the translation for observability when operators
         # review run output.
-        model_name = _ensure_local_model(model_spec)
-        if model_name != model_spec:
+        resolved_model = _ensure_local_model(model_spec)
+        if resolved_model != model_spec:
             logger.info(
-                "Topic '%s': resolved model '%s' to '%s'", topic_name, model_spec, model_name
+                "Topic '%s': resolved model '%s' to '%s'", topic_name, model_spec, resolved_model
             )
         negative_terms = [
             t.strip() for t in (ranking_cfg.get("negative_queries") or []) if isinstance(t, str) and t.strip()
@@ -192,7 +193,7 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
             continue
 
         # Prepare ranker
-        ranker = STRanker(model_name=model_name)
+        ranker = STRanker(model_name=model_spec)
         if not ranker.available():
             logger.warning("Ranker unavailable for topic '%s'; skipping.", topic_name)
             continue

@@ -43,6 +43,7 @@ def test_ranker_scores_entries_with_fastembed(monkeypatch):
 
     ranker = st_ranker.STRanker(model_name="all-MiniLM-L6-v2")
     assert ranker.available()
+    assert ranker.backend == "fastembed"
     assert called["name"] == "BAAI/bge-small-en-v1.5"
 
     entries = [("1", "topic", "doc one"), ("2", "topic", "doc two")]
@@ -58,7 +59,39 @@ def test_ranker_handles_loader_failure(monkeypatch):
         raise RuntimeError("no backend")
 
     monkeypatch.setattr(st_ranker, "_load_text_embedding", boom)
+    def fallback_boom(_name):
+        raise RuntimeError("no fallback")
+
+    monkeypatch.setattr(st_ranker, "_load_sentence_transformer", fallback_boom)
 
     ranker = st_ranker.STRanker(model_name="BAAI/bge-small-en-v1.5")
     assert not ranker.available()
     assert ranker.score_entries("alpha", [("1", "topic", "text")]) == []
+
+
+def test_ranker_falls_back_to_sentence_transformers(monkeypatch):
+    mapping = {
+        "alpha": [1.0, 0.0],
+        "doc one": [0.8, 0.2],
+        "doc two": [0.1, 0.9],
+    }
+
+    def boom(_model_name):
+        raise RuntimeError("fastembed missing")
+
+    def fake_sentence_loader(model_name):
+        assert model_name == "all-MiniLM-L6-v2"
+        return DummyEmbedder(mapping)
+
+    monkeypatch.setattr(st_ranker, "_load_text_embedding", boom)
+    monkeypatch.setattr(st_ranker, "_load_sentence_transformer", fake_sentence_loader)
+
+    ranker = st_ranker.STRanker(model_name="all-MiniLM-L6-v2")
+    assert ranker.available()
+    assert ranker.backend == "sentence-transformers"
+
+    entries = [("1", "topic", "doc one"), ("2", "topic", "doc two")]
+    results = ranker.score_entries("alpha", entries)
+    assert [r[0] for r in results] == ["1", "2"]
+    assert pytest.approx(results[0][2], rel=1e-6) == 0.9701425
+    assert pytest.approx(results[1][2], rel=1e-6) == 0.1104315

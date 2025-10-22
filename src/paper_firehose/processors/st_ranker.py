@@ -5,8 +5,9 @@ and entry texts, and returns scores suitable for writing into ``papers.db``
 (``rank_score``).
 
 This module is intentionally lean and resilient: if FastEmbed (or the
-underlying model download) is unavailable, it logs and returns an empty
-result so callers can decide how to proceed.
+underlying model download) is unavailable, it first attempts to fall back to a
+``sentence_transformers`` model.  If neither backend can be loaded we log and
+return an empty result so callers can decide how to proceed.
 
 The previous :mod:`sentence_transformers`-powered implementation carried a
 significant PyTorch dependency.  The new design keeps the same public API but
@@ -48,6 +49,41 @@ def _load_text_embedding(model_name: str):
     return TextEmbedding(model_name=model_name)
 
 
+class _SentenceTransformerAdapter:
+    """Thin wrapper that mimics the ``TextEmbedding`` interface."""
+
+    def __init__(self, model_name: str) -> None:
+        from sentence_transformers import SentenceTransformer  # type: ignore
+
+        self._model = SentenceTransformer(model_name)
+
+    def embed(self, documents, **_kwargs):
+        if isinstance(documents, str):
+            docs = [documents]
+        else:
+            docs = list(documents)
+        if not docs:
+            return []
+
+        vectors = self._model.encode(
+            docs,
+            convert_to_numpy=True,
+            normalize_embeddings=False,
+            show_progress_bar=False,
+        )
+        if isinstance(vectors, np.ndarray):
+            if vectors.ndim == 1:
+                return [np.asarray(vectors, dtype=np.float32)]
+            return [np.asarray(vec, dtype=np.float32) for vec in vectors]
+        return [np.asarray(vec, dtype=np.float32) for vec in vectors]
+
+
+def _load_sentence_transformer(model_name: str):
+    """Return a SentenceTransformer-backed adapter."""
+
+    return _SentenceTransformerAdapter(model_name)
+
+
 class STRanker:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
         """Lazy-load a FastEmbed text embedding model, logging a warning on failure."""
@@ -64,16 +100,30 @@ class STRanker:
         self.model_name = model_name
         self._resolved_name = resolved_name
         self._model: Optional[Any] = None
+        self.backend: Optional[str] = None
         try:
             # FastEmbed lazily downloads the model weights (if necessary) when the
             # object is instantiated.  We keep the construction inside a ``try`` so
             # environments without network access degrade gracefully instead of
             # crashing the command.
             self._model = _load_text_embedding(resolved_name)
+            self.backend = "fastembed"
         except Exception as e:  # pragma: no cover - optional dependency
             logger.warning(
-                "FastEmbed unavailable or model load failed (%s). Ranking will be skipped.", e
+                "FastEmbed unavailable or model load failed (%s). Attempting SentenceTransformer fallback.",
+                e,
             )
+            try:
+                self._model = _load_sentence_transformer(self.model_name)
+                self.backend = "sentence-transformers"
+                logger.info(
+                    "Using SentenceTransformer fallback for model '%s'", self.model_name
+                )
+            except Exception as fallback_err:  # pragma: no cover - optional dependency
+                logger.warning(
+                    "SentenceTransformer fallback unavailable (%s). Ranking will be skipped.",
+                    fallback_err,
+                )
 
     def available(self) -> bool:
         """Return True when the embedding model loaded successfully."""
