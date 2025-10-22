@@ -32,7 +32,10 @@ logger = logging.getLogger(__name__)
 _MODEL_ALIASES = {
     # Historical defaults from the SentenceTransformers era.  Keeping them in
     # place means topic configs (and tests) can continue to reference the old
-    # names without noticing the backend swap.
+    # names without noticing the backend swap.  Each entry maps a legacy
+    # Sentence-Transformers identifier to the FastEmbed model we now ship with.
+    # ``STRanker`` always stores the original request (``model_name``) so that
+    # logs reflect the user intent even when the resolved backend differs.
     "all-MiniLM-L6-v2": "BAAI/bge-small-en-v1.5",
     "sentence-transformers/all-MiniLM-L6-v2": "BAAI/bge-small-en-v1.5",
 }
@@ -54,6 +57,10 @@ class STRanker:
         # functioning even though the backend swapped out from
         # ``SentenceTransformer`` to FastEmbed.
         resolved_name = _MODEL_ALIASES.get(model_name, model_name)
+        # ``model_name`` captures the config value verbatim; ``_resolved_name``
+        # is the concrete FastEmbed identifier we will attempt to load.  Keeping
+        # both around helps debug user reports like "my alias stopped working"
+        # because we can emit both names in logs.
         self.model_name = model_name
         self._resolved_name = resolved_name
         self._model: Optional[Any] = None
@@ -105,6 +112,10 @@ class STRanker:
         topics: List[str] = []
         docs: List[str] = []
         for eid, topic, text in entries:
+            # ``entries`` can be any iterable (including generators), therefore
+            # we eagerly consume it into simple Python lists.  Downstream numpy
+            # operations expect random-access sequences, so materialising here
+            # keeps the rest of the code straightforward.
             ids.append(eid)
             topics.append(topic)
             # Be conservative: strip/normalize; title is usually enough
@@ -152,7 +163,11 @@ class STRanker:
         # ``n x d`` array where ``n`` equals the number of candidate entries.
         doc_array = np.vstack(doc_matrix)
         # ``@`` performs a dense matrix/vector multiply that yields cosine scores
-        # because of the prior normalisation.
+        # because of the prior normalisation.  This mirrors the behaviour of the
+        # old Sentence-Transformers implementation where ``cos_sim(query, docs)``
+        # accomplished the same thing via PyTorch.
         sims = doc_array @ q_vec
 
+        # Re-unify the metadata with the computed scores.  The lists are kept in
+        # lockstep so ``zip`` is safe and stable with respect to the input order.
         return list(zip(ids, topics, sims.tolist()))

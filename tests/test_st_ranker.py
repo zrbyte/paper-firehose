@@ -9,7 +9,10 @@ class DummyEmbedder:
 
     def __init__(self, mapping):
         # ``mapping`` gives deterministic vectors for each requested document,
-        # letting us assert on the cosine scores downstream.
+        # letting us assert on the cosine scores downstream.  The real
+        # FastEmbed object streams generators of numpy arrays; this fake mirrors
+        # that contract closely so the unit tests exercise the same control flow
+        # (including batching mechanics) as production code.
         self.mapping = mapping
         self.requests = []
 

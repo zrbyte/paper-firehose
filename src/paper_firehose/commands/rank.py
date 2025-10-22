@@ -151,7 +151,11 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         ranking_cfg = (tcfg.get("ranking") or {}) if isinstance(tcfg, dict) else {}
         query = ranking_cfg.get("query") or ""
         model_spec = ranking_cfg.get("model") or "all-MiniLM-L6-v2"
-        # Resolve legacy aliases to concrete FastEmbed model identifiers
+        # Resolve legacy aliases to concrete FastEmbed model identifiers.  The
+        # ``STRanker`` module keeps the same mapping table so both layers agree
+        # on which backend gets loaded.  Doing the resolution in the command as
+        # well lets us log the translation for observability when operators
+        # review run output.
         model_name = _ensure_local_model(model_spec)
         if model_name != model_spec:
             logger.info(
@@ -199,9 +203,11 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
 
         # Apply simple downweight for entries containing any negative term in title or summary
         # ------------------------------------------------------------------------------------
-        # This mirrors the historical behaviour: each matching entry loses a configurable
-        # amount of score, allowing topic curators to nudge down documents they prefer to
-        # avoid without completely removing them from consideration.
+        # The FastEmbed switch kept the score scaling identical to the previous
+        # Sentence-Transformers backend, which means the existing penalty slider
+        # still behaves as "subtract a fixed amount from the cosine score".  We
+        # call this out explicitly so future maintainers know this post-processing
+        # happens *after* embedding similarity, not inside the model itself.
         if negative_terms:
             neg_set = {t.lower() for t in negative_terms}
             # Build quick lookup from (id, topic) -> entry for text access
@@ -233,7 +239,10 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         # ------------------------
         # Preferred authors and priority journals apply additive boosts after the
         # cosine similarities are computed.  The boosts stay clamped to [0, 1] to
-        # avoid inflating values beyond the downstream UI expectations.
+        # avoid inflating values beyond the downstream UI expectations.  This
+        # ordering matches the historical pipeline: the semantic similarity comes
+        # from FastEmbed, while domain-specific nudges (author/journal boosts)
+        # happen deterministically in Python for transparency.
         updated = 0
         boosted_auth = 0
         boosted_jour = 0
