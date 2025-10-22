@@ -40,7 +40,8 @@ License-File: LICENSE
 Requires-Dist: feedparser
 Requires-Dist: PyYAML
 Requires-Dist: click
-Requires-Dist: sentence-transformers>=2.2.2
+Requires-Dist: fastembed>=0.7.0
+Requires-Dist: numpy>=1.24
 Requires-Dist: requests
 Requires-Dist: openai>=1.30.0
 Requires-Dist: paper-qa

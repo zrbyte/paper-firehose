@@ -1,13 +1,18 @@
-"""
-Sentence-Transformers based ranking processor.
+"""FastEmbed based ranking processor.
 
 Minimal implementation: computes cosine similarity between a topic query
-and entry texts, and returns scores suitable for writing into papers.db
-(`rank_score`).
+and entry texts, and returns scores suitable for writing into ``papers.db``
+(``rank_score``).
 
-This module is intentionally lean and resilient: if sentence-transformers
-is not available or the model cannot be loaded, it logs and returns an
-empty result so callers can decide how to proceed.
+This module is intentionally lean and resilient: if FastEmbed (or the
+underlying model download) is unavailable, it logs and returns an empty
+result so callers can decide how to proceed.
+
+The previous :mod:`sentence_transformers`-powered implementation carried a
+significant PyTorch dependency.  The new design keeps the same public API but
+leans on the much lighter ``fastembed`` runtime.  To make future refactors
+easier, the code includes generous inline comments that describe the control
+flow and the data transformations performed before we score entries.
 """
 
 from __future__ import annotations
@@ -17,30 +22,55 @@ import os as _os
 _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import logging
-from typing import Iterable, List, Tuple, Optional
+from typing import Iterable, List, Tuple, Optional, Any
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
+_MODEL_ALIASES = {
+    # Historical defaults from the SentenceTransformers era.  Keeping them in
+    # place means topic configs (and tests) can continue to reference the old
+    # names without noticing the backend swap.
+    "all-MiniLM-L6-v2": "BAAI/bge-small-en-v1.5",
+    "sentence-transformers/all-MiniLM-L6-v2": "BAAI/bge-small-en-v1.5",
+}
+
+
+def _load_text_embedding(model_name: str):
+    """Return a FastEmbed ``TextEmbedding`` instance for the given model."""
+    from fastembed import TextEmbedding  # type: ignore
+
+    return TextEmbedding(model_name=model_name)
+
+
 class STRanker:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
-        """Lazy-load a SentenceTransformer model, logging a warning on failure."""
+        """Lazy-load a FastEmbed text embedding model, logging a warning on failure."""
+
+        # ``model_name`` reflects whatever the caller configured in their topic
+        # YAML.  We translate it through ``_MODEL_ALIASES`` so legacy configs keep
+        # functioning even though the backend swapped out from
+        # ``SentenceTransformer`` to FastEmbed.
+        resolved_name = _MODEL_ALIASES.get(model_name, model_name)
         self.model_name = model_name
-        self._model = None
-        self._util = None
+        self._resolved_name = resolved_name
+        self._model: Optional[Any] = None
         try:
-            from sentence_transformers import SentenceTransformer, util  # type: ignore
-            self._model = SentenceTransformer(model_name)
-            self._util = util
+            # FastEmbed lazily downloads the model weights (if necessary) when the
+            # object is instantiated.  We keep the construction inside a ``try`` so
+            # environments without network access degrade gracefully instead of
+            # crashing the command.
+            self._model = _load_text_embedding(resolved_name)
         except Exception as e:  # pragma: no cover - optional dependency
             logger.warning(
-                "sentence-transformers unavailable or model load failed (%s). Ranking will be skipped.",
-                e,
+                "FastEmbed unavailable or model load failed (%s). Ranking will be skipped.", e
             )
 
     def available(self) -> bool:
         """Return True when the embedding model loaded successfully."""
-        return self._model is not None and self._util is not None
+        return self._model is not None
 
     def score_entries(
         self,
@@ -59,14 +89,18 @@ class STRanker:
         Returns:
             List of (entry_id, topic, score) tuples
         """
-        if not self.available():  # graceful no-op
+        if not self.available():  # graceful no-op when the backend could not load
             return []
 
         model = self._model
-        util = self._util
-        assert model is not None and util is not None
+        assert model is not None
 
         # Prepare batch
+        # -------------
+        # The ``rank`` command hands us an iterable of (entry_id, topic, text).
+        # We split those tuples into parallel arrays because FastEmbed's API
+        # accepts a simple sequence of strings.  Keeping the metadata alongside
+        # the text lets us reassemble the results when we emit scores.
         ids: List[str] = []
         topics: List[str] = []
         docs: List[str] = []
@@ -79,8 +113,46 @@ class STRanker:
         if not docs:
             return []
 
-        q_emb = model.encode([query.strip()], normalize_embeddings=True)
-        d_emb = model.encode(docs, normalize_embeddings=True)
-        sims = util.cos_sim(q_emb, d_emb).tolist()[0]
+        try:
+            # FastEmbed returns generators; ``list`` consumption keeps the logic
+            # close to the former ``SentenceTransformer.encode`` usage.  Each item
+            # is a dense embedding vector.
+            q_vecs = list(model.embed([query.strip()]))
+            d_vecs = list(model.embed(docs))
+        except Exception as e:  # pragma: no cover - backend failure
+            logger.warning("FastEmbed inference failed (%s). Ranking will be skipped.", e)
+            return []
 
-        return list(zip(ids, topics, sims))
+        if not q_vecs or not d_vecs:
+            return []
+
+        # Normalise vectors
+        # -----------------
+        # Cosine similarity is sensitive to vector magnitude.  The
+        # SentenceTransformers version handled this internally, so we replicate
+        # the behaviour by normalising each embedding to unit length before we
+        # project the query against the document matrix.
+        q_vec = np.asarray(q_vecs[0], dtype=np.float32)
+        q_norm = np.linalg.norm(q_vec)
+        if q_norm > 0:
+            q_vec = q_vec / q_norm
+
+        doc_matrix = []
+        for vec in d_vecs:
+            arr = np.asarray(vec, dtype=np.float32)
+            norm = np.linalg.norm(arr)
+            if norm > 0:
+                arr = arr / norm
+            doc_matrix.append(arr)
+
+        if not doc_matrix:
+            return []
+
+        # ``doc_matrix`` is now a list of unit vectors.  Stacking them provides an
+        # ``n x d`` array where ``n`` equals the number of candidate entries.
+        doc_array = np.vstack(doc_matrix)
+        # ``@`` performs a dense matrix/vector multiply that yields cosine scores
+        # because of the prior normalisation.
+        sims = doc_array @ q_vec
+
+        return list(zip(ids, topics, sims.tolist()))

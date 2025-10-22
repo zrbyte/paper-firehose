@@ -38,7 +38,7 @@ Examples:
    # Fetch feeds and filter by topic configuration
    paper-firehose filter --topic condensed_matter
 
-   # Rank filtered entries using sentence-transformers
+   # Rank filtered entries using FastEmbed
    paper-firehose rank --topic condensed_matter
 
    # Fetch abstracts for highly-ranked entries

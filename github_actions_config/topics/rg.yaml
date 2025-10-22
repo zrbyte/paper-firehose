@@ -50,7 +50,7 @@ filter:
   fields: ["title", "summary"]
 
 ranking:
-  query: >   # Natural-language ranking query used for sentence-transformers similarity
+  query: >   # Natural-language ranking query used for FastEmbed similarity
     Rhombohedral graphite, rhombohedral stacking, rhombohedral multilayer graphene,
     ABC-stacked graphene, ABC stacking, trilayer, tetralayer, pentalayer, hexalayer,
     heptalayer graphene, chiral graphene

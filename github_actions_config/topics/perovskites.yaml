@@ -56,7 +56,7 @@ filter:
 
 # Ranking configuration
 ranking: 
-  query: >   # Natural-language ranking query used for sentence-transformers similarity
+  query: >   # Natural-language ranking query used for FastEmbed similarity
     Perovskites, solar cells, photoelectrochemistry, solar water splitting, solar fuels
 
   # Optional additional negative phrases to downweight (list may be empty)

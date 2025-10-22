@@ -69,7 +69,7 @@ filter:
 
 # Ranking configuration
 ranking:
-  query: >   # Natural-language ranking query used for sentence-transformers similarity
+  query: >   # Natural-language ranking query used for FastEmbed similarity
     graphene
     rhombohedral graphite
     ABC stacking

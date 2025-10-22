@@ -11,18 +11,12 @@ if str(SRC_DIR) not in sys.path:
 
 from paper_firehose.commands import rank  # noqa: E402
 
-
-def test_has_model_files_detects_config(tmp_path):
-    model_dir = tmp_path / "model"
-    model_dir.mkdir()
-    (model_dir / "config.json").write_text("{}", encoding="utf-8")
-    assert rank._has_model_files(str(model_dir)) is True
+def test_ensure_local_model_maps_legacy_alias():
+    assert rank._ensure_local_model("all-MiniLM-L6-v2") == "BAAI/bge-small-en-v1.5"
 
 
-def test_has_model_files_returns_false_for_empty_dir(tmp_path):
-    empty_dir = tmp_path / "empty"
-    empty_dir.mkdir()
-    assert rank._has_model_files(str(empty_dir)) is False
+def test_ensure_local_model_passthrough_for_custom():
+    assert rank._ensure_local_model("custom/model") == "custom/model"
 
 
 def test_build_entry_text_strips_whitespace():

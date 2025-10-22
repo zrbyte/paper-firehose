@@ -1,7 +1,8 @@
 feedparser
 PyYAML
 click
-sentence-transformers>=2.2.2  # needed for `rank` command scoring
+fastembed>=0.7.0  # provides lightweight embeddings for ranking
+numpy>=1.24
 requests
 openai>=1.30.0
 paper-qa

@@ -59,7 +59,7 @@ filter:
 
 # Ranking configuration
 ranking:
-  query: >   # Natural-language ranking query used for sentence-transformers similarity
+  query: >   # Natural-language ranking query used for FastEmbed similarity
     transition metal dichalcogenides
     TMDC
     2D metal

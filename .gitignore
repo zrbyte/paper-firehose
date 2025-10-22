@@ -13,6 +13,8 @@ archive/
 *.db
 *.ipynb
 *.env
+!src/paper_firehose/system/config/secrets/email_password.env
+!src/paper_firehose/system/config/secrets/openaikulcs.env
 .DS_Store
 .cursor/*
 paper_firehose/system/models/*
