@@ -8,9 +8,8 @@ Initial minimal version:
 - Writes scores to `rank_score` (no status change)
 
 Notes:
-- If FastEmbed is unavailable or model download fails, the command falls back to
-  ``sentence_transformers`` when available; otherwise it logs and skips scoring
-  without raising.
+- If FastEmbed is unavailable or model download fails, the command logs a warning
+  and skips scoring without raising.
 """
 
 from __future__ import annotations

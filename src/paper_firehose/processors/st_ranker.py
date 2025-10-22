@@ -1,19 +1,14 @@
-"""FastEmbed based ranking processor.
+"""FastEmbed-based ranking processor.
 
 Minimal implementation: computes cosine similarity between a topic query
 and entry texts, and returns scores suitable for writing into ``papers.db``
 (``rank_score``).
 
-This module is intentionally lean and resilient: if FastEmbed (or the
-underlying model download) is unavailable, it first attempts to fall back to a
-``sentence_transformers`` model.  If neither backend can be loaded we log and
-return an empty result so callers can decide how to proceed.
-
 The previous :mod:`sentence_transformers`-powered implementation carried a
 significant PyTorch dependency.  The new design keeps the same public API but
-leans on the much lighter ``fastembed`` runtime.  To make future refactors
-easier, the code includes generous inline comments that describe the control
-flow and the data transformations performed before we score entries.
+leans entirely on the lighter ``fastembed`` runtime.  If the configured model
+cannot be loaded we log the failure and return an empty result so callers can
+decide how to proceed.
 """
 
 from __future__ import annotations
@@ -32,11 +27,10 @@ logger = logging.getLogger(__name__)
 
 _MODEL_ALIASES = {
     # Historical defaults from the SentenceTransformers era.  Keeping them in
-    # place means topic configs (and tests) can continue to reference the old
-    # names without noticing the backend swap.  Each entry maps a legacy
-    # Sentence-Transformers identifier to the FastEmbed model we now ship with.
-    # ``STRanker`` always stores the original request (``model_name``) so that
-    # logs reflect the user intent even when the resolved backend differs.
+    # place means topic configs can continue to reference the old names without
+    # noticing the backend swap.  Each entry maps a legacy identifier to the
+    # FastEmbed model we now ship with, while ``STRanker`` still records the
+    # original request for logging.
     "all-MiniLM-L6-v2": "BAAI/bge-small-en-v1.5",
     "sentence-transformers/all-MiniLM-L6-v2": "BAAI/bge-small-en-v1.5",
 }
@@ -47,41 +41,6 @@ def _load_text_embedding(model_name: str):
     from fastembed import TextEmbedding  # type: ignore
 
     return TextEmbedding(model_name=model_name)
-
-
-class _SentenceTransformerAdapter:
-    """Thin wrapper that mimics the ``TextEmbedding`` interface."""
-
-    def __init__(self, model_name: str) -> None:
-        from sentence_transformers import SentenceTransformer  # type: ignore
-
-        self._model = SentenceTransformer(model_name)
-
-    def embed(self, documents, **_kwargs):
-        if isinstance(documents, str):
-            docs = [documents]
-        else:
-            docs = list(documents)
-        if not docs:
-            return []
-
-        vectors = self._model.encode(
-            docs,
-            convert_to_numpy=True,
-            normalize_embeddings=False,
-            show_progress_bar=False,
-        )
-        if isinstance(vectors, np.ndarray):
-            if vectors.ndim == 1:
-                return [np.asarray(vectors, dtype=np.float32)]
-            return [np.asarray(vec, dtype=np.float32) for vec in vectors]
-        return [np.asarray(vec, dtype=np.float32) for vec in vectors]
-
-
-def _load_sentence_transformer(model_name: str):
-    """Return a SentenceTransformer-backed adapter."""
-
-    return _SentenceTransformerAdapter(model_name)
 
 
 class STRanker:
@@ -110,20 +69,10 @@ class STRanker:
             self.backend = "fastembed"
         except Exception as e:  # pragma: no cover - optional dependency
             logger.warning(
-                "FastEmbed unavailable or model load failed (%s). Attempting SentenceTransformer fallback.",
+                "FastEmbed model '%s' unavailable: %s. Ranking will be skipped.",
+                resolved_name,
                 e,
             )
-            try:
-                self._model = _load_sentence_transformer(self.model_name)
-                self.backend = "sentence-transformers"
-                logger.info(
-                    "Using SentenceTransformer fallback for model '%s'", self.model_name
-                )
-            except Exception as fallback_err:  # pragma: no cover - optional dependency
-                logger.warning(
-                    "SentenceTransformer fallback unavailable (%s). Ranking will be skipped.",
-                    fallback_err,
-                )
 
     def available(self) -> bool:
         """Return True when the embedding model loaded successfully."""
@@ -162,10 +111,6 @@ class STRanker:
         topics: List[str] = []
         docs: List[str] = []
         for eid, topic, text in entries:
-            # ``entries`` can be any iterable (including generators), therefore
-            # we eagerly consume it into simple Python lists.  Downstream numpy
-            # operations expect random-access sequences, so materialising here
-            # keeps the rest of the code straightforward.
             ids.append(eid)
             topics.append(topic)
             # Be conservative: strip/normalize; title is usually enough
@@ -213,11 +158,7 @@ class STRanker:
         # ``n x d`` array where ``n`` equals the number of candidate entries.
         doc_array = np.vstack(doc_matrix)
         # ``@`` performs a dense matrix/vector multiply that yields cosine scores
-        # because of the prior normalisation.  This mirrors the behaviour of the
-        # old Sentence-Transformers implementation where ``cos_sim(query, docs)``
-        # accomplished the same thing via PyTorch.
+        # because of the prior normalisation.
         sims = doc_array @ q_vec
 
-        # Re-unify the metadata with the computed scores.  The lists are kept in
-        # lockstep so ``zip`` is safe and stable with respect to the input order.
         return list(zip(ids, topics, sims.tolist()))
