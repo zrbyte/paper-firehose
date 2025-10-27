@@ -225,6 +225,20 @@
       letter-spacing: -0.01em;
     }
 
+    .entry-journal {
+      display: inline-flex;
+      align-items: center;
+      align-self: flex-start;
+      padding: 6px 16px;
+      margin: 6px 0 0;
+      font-size: 1.18rem;
+      line-height: 1.38;
+      font-weight: 600;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
     .entry-title a {
       text-decoration: none;
       color: var(--text-primary);
@@ -830,6 +844,7 @@
           row.published_date = row.published_date || row.published || '';
           row.matched_date = row.matched_date || '';
           row.topics = row.topics || row.topic || '';
+          row.journal = row.journal || row.journal_name || row.feed_name || '';
           rows.push(row);
         }
         stmt.free();
@@ -912,7 +927,7 @@
         const published = esc(row.published_date || '');
         const matched = esc(row.matched_date || '');
         const doi = esc(row.doi || '');
-        const feed = esc(row.feed_name || '');
+        const journal = esc(row.journal || row.feed_name || '');
 
         let badgeHtml = '';
         const rankRaw = row.rank_score != null && row.rank_score !== '' ? row.rank_score : row.rank;
@@ -937,17 +952,12 @@
         const context = buildContextSection(row, summary.type);
 
         const tags = [];
-        if (feed) {
-          tags.push(`<span class="tag tag-feed">${feed}</span>`);
-        }
-        if (summary.tagHtml) {
-          tags.push(summary.tagHtml);
-        }
         const topicList = (row.topics || '').split(',').map(t => t.trim()).filter(Boolean);
         topicList.forEach(topic => {
           tags.push(`<span class="tag tag-topic">${esc(topic)}</span>`);
         });
         const tagsMarkup = tags.length ? `<div class="entry-tags">${tags.join('')}</div>` : '';
+        const journalMarkup = journal ? `<div class="entry-journal">${journal}</div>` : '';
 
         const imageUrl = row.image_url || row.thumbnail || row.thumbnail_url || row.image;
         let imageBlock = '';
@@ -976,6 +986,7 @@
               <div class="entry-title">
                 <h3><a href="${link}" target="_blank" rel="noopener noreferrer">${title}</a>${badgeHtml ? ' ' + badgeHtml : ''}</h3>
               </div>
+              ${journalMarkup}
               <div class="entry-meta">
                 ${metaMarkup}
               </div>
