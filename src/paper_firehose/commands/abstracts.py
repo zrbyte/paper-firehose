@@ -2,15 +2,17 @@
 Fetch abstracts and populate both papers.db (entries.abstract) and
 matched_entries_history.db (matched_entries.abstract).
 
-Rules:
+Rules
+-----
+
 - First pass fills arXiv/cond-mat abstracts from summary (no threshold).
-- Then for rows with rank_score >= threshold: Crossref (DOI, then title search),
+- Then for rows with ``rank_score >= threshold``: Crossref (DOI, then title search),
   followed by aggregator fallbacks (Semantic Scholar, OpenAlex, PubMed).
-- Only process topics where topic yaml has abstract_fetch.enabled: true.
-- Use per-topic abstract_fetch.rank_threshold if set; otherwise fall back to
-  global defaults.rank_threshold in config.yaml.
-- Respect API rate limits; include a descriptive User-Agent with contact email
-  and obey Retry-After on 429/503. Default to ~1 request/second.
+- Only process topics where the topic YAML has ``abstract_fetch.enabled: true``.
+- Use per-topic ``abstract_fetch.rank_threshold`` if set; otherwise fall back to
+  global ``defaults.rank_threshold`` in ``config.yaml``.
+- Respect API rate limits; include a descriptive ``User-Agent`` with contact email
+  and obey ``Retry-After`` on 429/503 responses. Default to ~1 request/second.
 """
 
 from __future__ import annotations

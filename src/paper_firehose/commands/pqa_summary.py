@@ -2,12 +2,16 @@
 Paper-QA Summarizer
 
 This command selects entries from papers.db for a given topic with
-rank_score >= configured threshold and downloads arXiv PDFs for them,
+``rank_score >=`` the configured threshold and downloads arXiv PDFs for them,
 adhering to arXiv API Terms of Use (polite rate limiting and descriptive
-User-Agent with contact email).
-- Run paper-qa over downloaded PDFs to produce grounded JSON summaries
-- Write summaries into papers.db (entries.paper_qa_summary) and
-  matched_entries_history.db (matched_entries.paper_qa_summary)
+``User-Agent`` with contact email).
+
+Workflow
+--------
+
+- Run ``paper-qa`` over downloaded PDFs to produce grounded JSON summaries.
+- Write summaries into papers.db (``entries.paper_qa_summary``) and
+  matched_entries_history.db (``matched_entries.paper_qa_summary``).
 """
 
 from __future__ import annotations
@@ -585,7 +589,9 @@ def run(
 ) -> None:
     """Execute the paper-qa download + summarization workflow.
 
-    Workflow overview:
+    Workflow overview
+    -----------------
+
     - Load configuration/database state and prepare download/archive folders.
     - Determine targets either from ranked topic entries (respecting the download
       rank threshold and optional ``limit``) or from the explicit ``arxiv``/``entry_ids``
@@ -593,7 +599,7 @@ def run(
       ``use_history`` is enabled.
     - Resolve arXiv IDs, reuse archived PDFs when possible, download missing
       PDFs under the configured rate limit, and archive successful downloads.
-    - Run paper-qa on each PDF, normalize the JSON result, and write summaries
+    - Run ``paper-qa`` on each PDF, normalize the JSON result, and write summaries
       back to both ``papers.db`` and ``matched_entries_history.db`` when an
       ``entry_id`` is available.
     """

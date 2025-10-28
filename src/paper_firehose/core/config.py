@@ -20,6 +20,9 @@ _TEMPLATE_CONFIG = _TEMPLATE_DIR / "config.yaml"
 _TEMPLATE_TOPICS_DIR = _TEMPLATE_DIR / "topics"
 _TEMPLATE_SECRETS_DIR = _TEMPLATE_DIR / "secrets"
 
+_DEFAULT_EMAIL_SECRET = "# Placeholder SMTP password file. Replace with real credentials.\n"
+_DEFAULT_OPENAI_SECRET = "# Placeholder OpenAI API key file for summarize/pqa commands.\n"
+
 _DEFAULT_CONFIG_TEMPLATE = """# Auto-generated default configuration for paper-firehose
 database:
   path: "papers.db"
@@ -193,6 +196,20 @@ class ConfigManager:
             _copy_tree(_TEMPLATE_SECRETS_DIR, secrets_dir)
         except Exception as exc:
             logger.warning("Failed to copy secrets template tree: %s", exc)
+
+        # Ensure critical secret placeholders exist even if the template tree lacks them
+        placeholders = {
+            "email_password.env": _DEFAULT_EMAIL_SECRET,
+            "openaikulcs.env": _DEFAULT_OPENAI_SECRET,
+        }
+        for filename, content in placeholders.items():
+            target = secrets_dir / filename
+            if target.exists():
+                continue
+            try:
+                target.write_text(content, encoding="utf-8")
+            except Exception as exc:
+                logger.warning("Failed to create placeholder secret %s: %s", target, exc)
 
         if not any(topics_dir.glob("*.yml")) and not any(topics_dir.glob("*.yaml")):
             default_topic_path = topics_dir / "example.yaml"

@@ -1,14 +1,18 @@
 """
-Rank command: compute and write rank scores into papers.db (rank_score).
+Rank command: compute and write rank scores into papers.db (``rank_score``).
 
-Initial minimal version:
-- Reads per-topic ranking config (query, model)
-- Fetches entries with status='filtered' for the topic(s)
-- Computes cosine similarity (Sentence-Transformers) between query and title
-- Writes scores to `rank_score` (no status change)
+Initial minimal version
+-----------------------
 
-Notes:
-- If sentence-transformers is unavailable or model download fails, the command logs
+- Read per-topic ranking config (query, model).
+- Fetch entries with ``status='filtered'`` for the topic(s).
+- Compute cosine similarity (Sentence-Transformers) between query and title.
+- Write scores to ``rank_score`` (no status change).
+
+Notes
+-----
+
+- If Sentence-Transformers is unavailable or model download fails, the command logs
   and skips scoring without raising.
 """
 
