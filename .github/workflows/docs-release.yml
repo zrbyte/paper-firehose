@@ -41,13 +41,30 @@ jobs:
           set -euo pipefail
           mkdir -p "$PAPER_FIREHOSE_DATA_DIR" assets
           echo "=== Loading databases from data branch ==="
+          if ! git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
+            echo "ℹ️  data branch not found; skipping copy"
+            exit 0
+          fi
+
           git fetch origin data
+          git lfs install --local
+
+          WT="$(mktemp -d)"
+          cleanup() { git worktree remove -f "$WT" >/dev/null 2>&1 || rm -rf "$WT"; }
+          trap cleanup EXIT
+
+          git worktree add --detach "$WT" origin/data
+          pushd "$WT" >/dev/null
+            git lfs pull origin data || true
+          popd >/dev/null
 
           load_db() {
             local remote_path="$1"
             local dest="$2"
             local label="$3"
-            if git show "origin/data:${remote_path}" >"${dest}" 2>/dev/null; then
+            local source="$WT/${remote_path}"
+            if [ -f "${source}" ]; then
+              cp "${source}" "${dest}"
               echo "✅ Loaded ${label} from data branch into ${dest}"
               ls -lh "${dest}"
             else
