@@ -18,3 +18,11 @@ archive/
 paper_firehose/system/models/*
 .paper_firehose/*
 docs/_build/
+ARCHITECTURE_INDEX.md
+ARCHITECTURE_SUMMARY.txt
+ARCHITECTURE.md
+CLAUDE.md
+QUICK_REFERENCE.md
+TEST_ANALYSIS.md
+TEST_CHECKLIST.md
+TEST_SUMMARY.txt
