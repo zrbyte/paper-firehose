@@ -40,10 +40,32 @@ jobs:
           restore-keys: |
             huggingface-models-
 
+      - name: Initialize data directory
+        run: |
+          set -euo pipefail
+          mkdir -p "$PAPER_FIREHOSE_DATA_DIR"
+
+      - name: Restore runtime databases cache
+        id: cache-runtime-dbs
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.PAPER_FIREHOSE_DATA_DIR }}/all_feed_entries.db
+            ${{ env.PAPER_FIREHOSE_DATA_DIR }}/matched_entries_history.db
+            ${{ env.PAPER_FIREHOSE_DATA_DIR }}/papers.db
+          key: runtime-dbs-${{ github.run_id }}
+          restore-keys: |
+            runtime-dbs-
+
       - name: Load databases from data branch
         run: |
           set -euo pipefail
           mkdir -p "$PAPER_FIREHOSE_DATA_DIR" assets
+
+          if ls "$PAPER_FIREHOSE_DATA_DIR"/*.db >/dev/null 2>&1; then
+            echo "✅ Databases restored from cache; skipping data branch fetch"
+            exit 0
+          fi
 
           echo "=== Loading databases from data branch ==="
           if ! git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
@@ -201,18 +223,21 @@ jobs:
             mkdir -p assets
             TS="$(date -u +%Y%m%dT%H%M%SZ)"
 
-            # Only keep latest + one previous version
+            # Only keep latest + two previous versions
             update_db() {
               local src="$1"; local stem="$2"
               if [ -f "$GITHUB_WORKSPACE/$src" ]; then
                 # Backup current .latest.db to .previous.db if it exists
+                if [ -f "assets/${stem}.previous.db" ]; then
+                  mv "assets/${stem}.previous.db" "assets/${stem}.previous2.db" || true
+                fi
                 if [ -f "assets/${stem}.latest.db" ]; then
                   mv "assets/${stem}.latest.db" "assets/${stem}.previous.db" || true
                 fi
                 # Copy new version as .latest.db
                 cp "$GITHUB_WORKSPACE/$src" "assets/${stem}.latest.db"
-                git add -f "assets/${stem}.latest.db" "assets/${stem}.previous.db" 2>/dev/null || true
-                echo "✅ Updated ${stem}: latest + previous versions retained"
+                git add -f "assets/${stem}.latest.db" "assets/${stem}.previous.db" "assets/${stem}.previous2.db" 2>/dev/null || true
+                echo "✅ Updated ${stem}: latest + two previous versions retained"
               else
                 echo "ℹ️  Skip: $src not found"
               fi
@@ -236,6 +261,16 @@ jobs:
               echo "ℹ️  No changes to commit."
             fi
           popd >/dev/null
+
+      - name: Save runtime databases cache
+        if: ${{ success() }}
+        uses: actions/cache/save@v3
+        with:
+          path: |
+            ${{ env.PAPER_FIREHOSE_DATA_DIR }}/all_feed_entries.db
+            ${{ env.PAPER_FIREHOSE_DATA_DIR }}/matched_entries_history.db
+            ${{ env.PAPER_FIREHOSE_DATA_DIR }}/papers.db
+          key: runtime-dbs-${{ github.run_id }}
 
       - name: Build documentation
         run: |
