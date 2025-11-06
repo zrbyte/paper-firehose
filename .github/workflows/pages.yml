@@ -168,8 +168,7 @@ jobs:
 
       - name: Commit updated databases to data branch
         env:
-          KEEP_SNAPSHOTS: "10"
-          SNAP_DIR: "assets/db_history"
+          KEEP_SNAPSHOTS: "2"
           DB_HISTORY: ".paper_firehose/matched_entries_history.db"
           DB_SEEN: ".paper_firehose/all_feed_entries.db"
           DB_CURRENT: ".paper_firehose/papers.db"
@@ -199,44 +198,40 @@ jobs:
               git add .gitattributes
             fi
 
-            mkdir -p "$SNAP_DIR" assets
+            mkdir -p assets
             TS="$(date -u +%Y%m%dT%H%M%SZ)"
 
-            snapshot_one() {
+            # Only keep latest + one previous version
+            update_db() {
               local src="$1"; local stem="$2"
               if [ -f "$GITHUB_WORKSPACE/$src" ]; then
-                local snap="$SNAP_DIR/${stem}_${TS}.db"
-                cp "$GITHUB_WORKSPACE/$src" "$snap"
+                # Backup current .latest.db to .previous.db if it exists
+                if [ -f "assets/${stem}.latest.db" ]; then
+                  mv "assets/${stem}.latest.db" "assets/${stem}.previous.db" || true
+                fi
+                # Copy new version as .latest.db
                 cp "$GITHUB_WORKSPACE/$src" "assets/${stem}.latest.db"
-                git add -f "$snap" "assets/${stem}.latest.db"
-                echo "✅ Snapshot created: $snap and assets/${stem}.latest.db"
+                git add -f "assets/${stem}.latest.db" "assets/${stem}.previous.db" 2>/dev/null || true
+                echo "✅ Updated ${stem}: latest + previous versions retained"
               else
-                echo "Skip: $src not found"
+                echo "ℹ️  Skip: $src not found"
               fi
             }
 
-            snapshot_one "$DB_HISTORY" "matched_entries_history"
-            snapshot_one "$DB_SEEN" "all_feed_entries"
-            snapshot_one "$DB_CURRENT" "papers"
+            update_db "$DB_HISTORY" "matched_entries_history"
+            update_db "$DB_SEEN" "all_feed_entries"
+            update_db "$DB_CURRENT" "papers"
 
-            retain() {
-              local stem="$1"
-              mapfile -t FILES < <(ls -1t "$SNAP_DIR"/${stem}_*.db 2>/dev/null || true)
-              if [ "${#FILES[@]}" -gt "${KEEP_SNAPSHOTS}" ]; then
-                for f in "${FILES[@]:${KEEP_SNAPSHOTS}}"; do rm -f "$f"; done
-                echo "🗑️  Retained ${KEEP_SNAPSHOTS} most recent snapshots for $stem"
-              fi
-            }
-            retain "matched_entries_history"
-            retain "all_feed_entries"
-            retain "papers"
-
-            git add -A "$SNAP_DIR" || true
+            # Remove old snapshot directory if it exists
+            if [ -d "assets/db_history" ]; then
+              git rm -rf "assets/db_history" || rm -rf "assets/db_history"
+              echo "🗑️  Removed historical snapshot directory"
+            fi
 
             if ! git diff --cached --quiet; then
-              git commit -m "Update database snapshots @ ${TS} [skip ci]"
+              git commit -m "Update databases @ ${TS} [skip ci]"
               git push origin data
-              echo "✅ Database snapshots committed and pushed to data branch"
+              echo "✅ Databases committed and pushed to data branch"
             else
               echo "ℹ️  No changes to commit."
             fi
