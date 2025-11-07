@@ -7,9 +7,10 @@ on:
         description: "Purge entries from the last day before running the pipeline"
         required: false
         default: "false"
-  schedule:
-    # Run every day at 4 AM UTC
-    - cron: '0 5 * * *'
+  # to enalble scheduled runs, uncomment the following lines
+  # schedule:
+  #   # Run every day at 4 AM UTC
+  #   - cron: '0 5 * * *'
 
 permissions:
   contents: write
