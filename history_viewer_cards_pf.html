@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Paper Firehose — History Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-page: #f5f7fb;
+      --bg-card: #ffffff;
+      --text-primary: #1f2937;
+      --text-secondary: #4b5563;
+      --accent: #2563eb;
+      --accent-soft: rgba(37, 99, 235, 0.12);
+      --border-soft: rgba(148, 163, 184, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 0.86rem;
+      line-height: 1.65;
+      background: var(--bg-page);
+      color: var(--text-primary);
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .site-header {
+      background: #e5e7eb;
+      color: #1f2937;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.15);
+    }
+
+    .site-header__content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 24px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .site-title {
+      margin: 0;
+      font-size: 1.58rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .site-subtitle {
+      margin: 0;
+      font-size: 0.9rem;
+      color: rgba(55, 65, 81, 0.88);
+    }
+
+    .content-wrapper {
+      max-width: 1200px;
+      margin: 38px auto 96px;
+      padding: 0 24px;
+    }
+
+    .controls-panel {
+      background: var(--bg-card);
+      border-radius: 18px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      box-shadow: 0 22px 50px rgba(15, 23, 42, 0.1);
+      padding: 24px 24px 10px;
+      margin-bottom: 32px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .controls-label {
+      font-weight: 600;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+    }
+
+    .control-input,
+    .control-select {
+      flex: 1 1 260px;
+      padding: 10px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--border-soft);
+      background: #ffffff;
+      font-size: 0.94rem;
+      box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+      transition: border-color 0.12s ease, box-shadow 0.12s ease;
+    }
+
+    .control-input:focus,
+    .control-select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-soft);
+    }
+
+    .control-input--compact {
+      flex: 1 1 200px;
+    }
+
+    .control-select--compact {
+      flex: 0 0 auto;
+    }
+
+    .control-file {
+      font-size: 0.82rem;
+    }
+
+    button {
+      border: none;
+      border-radius: 999px;
+      padding: 10px 20px;
+      font-size: 0.92rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.1s ease, box-shadow 0.1s ease, opacity 0.1s ease;
+    }
+
+    button:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.22);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .button-primary {
+      background: var(--accent);
+      color: #f8fafc;
+      box-shadow: 0 14px 34px rgba(37, 99, 235, 0.28);
+    }
+
+    .button-primary:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+
+    .button-secondary {
+      background: rgba(37, 99, 235, 0.12);
+      color: #1d4ed8;
+      box-shadow: 0 10px 26px rgba(37, 99, 235, 0.16);
+    }
+
+    .button-secondary:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+
+    .hint {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+    }
+
+    .status-line {
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .entries-list {
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+
+    .entry-count {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 18px;
+    }
+
+    .entry {
+      background: var(--bg-card);
+      border-radius: 18px;
+      box-shadow: 0 24px 60px rgba(15, 23, 42, 0.14);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      overflow: hidden;
+    }
+
+    .entry-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    }
+
+    .entry-info {
+      padding: 30px 32px;
+      border-right: 1px solid rgba(148, 163, 184, 0.2);
+      background: #eff4ff;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .entry-content {
+      padding: 30px 36px;
+      background: #ffffff;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .entry-title h3 {
+      margin: 0;
+      font-size: 1.18rem;
+      line-height: 1.38;
+      letter-spacing: -0.01em;
+    }
+
+    .entry-journal {
+      display: inline-flex;
+      align-items: center;
+      align-self: flex-start;
+      padding: 6px 16px;
+      margin: 6px 0 0;
+      font-size: 1.18rem;
+      line-height: 1.38;
+      font-weight: 600;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .entry-title a {
+      text-decoration: none;
+      color: var(--text-primary);
+    }
+
+    .entry-title a:hover {
+      color: var(--accent);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #f8fafc;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    .entry-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 0.95rem;
+      color: var(--text-secondary);
+    }
+
+    .entry-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 999px;
+      letter-spacing: 0.03em;
+    }
+
+    .tag-feed {
+      background: var(--accent-soft);
+      color: #1d4ed8;
+    }
+
+    .tag-llm {
+      background: rgba(16, 185, 129, 0.17);
+      color: #0f766e;
+    }
+
+    .tag-pqa {
+      background: rgba(250, 204, 21, 0.28);
+      color: #92400e;
+    }
+
+    .tag-fallback {
+      background: rgba(148, 163, 184, 0.25);
+      color: #475569;
+    }
+
+    .tag-topic {
+      background: rgba(59, 130, 246, 0.16);
+      color: #1d4ed8;
+    }
+
+    .entry-actions {
+      margin-top: auto;
+    }
+
+    .action-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 18px;
+      border-radius: 12px;
+      background: #86efac;
+      color: #065f46;
+      font-weight: 600;
+      text-decoration: none;
+      box-shadow: 0 12px 28px rgba(34, 197, 94, 0.32);
+    }
+
+    .action-link--disabled {
+      background: rgba(148, 163, 184, 0.25);
+      color: rgba(71, 85, 105, 0.9);
+      pointer-events: none;
+    }
+
+    .entry-figure img {
+      width: 100%;
+      border-radius: 16px;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.2);
+    }
+
+    .summary-section {
+      line-height: 1.65;
+      font-size: 0.96rem;
+      color: var(--text-primary);
+    }
+
+    .llm-summary,
+    .pqa-summary {
+      border-radius: 14px;
+      padding: 18px 20px;
+      line-height: 1.65;
+      font-size: 0.96rem;
+    }
+
+    .llm-summary {
+      background: rgba(16, 185, 129, 0.12);
+      border-left: 4px solid rgba(16, 185, 129, 0.65);
+    }
+
+    .pqa-summary {
+      background: rgba(250, 204, 21, 0.18);
+      border-left: 4px solid rgba(217, 119, 6, 0.75);
+    }
+
+    .abstract-details {
+      border: 1px solid rgba(148, 163, 184, 0.26);
+      border-radius: 12px;
+      padding: 12px 18px;
+      background: rgba(241, 245, 249, 0.7);
+    }
+
+    .abstract-details summary {
+      cursor: pointer;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--text-secondary);
+    }
+
+    .abstract-details summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .no-entries {
+      font-style: italic;
+      color: var(--text-secondary);
+      text-align: center;
+      padding: 24px;
+      border-radius: 14px;
+      background: rgba(148, 163, 184, 0.18);
+    }
+
+    .no-results {
+      border: 1px dashed rgba(148, 163, 184, 0.4);
+    }
+
+    .load-more-controls {
+      display: none;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      margin: 32px 0 60px;
+    }
+
+    .load-more-controls button {
+      min-width: 150px;
+    }
+
+    @media (min-width: 1200px) {
+      body {
+        font-size: 0.82rem;
+      }
+
+      .entry-title h3 {
+        font-size: 1.2rem;
+      }
+
+      .summary-section,
+      .llm-summary,
+      .pqa-summary {
+        font-size: 0.92rem;
+      }
+    }
+
+    @media (max-width: 1040px) {
+      .entry-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .entry-info {
+        border-right: none;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+      }
+    }
+
+    @media (max-width: 780px) {
+      body {
+        font-size: 0.84rem;
+      }
+
+      .controls {
+        gap: 10px;
+      }
+
+      .control-input,
+      .control-select {
+        flex: 1 1 100%;
+      }
+
+      .control-input--compact,
+      .control-select--compact {
+        flex: 1 1 100%;
+      }
+
+      .controls-panel {
+        padding: 20px 18px 10px;
+      }
+
+      .entry-title h3 {
+        font-size: 1.14rem;
+      }
+    }
+
+    @media (max-width: 540px) {
+      .site-header__content {
+        padding: 20px 18px;
+      }
+
+      .controls-panel {
+        border-radius: 16px;
+      }
+
+      button {
+        width: 100%;
+      }
+
+      .load-more-controls {
+        flex-direction: column;
+      }
+
+      .load-more-controls button {
+        width: 100%;
+      }
+    }
+  </style>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
+        displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
+        processEscapes: true
+      }
+    };
+  </script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header__content">
+      <h1 class="site-title">Matched Entry History</h1>
+      <p class="site-subtitle">Browse archived matches with summaries, abstracts, and ranking context.</p>
+    </div>
+  </header>
+
+  <main class="content-wrapper">
+    <section class="controls-panel">
+      <div class="controls controls--filters">
+        <label class="controls-label" for="topicSel">Topic</label>
+        <select id="topicSel" class="control-select"><option value="__all__">All</option></select>
+        <label class="controls-label" for="orderSel">Order</label>
+        <select id="orderSel" class="control-select">
+          <option value="pub_desc">Published desc</option>
+          <option value="pub_asc">Published asc</option>
+          <option value="matched_desc" selected>Matched desc</option>
+          <option value="matched_asc">Matched asc</option>
+          <option value="rank_desc">Rank desc</option>
+          <option value="rank_asc">Rank asc</option>
+        </select>
+        <label class="controls-label" for="search">Search</label>
+        <input id="search" class="control-input control-input--compact" type="text" size="24" placeholder="title or authors" />
+        <select id="searchIn" class="control-select control-select--compact">
+          <option value="all">Title + Authors</option>
+          <option value="title">Title only</option>
+          <option value="authors">Authors only</option>
+        </select>
+        <button id="applyBtn" class="button-secondary" type="button">Apply</button>
+      </div>
+      <div class="status-line">
+        <span id="status" class="status-text"></span>
+      </div>
+    </section>
+
+    <div id="entryCount" class="entry-count" style="display:none"></div>
+    <div id="entries" class="entries-list" style="display:none"></div>
+    <div id="loadMoreControls" class="load-more-controls" style="display:none">
+      <button id="loadMoreBtn" class="button-secondary" type="button">Load 50 more</button>
+      <button id="loadAllBtn" class="button-secondary" type="button">Show all</button>
+    </div>
+  </main>
+
+  <script>
+    (function() {
+      const DEFAULT_DB_URL_DISPLAY = 'matched_entries_history.latest.db';
+      const DEFAULT_PAGE_SIZE = 50;
+      const LOAD_MORE_STEP = 50;
+
+      let SQLWasm = null;
+      let SQL_WASM_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/';
+      let db = null;
+      let allRows = [];
+      let filteredRowsCache = [];
+      let displayCount = DEFAULT_PAGE_SIZE;
+      let currentDbUrl = DEFAULT_DB_URL_DISPLAY;
+
+      function $(id) {
+        return document.getElementById(id);
+      }
+
+      function esc(value) {
+        const div = document.createElement('div');
+        div.innerText = value == null ? '' : String(value);
+        return div.innerHTML;
+      }
+
+      function sanitizePossibleHTML(value) {
+        if (value == null) return '';
+        const template = document.createElement('template');
+        template.innerHTML = String(value);
+        template.content.querySelectorAll('script,style,iframe,object,embed').forEach(el => el.remove());
+        template.content.querySelectorAll('*').forEach(el => {
+          [...el.attributes].forEach(attr => {
+            if (attr.name.startsWith('on')) {
+              el.removeAttribute(attr.name);
+            }
+          });
+        });
+        return template.innerHTML;
+      }
+
+      function toParagraphs(text) {
+        if (text == null) return '';
+        const normalized = String(text).trim();
+        if (!normalized) return '';
+        const blocks = normalized.replace(/\r\n/g, '\n').split(/\n{2,}/);
+        return blocks.map(block => {
+          const safe = esc(block).replace(/\n/g, '<br>');
+          return `<p>${safe}</p>`;
+        }).join('');
+      }
+
+      function formatRichText(value) {
+        if (!value) return '';
+        const str = String(value);
+        if (/<[a-z][\s\S]*>/i.test(str.trim())) {
+          return sanitizePossibleHTML(str);
+        }
+        return toParagraphs(str);
+      }
+
+      function formatPqaSummaryContent(raw) {
+        if (!raw) return '';
+        try {
+          const data = JSON.parse(raw);
+          if (!data || typeof data !== 'object') throw new Error('Invalid payload');
+          const summaryHTML = toParagraphs(data.summary ?? '');
+          const methodsHTML = toParagraphs(data.methods ?? '');
+          const pieces = [];
+          if (summaryHTML) {
+            pieces.push(`<div class="summary-section"><h4>Summary</h4>${summaryHTML}</div>`);
+          }
+          if (methodsHTML) {
+            pieces.push(`<div class="summary-section"><h4>Methods</h4>${methodsHTML}</div>`);
+          }
+          return pieces.join('');
+        } catch (err) {
+          const fallback = toParagraphs(raw);
+          return fallback ? `<div class="summary-section"><h4>PDF Summary</h4>${fallback}</div>` : '';
+        }
+      }
+
+      function getSummaryContent(row) {
+        const pqaContent = formatPqaSummaryContent(row.paper_qa_summary);
+        if (pqaContent) {
+          return {
+            html: `<div class="pqa-summary">${pqaContent}</div>`,
+            tagHtml: '<span class="tag tag-pqa">PDF summary</span>',
+            type: 'pqa'
+          };
+        }
+        const llmHtml = formatRichText(row.llm_summary_html || row.llm_summary);
+        if (llmHtml) {
+          return {
+            html: `<div class="llm-summary">${llmHtml}</div>`,
+            tagHtml: '<span class="tag tag-llm">LLM summary</span>',
+            type: 'llm'
+          };
+        }
+        const summaryHtml = formatRichText(row.summary_html || row.summary);
+        if (summaryHtml) {
+          return {
+            html: `<div class="llm-summary">${summaryHtml}</div>`,
+            tagHtml: '<span class="tag tag-llm">Summary</span>',
+            type: 'summary'
+          };
+        }
+        const abstractHtml = formatRichText(row.abstract);
+        if (abstractHtml) {
+          return {
+            html: `<div class="llm-summary">${abstractHtml}</div>`,
+            tagHtml: '<span class="tag tag-fallback">Abstract</span>',
+            type: 'abstract'
+          };
+        }
+        return {
+          html: '<div class="llm-summary"><p>No summary available.</p></div>',
+          tagHtml: '<span class="tag tag-fallback">No summary</span>',
+          type: 'none'
+        };
+      }
+
+      function buildContextSection(row, summaryType) {
+        if (summaryType === 'abstract') return '';
+        const abstractRaw = row.abstract || '';
+        const summaryRaw = row.summary || '';
+        const abstractTrim = String(abstractRaw).trim();
+        const summaryTrim = String(summaryRaw).trim();
+
+        if (abstractTrim && abstractTrim !== summaryTrim) {
+          const abstractHtml = formatRichText(abstractRaw);
+          if (abstractHtml) {
+            return `<details class="abstract-details"><summary>Original abstract</summary>${abstractHtml}</details>`;
+          }
+        }
+
+        if (summaryType !== 'summary' && summaryTrim) {
+          const summaryHtml = formatRichText(summaryRaw);
+          if (summaryHtml) {
+            return `<details class="abstract-details"><summary>Original summary</summary>${summaryHtml}</details>`;
+          }
+        }
+        return '';
+      }
+
+      function injectScript(src) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = src;
+          script.async = true;
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+          document.head.appendChild(script);
+        });
+      }
+
+      async function ensureSqlJsLoaded() {
+        if (typeof window.initSqlJs === 'function') return;
+        try {
+          await injectScript('https://unpkg.com/sql.js@1.8.0/dist/sql-wasm.js');
+          SQL_WASM_BASE = 'https://unpkg.com/sql.js@1.8.0/dist/';
+        } catch (err) {
+          await injectScript('https://cdn.jsdelivr.net/npm/sql.js@1.8.0/dist/sql-wasm.js');
+          SQL_WASM_BASE = 'https://cdn.jsdelivr.net/npm/sql.js@1.8.0/dist/';
+        }
+        if (typeof window.initSqlJs !== 'function') {
+          throw new Error('sql.js failed to load (initSqlJs is undefined). Check your network or try again.');
+        }
+      }
+
+      async function initSQL() {
+        if (SQLWasm) return SQLWasm;
+        await ensureSqlJsLoaded();
+        SQLWasm = await initSqlJs({ locateFile: file => `${SQL_WASM_BASE}${file}` });
+        return SQLWasm;
+      }
+
+      async function loadFromURL(url) {
+        const path = (url || '').trim();
+        if (!path) {
+          throw new Error('Database URL is empty.');
+        }
+        const res = await fetch(path, { cache: 'no-cache' });
+        if (!res.ok) {
+          throw new Error(`Failed to fetch database (status ${res.status}).`);
+        }
+        const buf = await res.arrayBuffer();
+        return new Uint8Array(buf);
+      }
+
+     function tableExists(database, name) {
+        try {
+          const stmt = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?");
+          stmt.bind([name]);
+          const exists = stmt.step();
+          stmt.free();
+          return !!exists;
+        } catch (err) {
+          return false;
+        }
+      }
+
+      function getTableColumns(database, name) {
+        try {
+          const stmt = database.prepare(`PRAGMA table_info(${name})`);
+          const cols = [];
+          while (stmt.step()) {
+            cols.push(stmt.getAsObject().name);
+          }
+          stmt.free();
+          return cols;
+        } catch (err) {
+          return [];
+        }
+      }
+
+      function parseRows(database) {
+        if (!tableExists(database, 'matched_entries')) {
+          throw new Error("Table 'matched_entries' not found in database");
+        }
+        const stmt = database.prepare('SELECT * FROM matched_entries');
+        const rows = [];
+        while (stmt.step()) {
+          const row = stmt.getAsObject();
+          row.feed_name = row.feed_name || '';
+          row.title = row.title || '';
+          row.link = row.link || '';
+          row.authors = row.authors || row.author || '';
+          row.abstract = row.abstract || row.summary || '';
+          row.published_date = row.published_date || row.published || '';
+          row.matched_date = row.matched_date || '';
+          row.topics = row.topics || row.topic || '';
+          row.journal = row.journal || row.journal_name || row.feed_name || '';
+          rows.push(row);
+        }
+        stmt.free();
+        return rows;
+      }
+
+      function renderTopics(rows) {
+        const sel = $('topicSel');
+        const previous = sel.value;
+        const set = new Set();
+        rows.forEach(r => {
+          (r.topics || '').split(',').map(x => x.trim()).filter(Boolean).forEach(t => set.add(t));
+        });
+        const options = ['<option value="__all__">All</option>'];
+        Array.from(set).sort().forEach(topic => {
+          options.push(`<option value="${esc(topic)}">${esc(topic)}</option>`);
+        });
+        sel.innerHTML = options.join('');
+        if (set.size && previous && Array.from(sel.options).some(opt => opt.value === previous)) {
+          sel.value = previous;
+        }
+      }
+
+      function sortRows(rows, order) {
+        let field = 'published_date';
+        let dir = 'desc';
+        let byRank = false;
+        if (typeof order === 'string') {
+          if (order.startsWith('pub')) field = 'published_date';
+          if (order.startsWith('matched')) field = 'matched_date';
+          if (order.startsWith('rank')) byRank = true;
+          if (order.endsWith('_asc')) dir = 'asc';
+          if (order.endsWith('_desc')) dir = 'desc';
+        }
+        const copy = rows.slice();
+        if (byRank) {
+          return copy.sort((a, b) => {
+            const av = parseFloat(a.rank_score || a.rank || '0') || 0;
+            const bv = parseFloat(b.rank_score || b.rank || '0') || 0;
+            const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+            return dir === 'asc' ? cmp : -cmp;
+          });
+        }
+        return copy.sort((a, b) => {
+          const av = (a[field] || '').trim();
+          const bv = (b[field] || '').trim();
+          if (!av && !bv) return 0;
+          if (!av) return 1;
+          if (!bv) return -1;
+          const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+          return dir === 'asc' ? cmp : -cmp;
+        });
+      }
+
+      function updateLoadMoreControls(total, shown) {
+        const controls = $('loadMoreControls');
+        const moreBtn = $('loadMoreBtn');
+        const allBtn = $('loadAllBtn');
+        const remaining = Math.max(total - shown, 0);
+        if (!total || remaining <= 0) {
+          controls.style.display = 'none';
+          return;
+        }
+        controls.style.display = 'flex';
+        const step = Math.min(LOAD_MORE_STEP, remaining);
+        moreBtn.textContent = `Load ${step} more`;
+        moreBtn.disabled = remaining <= 0;
+        allBtn.textContent = `Show all (${total})`;
+        allBtn.disabled = remaining <= 0;
+      }
+
+      function buildEntry(row) {
+        const entry = document.createElement('article');
+        entry.className = 'entry';
+
+        const title = esc(row.title || 'Untitled');
+        const linkRaw = (row.link || '').trim();
+        const link = linkRaw ? esc(linkRaw) : '#';
+        const authors = esc(row.authors || '');
+        const published = esc(row.published_date || '');
+        const matched = esc(row.matched_date || '');
+        const doi = esc(row.doi || '');
+        const journal = esc(row.journal || row.feed_name || '');
+
+        let badgeHtml = '';
+        const rankRaw = row.rank_score != null && row.rank_score !== '' ? row.rank_score : row.rank;
+        if (rankRaw != null && rankRaw !== '') {
+          const asNumber = Number(rankRaw);
+          if (Number.isFinite(asNumber)) {
+            const truncated = Math.floor(asNumber * 100) / 100;
+            badgeHtml = `<span class="badge">Score ${truncated.toFixed(2)}</span>`;
+          } else {
+            badgeHtml = `<span class="badge">${esc(rankRaw)}</span>`;
+          }
+        }
+
+        const meta = [];
+        if (authors) meta.push(`<span class="meta-item"><strong>Authors:</strong> ${authors}</span>`);
+        if (published) meta.push(`<span class="meta-item"><strong>Published:</strong> ${published}</span>`);
+        if (matched) meta.push(`<span class="meta-item"><strong>Matched:</strong> ${matched}</span>`);
+        if (doi) meta.push(`<span class="meta-item"><strong>DOI:</strong> ${doi}</span>`);
+        const metaMarkup = meta.length ? meta.join('') : '<span class="meta-item">No metadata available.</span>';
+
+        const summary = getSummaryContent(row);
+        const context = buildContextSection(row, summary.type);
+
+        const tags = [];
+        const topicList = (row.topics || '').split(',').map(t => t.trim()).filter(Boolean);
+        topicList.forEach(topic => {
+          tags.push(`<span class="tag tag-topic">${esc(topic)}</span>`);
+        });
+        const tagsMarkup = tags.length ? `<div class="entry-tags">${tags.join('')}</div>` : '';
+        const journalMarkup = journal ? `<div class="entry-journal">${journal}</div>` : '';
+
+        const imageUrl = row.image_url || row.thumbnail || row.thumbnail_url || row.image;
+        let imageBlock = '';
+        if (imageUrl) {
+          const safe = esc(imageUrl);
+          imageBlock = `<div class="entry-figure"><img src="${safe}" alt="Preview image for ${title}"></div>`;
+        }
+        const contentParts = [];
+        if (imageBlock) contentParts.push(imageBlock);
+        contentParts.push(summary.html);
+        if (context) contentParts.push(context);
+        const contentHtml = contentParts.join('');
+
+        const actions = [];
+        if (link && link !== '#') {
+          actions.push(`<a class="action-link" href="${link}" target="_blank" rel="noopener noreferrer">Open article</a>`);
+        }
+        if (!actions.length) {
+          actions.push('<span class="action-link action-link--disabled">No link available</span>');
+        }
+        const actionsMarkup = `<div class="entry-actions">${actions.join('')}</div>`;
+
+        entry.innerHTML = `
+          <div class="entry-grid">
+            <div class="entry-info">
+              <div class="entry-title">
+                <h3><a href="${link}" target="_blank" rel="noopener noreferrer">${title}</a>${badgeHtml ? ' ' + badgeHtml : ''}</h3>
+              </div>
+              ${journalMarkup}
+              <div class="entry-meta">
+                ${metaMarkup}
+              </div>
+              ${tagsMarkup}
+              ${actionsMarkup}
+            </div>
+            <div class="entry-content">
+              ${contentHtml}
+            </div>
+          </div>
+        `;
+        return entry;
+      }
+
+      function renderEntries() {
+        const list = $('entries');
+        list.innerHTML = '';
+        const total = filteredRowsCache.length;
+        if (!total) {
+          $('entryCount').style.display = 'none';
+          list.style.display = '';
+          list.innerHTML = '<div class="no-entries">No entries match the selected filters.</div>';
+          $('status').textContent = 'No entries match the selected filters.';
+          updateLoadMoreControls(0, 0);
+          return;
+        }
+
+        const shown = Math.min(displayCount, total);
+        const frag = document.createDocumentFragment();
+        for (let i = 0; i < shown; i += 1) {
+          frag.appendChild(buildEntry(filteredRowsCache[i]));
+        }
+        list.appendChild(frag);
+        list.style.display = '';
+        $('entryCount').style.display = '';
+        $('entryCount').textContent = `${total} entries (showing ${shown})`;
+        $('status').textContent = `Showing ${shown} of ${total} entries.`;
+        updateLoadMoreControls(total, shown);
+
+        if (window.MathJax && MathJax.typesetPromise) {
+          MathJax.typesetPromise([list]).catch(() => {});
+        }
+      }
+
+      function applyFilterAndRender(options = {}) {
+        const resetCount = options.resetCount !== false;
+        if (!allRows.length) {
+          filteredRowsCache = [];
+          renderEntries();
+          return;
+        }
+        const topic = $('topicSel').value;
+        const order = $('orderSel').value;
+        const q = $('search').value.trim().toLowerCase();
+        const searchIn = $('searchIn').value;
+
+        let rows = allRows;
+        if (topic && topic !== '__all__') {
+          rows = rows.filter(r => (r.topics || '').split(',').map(x => x.trim()).includes(topic));
+        }
+        if (q) {
+          rows = rows.filter(r => {
+            const title = (r.title || '').toLowerCase();
+            const authors = (r.authors || '').toLowerCase();
+            if (searchIn === 'title') return title.includes(q);
+            if (searchIn === 'authors') return authors.includes(q);
+            return title.includes(q) || authors.includes(q);
+          });
+        }
+
+        filteredRowsCache = sortRows(rows, order);
+        if (resetCount) {
+          displayCount = DEFAULT_PAGE_SIZE;
+        } else {
+          displayCount = Math.min(displayCount, filteredRowsCache.length);
+        }
+        renderEntries();
+      }
+
+      async function loadDB(bytes) {
+        const SQL = await initSQL();
+        if (db) {
+          db.close();
+          db = null;
+        }
+        db = new SQL.Database(bytes);
+        allRows = parseRows(db);
+        renderTopics(allRows);
+        displayCount = DEFAULT_PAGE_SIZE;
+        applyFilterAndRender({ resetCount: true });
+      }
+
+      async function loadDatabase(urlOverride) {
+        $('status').textContent = 'Loading...';
+        try {
+          let url = urlOverride != null ? String(urlOverride).trim() : currentDbUrl;
+          if (!url) {
+            $('status').textContent = 'Database URL is empty.';
+            return;
+          }
+          if (urlOverride != null) {
+            currentDbUrl = url;
+          }
+          const bytes = await loadFromURL(url);
+          await loadDB(bytes);
+          $('status').textContent = filteredRowsCache.length
+            ? `Showing ${Math.min(displayCount, filteredRowsCache.length)} of ${filteredRowsCache.length} entries.`
+            : 'Loaded, but no entries found.';
+        } catch (err) {
+          console.error(err);
+          $('status').textContent = 'Error: ' + (err.message || err);
+        }
+      }
+
+      function tryAutoLoadFromQuery() {
+        const params = new URLSearchParams(location.search);
+        const dbParam = params.get('db');
+        const topic = params.get('topic');
+        const order = params.get('order');
+        if (dbParam) {
+          currentDbUrl = dbParam;
+          loadDatabase(dbParam);
+        }
+        if (topic) {
+          const selectTopic = () => {
+            const sel = $('topicSel');
+            if (Array.from(sel.options).some(opt => opt.value === topic)) {
+              sel.value = topic;
+              applyFilterAndRender({ resetCount: true });
+            }
+          };
+          setTimeout(selectTopic, 1500);
+        }
+        if (order) {
+          let normalized = order;
+          if (order === 'asc' || order === 'desc') normalized = `pub_${order}`;
+          if (order.startsWith('published_')) normalized = order.replace('published_', 'pub_');
+          const allowed = new Set(['pub_asc', 'pub_desc', 'matched_asc', 'matched_desc', 'rank_asc', 'rank_desc']);
+          if (allowed.has(normalized)) {
+            $('orderSel').value = normalized;
+          }
+        }
+      }
+
+      $('applyBtn').addEventListener('click', () => applyFilterAndRender({ resetCount: true }));
+      $('topicSel').addEventListener('change', () => applyFilterAndRender({ resetCount: true }));
+      $('orderSel').addEventListener('change', () => applyFilterAndRender({ resetCount: true }));
+      $('searchIn').addEventListener('change', () => applyFilterAndRender({ resetCount: true }));
+      $('search').addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          applyFilterAndRender({ resetCount: true });
+        }
+      });
+
+      $('loadMoreBtn').addEventListener('click', () => {
+        displayCount = Math.min(displayCount + LOAD_MORE_STEP, filteredRowsCache.length);
+        renderEntries();
+      });
+
+      $('loadAllBtn').addEventListener('click', () => {
+        displayCount = filteredRowsCache.length;
+        renderEntries();
+      });
+
+      tryAutoLoadFromQuery();
+      if (!(new URLSearchParams(location.search)).get('db')) {
+        setTimeout(() => {
+          if (currentDbUrl) {
+            loadDatabase(currentDbUrl);
+          }
+        }, 50);
+      }
+    })();
+  </script>
+</body>
+</html>
