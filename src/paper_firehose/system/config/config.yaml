@@ -216,10 +216,10 @@ email:
   # Optional subject prefix
   subject_prefix: "paper firehose"
   # Sender address; defaults to smtp.username if omitted
-  from: "foo@bar.com"
+  from: "myuser@gmail.com"
   smtp:
-    host: "mail.foobar.com"
+    host: "mail.foobar.com" # for gmail: smtp.gmail.com
     port: 465
-    username: "_mainaccount@foobar.com"
+    username: "_mainaccount@foobar.com" # for gmail: your full gmail address
     # Prefer file-based secret storage. Put the password in this file
     password_file: "secrets/email_password.env"

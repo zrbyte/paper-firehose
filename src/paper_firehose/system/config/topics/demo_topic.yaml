@@ -1,7 +1,7 @@
 # this is an example configuration file for a topic
 # see config.yaml for global configuration options
-name: "Perovskites"
-description: "Perovskite solar cells, photoelectrochemistry, etc"
+name: "Demo"
+description: "Demo topic, best demo of all time"
 
 # Which feeds to process for this topic
 feeds:
@@ -44,8 +44,8 @@ feeds:
 
 # Regex filter
 filter:
-  pattern: '(foo*)|\
-            (*bar)'
+  pattern: '(foo)|\
+            (bar)'
   fields: ["title", "summary"]
 
 # Ranking configuration
