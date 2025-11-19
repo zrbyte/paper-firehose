@@ -287,16 +287,10 @@ def purge(ctx: click.Context, days: int | None, all_data: bool) -> None:
 @click.pass_context
 def status(ctx: click.Context) -> None:
     """Show system status and configuration."""
-    config_path = ctx.obj["config_path"]
-
-    if not os.path.exists(config_path):
-        click.echo(f"❌ Config file not found: {config_path}", err=True)
-        return
-
-    click.echo(f"📄 Config file: {config_path}")
-
     try:
-        config_manager = ConfigManager(config_path)
+        config_manager = ConfigManager(ctx.obj["config_path"])
+        config_path = config_manager.config_path
+        click.echo(f"📄 Config file: {config_path}")
 
         if config_manager.validate_config():
             click.echo("✅ Configuration is valid")
