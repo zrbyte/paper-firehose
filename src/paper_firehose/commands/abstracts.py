@@ -443,16 +443,6 @@ def _crossref_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto:
                 hconn.close()
             except Exception:
                 pass
-            # Also update history DB (best-effort)
-            try:
-                import sqlite3 as _sqlite3
-                hconn = _sqlite3.connect(db.db_paths['history'])
-                hcur = hconn.cursor()
-                hcur.execute("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", (abstract, row['id']))
-                hconn.commit()
-                hconn.close()
-            except Exception:
-                pass
             fetched += 1
             if max_per_topic is not None and fetched >= max_per_topic:
                 break
