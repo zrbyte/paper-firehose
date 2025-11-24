@@ -93,7 +93,6 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
         output:
           filename: "test_topic_filtered.html"
           filename_ranked: "test_topic_ranked.html"
-          filename_summary: "test_topic_summary.html"
         """
     ).strip() + "\n"
 
@@ -201,25 +200,18 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
     html_dir = data_dir / "html"
     filtered_path = html_dir / "test_topic_filtered.html"
     ranked_path = html_dir / "test_topic_ranked.html"
-    summary_path = html_dir / "test_topic_summary.html"
 
     assert filtered_path.exists()
     assert ranked_path.exists()
-    assert summary_path.exists()
 
     filtered_html = filtered_path.read_text(encoding="utf-8")
     ranked_html = ranked_path.read_text(encoding="utf-8")
-    summary_html = summary_path.read_text(encoding="utf-8")
 
     assert "Graphene breakthroughs in materials science" in filtered_html
     assert "Other topic unrelated to filters" not in filtered_html
 
     # Ranked output should include the assigned score badge from DummyRanker
     assert "Score 0.90" in ranked_html
-
-    # Summary page should still list the entry and note the fallback text
-    assert "Graphene breakthroughs in materials science" in summary_html
-    assert "Graphene summary for experts" in summary_html
 
     # Ensure the environment override directed outputs into the temporary directory
     assert filtered_path.is_file() and str(filtered_path).startswith(str(data_dir))

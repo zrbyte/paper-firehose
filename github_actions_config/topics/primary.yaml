@@ -98,33 +98,8 @@ abstract_fetch:
   enabled: true
   rank_threshold: 0.25 # this overrides the global rank_threshold in config.yaml. Should be smaller than score_cutoff
 
-# LLM summary configuration
-llm_summary:
-  enabled: true
-  prompt: > # Uses ranking_query from the ranking configuration to assess topical relevance
-    You are a world-class condensed-matter researcher specializing in 2D van der Waals materials,
-    STM, and charge transport in graphene/graphite systems. 
-    Focus on topical relevance (graphene, rhombohedral graphite,
-    moiré/twisted systems, STM), novelty/impact, and experimental/theory significance.
-    Be concise and expert-focused. Keep text concise and information-dense.
-    Avoid using superlatives and other over-the-top language.
-    CRITICAL: Return ONLY valid JSON with the exact structure specified.
-    No markdown formatting, no explanations, no text before or after the JSON object.
-    Required JSON structure:
-    {
-      "summary": "Brief technical summary of the paper", three sentences.
-      "topical_relevance": "Assessment of relevance to: {ranking_query}, in one sentence",
-      "novelty_impact": "Evaluation of novelty and potential impact", in two sentences.
-    }
-  # Cutoffs: strongest cutoff applies (the one returning the fewest entries)
-  # score_cutoff: minimum cosine similarity (0.0–1.0)
-  score_cutoff: 0.3
-  # Top N papers to return, hard cutoff after score_cutoff
-  top_n: 10
-
 # Output configuration
 output:
   filename: "results_primary.html"
   filename_ranked: "results_primary_ranked.html"
-  filename_summary: "results_primary_summary.html"
   archive: true # archive the output file to the "matched_entries_history.db" database

@@ -80,32 +80,5 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
             logger.error(f"Error generating HTML for topic '{topic_name}': {e}")
             continue
 
-    # Generate summarized HTML for each topic that has summaries
-    try:
-        html_gen = HTMLGenerator(template_path="llmsummary_template.html")
-        
-        for topic_name in topics_to_render:
-            try:
-                topic_config = config_manager.load_topic_config(topic_name)
-                output_config = topic_config.get('output', {})
-                summary_filename = output_config.get('filename_summary')
-                
-                if summary_filename:
-                    summary_path = resolve_data_path('html', summary_filename, ensure_parent=True)
-                    topic_display_name = topic_config.get('name', topic_name)
-                    # Always generate the summary page. The generator prefers PQA/LLM summaries
-                    # and falls back to ranked fields when none are available.
-                    html_gen.generate_summarized_html_from_database(
-                        db_manager,
-                        topic_name,
-                        str(summary_path),
-                        f"LLM Summaries - {topic_display_name}"
-                    )
-                    logger.info("Generated summarized HTML for topic '%s': %s", topic_name, summary_path)
-            except Exception as e:
-                logger.error("Failed to generate summarized HTML for topic '%s': %s", topic_name, e)
-    except Exception as e:
-        logger.error("Failed to generate summarized HTML: %s", e)
-
     db_manager.close_all_connections()
     logger.info("HTML generation from database completed")

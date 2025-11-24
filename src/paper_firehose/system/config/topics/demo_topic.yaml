@@ -68,29 +68,8 @@ abstract_fetch:
   enabled: true
   rank_threshold: 0.2 # this overrides the global rank_threshold in config.yaml. Should be smaller than score_cutoff
 
-llm_summary: # to be discontinued in future major versions. Paper-qa summarization much more useful.
-  enabled: true
-  prompt: > # Uses ranking_query from the ranking configuration to assess topical relevance
-    You are a domain expert on foooooooo and baaaaaar.
-    Prefer clear methodological advances and results with high potential impact.
-    Be concise and expert-focused. Keep text concise and information-dense.
-    Avoid using superlatives and other over-the-top language.
-    CRITICAL: Return ONLY valid JSON with the exact structure specified.
-    No markdown formatting, no explanations, no text before or after the JSON object.
-    Required JSON structure:
-    {
-      "summary": "Brief technical summary of the paper",
-      "topical_relevance": "Assessment of relevance to: {ranking_query}, in one sentence",
-      "novelty_impact": "Evaluation of novelty and potential impact"
-    }  
-  # Cutoffs: strongest cutoff applies (the one returning the fewest entries)
-  # score_cutoff: minimum cosine similarity (0.0–1.0)
-  score_cutoff: 0.3
-  top_n: 10
-
 # Output configuration
 output:
   filename: "results_demo.html"
   filename_ranked: "results_demo_ranked.html"
-  filename_summary: "results_demo_summary.html"
   archive: true # archive the output file to the "matched_entries_history.db" database

@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional
 from .commands import filter as filter_cmd
 from .commands import rank as rank_cmd
 from .commands import abstracts as abstracts_cmd
-from .commands import summarize as summarize_cmd
 from .commands import pqa_summary as pqa_summary_cmd
 from .commands import email_list as email_cmd
 from .core.config import ConfigManager, DEFAULT_CONFIG_PATH
@@ -24,7 +23,6 @@ __all__ = [
     'filter',
     'rank',
     'abstracts',
-    'summarize',
     'pqa_summary',
     'paperqa_summary',
     'email',
@@ -80,23 +78,6 @@ def abstracts(
     """
     cfg_path = config_path or _DEFAULT_CONFIG
     abstracts_cmd.run(cfg_path, topic, mailto=mailto, max_per_topic=limit, rps=rps or 1.0)
-
-
-def summarize(
-    topic: Optional[str] = None,
-    *,
-    rps: Optional[float] = None,
-    config_path: Optional[str] = None,
-) -> None:
-    """Run LLM summarization and write summaries into papers.db/history.
-
-    Args:
-        topic: Single topic (optional)
-        rps: Requests/second throttle (optional)
-        config_path: Path to config (optional)
-    """
-    cfg_path = config_path or _DEFAULT_CONFIG
-    summarize_cmd.run(cfg_path, topic, rps=rps)
 
 
 def pqa_summary(
@@ -234,7 +215,6 @@ def html(
 
     base_generator = HTMLGenerator()
     ranked_generator = HTMLGenerator(template_path='ranked_template.html')
-    summary_generator = HTMLGenerator(template_path='llmsummary_template.html')
 
     try:
         for topic_name in topics_to_render:
@@ -271,20 +251,6 @@ def html(
                 )
             except Exception as exc:
                 logger.error("Failed to generate ranked HTML for topic '%s': %s", topic_name, exc)
-
-            summary_output_path = output_config.get('filename_summary')
-            if summary_output_path:
-                summary_title = f"LLM Summaries - {heading}"
-                try:
-                    summary_target = _resolve_output_path(summary_output_path)
-                    summary_generator.generate_summarized_html_from_database(
-                        db_manager,
-                        topic_name,
-                        str(summary_target),
-                        summary_title,
-                    )
-                except Exception as exc:
-                    logger.error("Failed to generate summarized HTML for topic '%s': %s", topic_name, exc)
     finally:
         db_manager.close_all_connections()
 
