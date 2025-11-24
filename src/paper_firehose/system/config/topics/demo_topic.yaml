@@ -44,8 +44,8 @@ feeds:
 
 # Regex filter
 filter:
-  pattern: '(foo)|\
-            (bar)'
+  pattern: '(foo.*)|\
+            (.*bar)'
   fields: ["title", "summary"]
 
 # Ranking configuration
