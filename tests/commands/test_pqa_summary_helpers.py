@@ -175,6 +175,24 @@ def test_write_pqa_summary_to_dbs_updates_tables(tmp_path):
                 "history": str(history_path),
             }
 
+        def get_connection(self, db_key='current', row_factory=True):
+            """Mock context manager for database connections."""
+            from contextlib import contextmanager
+            @contextmanager
+            def _conn():
+                conn = sqlite3.connect(self.db_paths[db_key])
+                if row_factory:
+                    conn.row_factory = sqlite3.Row
+                try:
+                    yield conn
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    conn.close()
+            return _conn()
+
     db = DummyDB(current, history)
     payload = json.dumps({"summary": "done", "methods": "m"})
 

@@ -11,7 +11,8 @@ import os
 import datetime
 import hashlib
 import urllib.parse
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Iterator
+from contextlib import contextmanager
 import logging
 import glob
 
@@ -317,102 +318,126 @@ class DatabaseManager:
     
     def is_new_entry(self, title: str) -> bool:
         """Check if an entry is new (title not in all_feed_entries.db)."""
-        conn = sqlite3.connect(self.db_paths['all_feeds'])
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            "SELECT 1 FROM feed_entries WHERE title = ?",
-            (title,)
-        )
-        result = cursor.fetchone()
-        conn.close()
-        
-        return result is None
+        with self.get_connection('all_feeds', row_factory=False) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT 1 FROM feed_entries WHERE title = ?",
+                (title,)
+            )
+            result = cursor.fetchone()
+            return result is None
     
     def save_feed_entry(self, entry: Dict[str, Any], feed_name: str, entry_id: str):
         """Save an entry to all_feed_entries.db with proper date formatting."""
-        conn = sqlite3.connect(self.db_paths['all_feeds'])
-        cursor = conn.cursor()
-        
-        authors = self._extract_authors(entry)
-        raw_data = json.dumps(entry, default=str)
-        
-        # Ensure published_date is in YYYY-MM-DD format
-        published_date = self._format_published_date(entry)
-        title = entry.get('title', '').strip()
-        
-        cursor.execute('''
-            INSERT OR REPLACE INTO feed_entries 
-            (entry_id, feed_name, title, link, summary, authors, published_date, 
-             first_seen, last_seen, raw_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 
-                    COALESCE((SELECT first_seen FROM feed_entries WHERE title = ?), datetime('now')),
-                    datetime('now'), ?)
-        ''', (
-            entry_id, feed_name, 
-            title, 
-            entry.get('link', ''),
-            entry.get('summary', entry.get('description', '')),
-            authors,
-            published_date,
-            title,  # for COALESCE subquery
-            raw_data
-        ))
-        
-        conn.commit()
-        conn.close()
+        with self.get_connection('all_feeds', row_factory=False) as conn:
+            cursor = conn.cursor()
+
+            authors = self._extract_authors(entry)
+            raw_data = json.dumps(entry, default=str)
+
+            # Ensure published_date is in YYYY-MM-DD format
+            published_date = self._format_published_date(entry)
+            title = entry.get('title', '').strip()
+
+            cursor.execute('''
+                INSERT OR REPLACE INTO feed_entries
+                (entry_id, feed_name, title, link, summary, authors, published_date,
+                 first_seen, last_seen, raw_data)
+                VALUES (?, ?, ?, ?, ?, ?, ?,
+                        COALESCE((SELECT first_seen FROM feed_entries WHERE title = ?), datetime('now')),
+                        datetime('now'), ?)
+            ''', (
+                entry_id, feed_name,
+                title,
+                entry.get('link', ''),
+                entry.get('summary', entry.get('description', '')),
+                authors,
+                published_date,
+                title,  # for COALESCE subquery
+                raw_data
+            ))
     
     # Note: helper methods `is_entry_in_history` and `get_entry_topics_from_history`
     # were unused and have been removed to reduce surface area.
     
     def save_matched_entry(self, entry: Dict[str, Any], feed_name: str, topic: str, entry_id: str):
         """Save a matched entry to matched_entries_history.db, merging topics if entry already exists."""
-        conn = sqlite3.connect(self.db_paths['history'])
-        cursor = conn.cursor()
-        
-        # Check if entry already exists in history
-        cursor.execute(
-            "SELECT topics FROM matched_entries WHERE entry_id = ?",
-            (entry_id,)
-        )
-        existing = cursor.fetchone()
-        
-        if existing:
-            # Entry exists, merge the new topic with existing topics
-            existing_topics = existing[0].split(', ') if existing[0] else []
-            if topic not in existing_topics:
-                existing_topics.append(topic)
-                merged_topics = ', '.join(sorted(existing_topics))
-                
-                cursor.execute('''
-                    UPDATE matched_entries 
-                    SET topics = ?, matched_date = datetime('now')
-                    WHERE entry_id = ?
-                ''', (merged_topics, entry_id))
-                
-                logger.debug(f"Updated entry {entry_id[:8]}... with merged topics: {merged_topics}")
+        with self.get_connection('history', row_factory=False) as conn:
+            cursor = conn.cursor()
+
+            # Check if entry already exists in history
+            cursor.execute(
+                "SELECT topics FROM matched_entries WHERE entry_id = ?",
+                (entry_id,)
+            )
+            existing = cursor.fetchone()
+
+            if existing:
+                # Entry exists, merge the new topic with existing topics
+                existing_topics = existing[0].split(', ') if existing[0] else []
+                if topic not in existing_topics:
+                    existing_topics.append(topic)
+                    merged_topics = ', '.join(sorted(existing_topics))
+
+                    cursor.execute('''
+                        UPDATE matched_entries
+                        SET topics = ?, matched_date = datetime('now')
+                        WHERE entry_id = ?
+                    ''', (merged_topics, entry_id))
+
+                    logger.debug(f"Updated entry {entry_id[:8]}... with merged topics: {merged_topics}")
+                else:
+                    logger.debug(f"Entry {entry_id[:8]}... already has topic '{topic}', skipping")
             else:
-                logger.debug(f"Entry {entry_id[:8]}... already has topic '{topic}', skipping")
-        else:
-            # New entry, insert it
+                # New entry, insert it
+                authors = self._extract_authors(entry)
+                raw_data = json.dumps(entry, default=str)
+                published_date = self._format_published_date(entry)
+                doi = self._extract_doi(entry)
+                rank_value = entry.get('rank_score')
+                if rank_value is not None:
+                    try:
+                        rank_value = float(rank_value)
+                    except (TypeError, ValueError):
+                        rank_value = None
+
+                cursor.execute('''
+                    INSERT INTO matched_entries
+                    (entry_id, feed_name, topics, title, link, summary, authors, abstract, doi,
+                     published_date, matched_date, raw_data, rank_score)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)
+                ''', (
+                    entry_id, feed_name, topic,
+                    entry.get('title', ''),
+                    entry.get('link', ''),
+                    entry.get('summary', entry.get('description', '')),
+                    authors,
+                    None,  # abstract to be populated later (Crossref)
+                    doi,
+                    published_date,
+                    raw_data,
+                    rank_value
+                ))
+
+                logger.debug(f"Added new entry {entry_id[:8]}... to history database with topic: {topic}")
+    
+    def save_current_entry(self, entry: Dict[str, Any], feed_name: str, topic: str, entry_id: str):
+        """Save an entry to papers.db for current run processing."""
+        with self.get_connection('current', row_factory=False) as conn:
+            cursor = conn.cursor()
+
             authors = self._extract_authors(entry)
             raw_data = json.dumps(entry, default=str)
             published_date = self._format_published_date(entry)
             doi = self._extract_doi(entry)
-            rank_value = entry.get('rank_score')
-            if rank_value is not None:
-                try:
-                    rank_value = float(rank_value)
-                except (TypeError, ValueError):
-                    rank_value = None
-            
+
             cursor.execute('''
-                INSERT INTO matched_entries 
-                (entry_id, feed_name, topics, title, link, summary, authors, abstract, doi,
-                 published_date, matched_date, raw_data, rank_score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)
+                INSERT OR REPLACE INTO entries
+                (id, topic, feed_name, title, link, summary, authors, abstract, doi,
+                 published_date, discovered_date, status, raw_data)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'filtered', ?)
             ''', (
-                entry_id, feed_name, topic,
+                entry_id, topic, feed_name,
                 entry.get('title', ''),
                 entry.get('link', ''),
                 entry.get('summary', entry.get('description', '')),
@@ -420,83 +445,41 @@ class DatabaseManager:
                 None,  # abstract to be populated later (Crossref)
                 doi,
                 published_date,
-                raw_data,
-                rank_value
+                raw_data
             ))
-            
-            logger.debug(f"Added new entry {entry_id[:8]}... to history database with topic: {topic}")
-        
-        conn.commit()
-        conn.close()
-    
-    def save_current_entry(self, entry: Dict[str, Any], feed_name: str, topic: str, entry_id: str):
-        """Save an entry to papers.db for current run processing."""
-        conn = sqlite3.connect(self.db_paths['current'])
-        cursor = conn.cursor()
-        
-        authors = self._extract_authors(entry)
-        raw_data = json.dumps(entry, default=str)
-        published_date = self._format_published_date(entry)
-        doi = self._extract_doi(entry)
-        
-        cursor.execute('''
-            INSERT OR REPLACE INTO entries 
-            (id, topic, feed_name, title, link, summary, authors, abstract, doi,
-             published_date, discovered_date, status, raw_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'filtered', ?)
-        ''', (
-            entry_id, topic, feed_name,
-            entry.get('title', ''),
-            entry.get('link', ''),
-            entry.get('summary', entry.get('description', '')),
-            authors,
-            None,  # abstract to be populated later (Crossref)
-            doi,
-            published_date,
-            raw_data
-        ))
-        
-        conn.commit()
-        conn.close()
     
     def get_current_entries(self, topic: str = None, status: str = None) -> List[Dict[str, Any]]:
         """Get entries from papers.db with optional filtering."""
-        conn = sqlite3.connect(self.db_paths['current'])
-        cursor = conn.cursor()
-        
-        query = "SELECT * FROM entries WHERE 1=1"
-        params = []
-        
-        if topic:
-            query += " AND topic = ?"
-            params.append(topic)
-        
-        if status:
-            query += " AND status = ?"
-            params.append(status)
-        
-        query += " ORDER BY discovered_date DESC"
-        
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        
-        # Convert to list of dicts
-        columns = [description[0] for description in cursor.description]
-        entries = [dict(zip(columns, row)) for row in rows]
-        
-        conn.close()
-        return entries
+        with self.get_connection('current', row_factory=True) as conn:
+            cursor = conn.cursor()
+
+            query = "SELECT * FROM entries WHERE 1=1"
+            params = []
+
+            if topic:
+                query += " AND topic = ?"
+                params.append(topic)
+
+            if status:
+                query += " AND status = ?"
+                params.append(status)
+
+            query += " ORDER BY discovered_date DESC"
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            # Convert Row objects to dicts
+            return [dict(row) for row in rows]
     
     # Note: `get_entries_for_html_generation` has been removed; HTML generation
     # reads via `get_current_entries` directly.
     
     def clear_current_db(self):
         """Clear the current run database."""
-        conn = sqlite3.connect(self.db_paths['current'])
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM entries")
-        conn.commit()
-        conn.close()
+        with self.get_connection('current', row_factory=False) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM entries")
 
     def update_entry_rank(self, entry_id: str, topic: str, score: float | None, reasoning: str | None = None) -> None:
         """Update rank_score (and optionally rank_reasoning) for a single entry.
@@ -507,26 +490,23 @@ class DatabaseManager:
             score: Rank score to persist (cosine similarity or None)
             reasoning: Optional concise reasoning string
         """
-        conn = sqlite3.connect(self.db_paths['current'])
-        cursor = conn.cursor()
-        if reasoning is None:
-            cursor.execute(
-                "UPDATE entries SET rank_score = ? WHERE id = ? AND topic = ?",
-                (score, entry_id, topic),
-            )
-        else:
-            cursor.execute(
-                "UPDATE entries SET rank_score = ?, rank_reasoning = ? WHERE id = ? AND topic = ?",
-                (score, reasoning, entry_id, topic),
-        )
-        conn.commit()
-        conn.close()
+        with self.get_connection('current', row_factory=False) as conn:
+            cursor = conn.cursor()
+            if reasoning is None:
+                cursor.execute(
+                    "UPDATE entries SET rank_score = ? WHERE id = ? AND topic = ?",
+                    (score, entry_id, topic),
+                )
+            else:
+                cursor.execute(
+                    "UPDATE entries SET rank_score = ?, rank_reasoning = ? WHERE id = ? AND topic = ?",
+                    (score, reasoning, entry_id, topic),
+                )
 
     def update_history_rank(self, entry_id: str, score: float | None) -> None:
         """Update the historical rank_score, keeping the highest score seen."""
-        conn = sqlite3.connect(self.db_paths['history'])
-        cursor = conn.cursor()
-        try:
+        with self.get_connection('history', row_factory=False) as conn:
+            cursor = conn.cursor()
             if score is None:
                 cursor.execute(
                     "UPDATE matched_entries SET rank_score = NULL WHERE entry_id = ?",
@@ -546,9 +526,6 @@ class DatabaseManager:
                     """,
                     (score_val, score_val, entry_id),
                 )
-        finally:
-            conn.commit()
-            conn.close()
     
     def purge_old_entries(self, days: int):
         """Remove entries from the most recent N days (including today) based on publication date (YYYY-MM-DD)."""
@@ -556,57 +533,51 @@ class DatabaseManager:
         end_date = datetime.datetime.now().date().isoformat()
         
         logger.info(f"Purging entries from {start_date} to {end_date} (last {days} days)")
-        
+
         # Purge from all_feed_entries.db based on publication_date
-        conn = sqlite3.connect(self.db_paths['all_feeds'])
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            DELETE FROM feed_entries
-            WHERE published_date IS NOT NULL
-              AND TRIM(published_date) != ''
-              AND DATE(published_date) BETWEEN DATE(?) AND DATE(?)
-            """,
-            (start_date, end_date),
-        )
-        deleted_count = cursor.rowcount
-        conn.commit()
-        conn.close()
-        logger.info(f"Purged {deleted_count} entries from all_feed_entries.db")
-        
+        with self.get_connection('all_feeds', row_factory=False) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM feed_entries
+                WHERE published_date IS NOT NULL
+                  AND TRIM(published_date) != ''
+                  AND DATE(published_date) BETWEEN DATE(?) AND DATE(?)
+                """,
+                (start_date, end_date),
+            )
+            deleted_count = cursor.rowcount
+            logger.info(f"Purged {deleted_count} entries from all_feed_entries.db")
+
         # Purge from matched_entries_history.db based on published_date
-        conn = sqlite3.connect(self.db_paths['history'])
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            DELETE FROM matched_entries
-            WHERE published_date IS NOT NULL
-              AND TRIM(published_date) != ''
-              AND DATE(published_date) BETWEEN DATE(?) AND DATE(?)
-            """,
-            (start_date, end_date),
-        )
-        deleted_count = cursor.rowcount
-        conn.commit()
-        conn.close()
-        logger.info(f"Purged {deleted_count} entries from matched_entries_history.db")
-        
+        with self.get_connection('history', row_factory=False) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM matched_entries
+                WHERE published_date IS NOT NULL
+                  AND TRIM(published_date) != ''
+                  AND DATE(published_date) BETWEEN DATE(?) AND DATE(?)
+                """,
+                (start_date, end_date),
+            )
+            deleted_count = cursor.rowcount
+            logger.info(f"Purged {deleted_count} entries from matched_entries_history.db")
+
         # Purge from papers.db based on published_date
-        conn = sqlite3.connect(self.db_paths['current'])
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            DELETE FROM entries
-            WHERE published_date IS NOT NULL
-              AND TRIM(published_date) != ''
-              AND DATE(published_date) BETWEEN DATE(?) AND DATE(?)
-            """,
-            (start_date, end_date),
-        )
-        deleted_count = cursor.rowcount
-        conn.commit()
-        conn.close()
-        logger.info(f"Purged {deleted_count} entries from papers.db")
+        with self.get_connection('current', row_factory=False) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM entries
+                WHERE published_date IS NOT NULL
+                  AND TRIM(published_date) != ''
+                  AND DATE(published_date) BETWEEN DATE(?) AND DATE(?)
+                """,
+                (start_date, end_date),
+            )
+            deleted_count = cursor.rowcount
+            logger.info(f"Purged {deleted_count} entries from papers.db")
     
     def _extract_authors(self, entry: Dict[str, Any]) -> str:
         """Extract authors string from entry."""
@@ -719,7 +690,182 @@ class DatabaseManager:
                     return doi
 
         return None
-    
+
+    @contextmanager
+    def get_connection(self, db_key: str = 'current', row_factory: bool = True):
+        """Context manager for database connections with automatic commit/rollback.
+
+        Args:
+            db_key: Which database to connect to ('current', 'history', 'all_feeds')
+            row_factory: If True, use sqlite3.Row factory for dict-like row access
+
+        Yields:
+            sqlite3.Connection: Database connection
+
+        Example:
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM entries")
+                # Auto-commits on success, auto-closes always
+        """
+        conn = sqlite3.connect(self.db_paths[db_key])
+        if row_factory:
+            conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def iter_targets(self, topic: Optional[str] = None, min_rank: Optional[float] = None) -> Iterator[sqlite3.Row]:
+        """Iterator for entries that need abstract fetching.
+
+        Args:
+            topic: Optional topic filter (if None, fetches all topics)
+            min_rank: Optional minimum rank score filter
+
+        Yields:
+            sqlite3.Row: Database rows with dict-like access
+        """
+        with self.get_connection('current') as conn:
+            cursor = conn.cursor()
+
+            query = """
+                SELECT id, topic, doi, abstract, rank_score, raw_data, title,
+                       feed_name, summary, link, authors, published_date
+                FROM entries
+                WHERE 1=1
+            """
+            params = []
+
+            if topic:
+                query += " AND topic = ?"
+                params.append(topic)
+
+            if min_rank is not None:
+                query += " AND rank_score >= ?"
+                params.append(min_rank)
+
+            query += " ORDER BY rank_score DESC"
+
+            cursor.execute(query, params)
+            for row in cursor:
+                yield row
+
+    def update_abstracts_batch(self, updates: List[tuple]) -> int:
+        """Batch update abstracts for multiple entries.
+
+        Args:
+            updates: List of (abstract, doi, entry_id, topic) tuples
+
+        Returns:
+            Number of rows updated
+        """
+        if not updates:
+            return 0
+
+        with self.get_connection('current') as conn:
+            cursor = conn.cursor()
+            cursor.executemany(
+                "UPDATE entries SET abstract = ?, doi = ? WHERE id = ? AND topic = ?",
+                updates
+            )
+            return cursor.rowcount
+
+    def update_history_abstracts_batch(self, updates: List[tuple]) -> int:
+        """Batch update abstracts in history database.
+
+        Args:
+            updates: List of (abstract, doi, entry_id) tuples
+
+        Returns:
+            Number of rows updated
+        """
+        if not updates:
+            return 0
+
+        with self.get_connection('history') as conn:
+            cursor = conn.cursor()
+            cursor.executemany(
+                "UPDATE matched_entries SET abstract = ?, doi = ? WHERE entry_id = ?",
+                updates
+            )
+            return cursor.rowcount
+
+    def get_entries_by_criteria(self,
+                                 topic: Optional[str] = None,
+                                 min_rank: Optional[float] = None,
+                                 status: Optional[str] = None,
+                                 has_doi: Optional[bool] = None,
+                                 order_by: str = 'rank_score DESC') -> List[sqlite3.Row]:
+        """Flexible query builder for entries with various criteria.
+
+        Args:
+            topic: Optional topic filter
+            min_rank: Optional minimum rank score
+            status: Optional status filter
+            has_doi: If True, only entries with DOI; if False, only without DOI
+            order_by: ORDER BY clause (default: 'rank_score DESC')
+
+        Returns:
+            List of sqlite3.Row objects with dict-like access
+        """
+        with self.get_connection('current') as conn:
+            cursor = conn.cursor()
+
+            query = "SELECT * FROM entries WHERE 1=1"
+            params = []
+
+            if topic:
+                query += " AND topic = ?"
+                params.append(topic)
+
+            if min_rank is not None:
+                query += " AND rank_score >= ?"
+                params.append(min_rank)
+
+            if status:
+                query += " AND status = ?"
+                params.append(status)
+
+            if has_doi is True:
+                query += " AND doi IS NOT NULL AND doi != ''"
+            elif has_doi is False:
+                query += " AND (doi IS NULL OR doi = '')"
+
+            query += f" ORDER BY {order_by}"
+
+            cursor.execute(query, params)
+            return cursor.fetchall()
+
+    def iter_history_entries(self, entry_ids: List[str]) -> Iterator[sqlite3.Row]:
+        """Iterator for history entries by ID.
+
+        Args:
+            entry_ids: List of entry IDs to fetch
+
+        Yields:
+            sqlite3.Row: Database rows with dict-like access
+        """
+        if not entry_ids:
+            return
+
+        with self.get_connection('history') as conn:
+            cursor = conn.cursor()
+            placeholders = ','.join(['?'] * len(entry_ids))
+            query = f"""
+                SELECT entry_id, feed_name, topics, title, link, summary,
+                       doi, matched_date, abstract, rank_score
+                FROM matched_entries
+                WHERE entry_id IN ({placeholders})
+            """
+            cursor.execute(query, entry_ids)
+            for row in cursor:
+                yield row
+
     def close_all_connections(self):
         """Close any open database connections (placeholder for connection pooling)."""
         pass

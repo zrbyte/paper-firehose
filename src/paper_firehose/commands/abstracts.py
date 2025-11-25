@@ -331,26 +331,12 @@ def try_publisher_apis(doi: Optional[str], feed_name: str, link: str, *, mailto:
 
 def _iter_targets(db: DatabaseManager, topic: str, threshold: float) -> Iterable[Dict[str, Any]]:
     """Yield ranked DB rows lacking abstracts for the given topic, highest score first."""
-    # Query directly for performance
-    import sqlite3
-    conn = sqlite3.connect(db.db_paths['current'])
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, topic, doi, abstract, rank_score, raw_data, title, feed_name, summary, link
-        FROM entries
-        WHERE topic = ?
-          AND (abstract IS NULL OR TRIM(abstract) = '')
-          AND rank_score IS NOT NULL
-          AND rank_score >= ?
-        ORDER BY rank_score DESC
-        """,
-        (topic, threshold),
-    )
-    cols = [d[0] for d in cur.description]
-    for row in cur.fetchall():
-        yield dict(zip(cols, row))
-    conn.close()
+    # Use DatabaseManager's iter_targets method with additional abstract filtering
+    for row in db.iter_targets(topic=topic, min_rank=threshold):
+        # Filter out rows that already have abstracts
+        abstract = row['abstract']
+        if abstract is None or (isinstance(abstract, str) and abstract.strip() == ''):
+            yield dict(row)
 
 
 def _fill_arxiv_summaries(db: DatabaseManager, topics: Optional[list[str]] = None) -> int:
@@ -358,58 +344,54 @@ def _fill_arxiv_summaries(db: DatabaseManager, topics: Optional[list[str]] = Non
 
     Returns number of rows updated.
     """
-    import sqlite3
-    conn = sqlite3.connect(db.db_paths['current'])
-    cur = conn.cursor()
-    params: list = []
-    topic_filter = ""
-    if topics:
-        placeholders = ",".join(["?"] * len(topics))
-        topic_filter = f" AND topic IN ({placeholders})"
-        params.extend(topics)
-    cur.execute(
-        f"""
-        SELECT id, topic, feed_name, link, summary
-        FROM entries
-        WHERE (abstract IS NULL OR TRIM(abstract) = '')
-          AND (
-                LOWER(COALESCE(feed_name, '')) LIKE '%cond-mat%'
-             OR LOWER(COALESCE(feed_name, '')) LIKE '%arxiv%'
-             OR LOWER(COALESCE(link, '')) LIKE '%arxiv.org%'
-          )
-          {topic_filter}
-        """,
-        params,
-    )
-    rows = cur.fetchall()
+    with db.get_connection('current') as conn:
+        cur = conn.cursor()
+        params: list = []
+        topic_filter = ""
+        if topics:
+            placeholders = ",".join(["?"] * len(topics))
+            topic_filter = f" AND topic IN ({placeholders})"
+            params.extend(topics)
+        cur.execute(
+            f"""
+            SELECT id, topic, feed_name, link, summary
+            FROM entries
+            WHERE (abstract IS NULL OR TRIM(abstract) = '')
+              AND (
+                    LOWER(COALESCE(feed_name, '')) LIKE '%cond-mat%'
+                 OR LOWER(COALESCE(feed_name, '')) LIKE '%arxiv%'
+                 OR LOWER(COALESCE(link, '')) LIKE '%arxiv.org%'
+              )
+              {topic_filter}
+            """,
+            params,
+        )
+        rows = cur.fetchall()
 
     # Collect all updates for batch processing
     papers_updates = []
     history_updates = []
 
-    for id_, tpc, feed, link, summary in rows:
+    for row in rows:
+        id_ = row['id']
+        tpc = row['topic']
+        summary = row['summary']
         if not summary:
             continue
         cleaned = _clean_for_db(summary)
         if cleaned:
-            papers_updates.append((cleaned, id_, tpc))
-            history_updates.append((cleaned, id_))
+            # Note: DOI stays None for these arXiv entries
+            papers_updates.append((cleaned, None, id_, tpc))
+            history_updates.append((cleaned, None, id_))
 
-    # Batch update papers.db
+    # Batch update papers.db using DatabaseManager method
     if papers_updates:
-        cur.executemany("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", papers_updates)
-        conn.commit()
-    conn.close()
+        db.update_abstracts_batch(papers_updates)
 
     # Batch update history DB (best-effort)
     if history_updates:
         try:
-            import sqlite3 as _sqlite3
-            hconn = _sqlite3.connect(db.db_paths['history'])
-            hcur = hconn.cursor()
-            hcur.executemany("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", history_updates)
-            hconn.commit()
-            hconn.close()
+            db.update_history_abstracts_batch(history_updates)
         except Exception:
             pass
 
@@ -442,30 +424,20 @@ def _crossref_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto:
             time.sleep(min_interval)
         if abstract:
             abstract = _clean_for_db(abstract)
-            papers_updates.append((abstract, row['id'], topic))
-            history_updates.append((abstract, row['id']))
+            papers_updates.append((abstract, doi, row['id'], topic))
+            history_updates.append((abstract, doi, row['id']))
             fetched += 1
             if max_per_topic is not None and fetched >= max_per_topic:
                 break
 
-    # Batch update papers.db
+    # Batch update papers.db using DatabaseManager method
     if papers_updates:
-        import sqlite3
-        conn = sqlite3.connect(db.db_paths['current'])
-        cur = conn.cursor()
-        cur.executemany("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", papers_updates)
-        conn.commit()
-        conn.close()
+        db.update_abstracts_batch(papers_updates)
 
     # Batch update history DB (best-effort)
     if history_updates:
         try:
-            import sqlite3 as _sqlite3
-            hconn = _sqlite3.connect(db.db_paths['history'])
-            hcur = hconn.cursor()
-            hcur.executemany("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", history_updates)
-            hconn.commit()
-            hconn.close()
+            db.update_history_abstracts_batch(history_updates)
         except Exception:
             pass
 
@@ -494,31 +466,21 @@ def _fallback_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto:
         abstract = try_publisher_apis(doi, row.get('feed_name') or '', row.get('link') or '', mailto=mailto, session=session)
         if abstract:
             abstract = _clean_for_db(abstract)
-            papers_updates.append((abstract, row['id'], topic))
-            history_updates.append((abstract, row['id']))
+            papers_updates.append((abstract, doi, row['id'], topic))
+            history_updates.append((abstract, doi, row['id']))
             fetched += 1
             time.sleep(min_interval)
             if max_per_topic is not None and fetched >= max_per_topic:
                 break
 
-    # Batch update papers.db
+    # Batch update papers.db using DatabaseManager method
     if papers_updates:
-        import sqlite3
-        conn = sqlite3.connect(db.db_paths['current'])
-        cur = conn.cursor()
-        cur.executemany("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", papers_updates)
-        conn.commit()
-        conn.close()
+        db.update_abstracts_batch(papers_updates)
 
     # Batch update history DB (best-effort)
     if history_updates:
         try:
-            import sqlite3 as _sqlite3
-            hconn = _sqlite3.connect(db.db_paths['history'])
-            hcur = hconn.cursor()
-            hcur.executemany("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", history_updates)
-            hconn.commit()
-            hconn.close()
+            db.update_history_abstracts_batch(history_updates)
         except Exception:
             pass
 
