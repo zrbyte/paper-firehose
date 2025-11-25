@@ -16,7 +16,7 @@ Documentation: [zrbyte.github.io/paper-firehose](https://zrbyte.github.io/paper-
 
 Configuration is done using only YAML text files. On first run the default YAML configs are copied into your runtime data directory (defaults to `~/.paper_firehose`, override with `PAPER_FIREHOSE_DATA_DIR`) from `src/paper_firehose/system/config`. Edit those files to customize feeds and topics. To reuse the GitHub Actions config locally, run `python scripts/bootstrap_config.py` – it copies `github_actions_config/` into your data directory so you work with the same files as the scheduled GitHub Actions workflow.
 
-Set up an OpenAI API key environment variable for summarization to work.
+Set up an OpenAI API key environment variable for paper-qa summarization to work.
 
 ### Automated run using GitHub Actions
 - Fork the repo.
@@ -41,7 +41,6 @@ paper-firehose status
 paper-firehose filter
 paper-firehose rank
 paper-firehose abstracts --mailto you@example.com --rps 1.0
-paper-firehose pqa_summary    # optional (needs OpenAI key, thus you have to bear the API costs)
 paper-firehose html           # write HTML from DB
 ```
 You can specify to run a specific topic, with the `--topic YOUR_TOPIC` option.
@@ -135,8 +134,8 @@ Runtime data dir
 - First run seeds `config/`, `templates/`, and optional `models/` from the bundled `system/` directory.
 
 Files to edit
-- `config/config.yaml`: global settings (DB paths, feeds, LLM, paper‑qa, defaults, optional email/SMTP)
-- `config/topics/<topic>.yaml`: topic name/description, feeds, regex filter, ranking, abstract fetch, LLM summary, and output filenames
+- `config/config.yaml`: global settings (DB paths, feeds, paper‑qa, defaults, optional email/SMTP)
+- `config/topics/<topic>.yaml`: topic name/description, feeds, regex filter, ranking, abstract fetch and output filenames
 - `config/secrets/`: secret material that should not be committed. These secrets can be either stored as `*.env` files or as environment variables.
   - `openaikulcs.env`: OpenAI API key for `pqa_summary`
   - `email_password.env`: SMTP password (referenced by `email.smtp.password_file`)
