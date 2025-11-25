@@ -50,7 +50,7 @@ filter:
 # Ranking configuration
 ranking: 
   query: >   # Natural-language ranking query used for sentence-transformers similarity
-    foobar, barfoo
+    graphene, STM, scanning tunneling microscopy
 
   # Optional additional negative phrases to downweight (list may be empty)
   negative_queries: [erratum, correction, reply, corrigendum]
