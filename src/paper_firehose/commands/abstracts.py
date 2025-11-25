@@ -382,31 +382,46 @@ def _fill_arxiv_summaries(db: DatabaseManager, topics: Optional[list[str]] = Non
         params,
     )
     rows = cur.fetchall()
-    updated = 0
+
+    # Collect all updates for batch processing
+    papers_updates = []
+    history_updates = []
+
     for id_, tpc, feed, link, summary in rows:
         if not summary:
             continue
         cleaned = _clean_for_db(summary)
         if cleaned:
-            cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (cleaned, id_, tpc))
-            updated += 1
-            # Also update history DB (best-effort)
-            try:
-                import sqlite3 as _sqlite3
-                hconn = _sqlite3.connect(db.db_paths['history'])
-                hcur = hconn.cursor()
-                hcur.execute("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", (cleaned, id_))
-                hconn.commit()
-                hconn.close()
-            except Exception:
-                pass
-    conn.commit()
+            papers_updates.append((cleaned, id_, tpc))
+            history_updates.append((cleaned, id_))
+
+    # Batch update papers.db
+    if papers_updates:
+        cur.executemany("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", papers_updates)
+        conn.commit()
     conn.close()
-    return updated
+
+    # Batch update history DB (best-effort)
+    if history_updates:
+        try:
+            import sqlite3 as _sqlite3
+            hconn = _sqlite3.connect(db.db_paths['history'])
+            hcur = hconn.cursor()
+            hcur.executemany("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", history_updates)
+            hconn.commit()
+            hconn.close()
+        except Exception:
+            pass
+
+    return len(papers_updates)
 
 
 def _crossref_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto: str, session: requests.Session, min_interval: float, max_per_topic: Optional[int], max_retries: int = 3) -> int:
     """Second pass: Crossref only (DOI first, then title) for entries above threshold."""
+    # Collect all updates for batch processing
+    papers_updates = []
+    history_updates = []
+
     fetched = 0
     for row in _iter_targets(db, topic, threshold):
         doi = row.get('doi') or _extract_doi_from_raw(row.get('raw_data'))
@@ -427,30 +442,42 @@ def _crossref_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto:
             time.sleep(min_interval)
         if abstract:
             abstract = _clean_for_db(abstract)
-            import sqlite3
-            conn = sqlite3.connect(db.db_paths['current'])
-            cur = conn.cursor()
-            cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (abstract, row['id'], topic))
-            conn.commit()
-            conn.close()
-            # Also update history DB (best-effort)
-            try:
-                import sqlite3 as _sqlite3
-                hconn = _sqlite3.connect(db.db_paths['history'])
-                hcur = hconn.cursor()
-                hcur.execute("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", (abstract, row['id']))
-                hconn.commit()
-                hconn.close()
-            except Exception:
-                pass
+            papers_updates.append((abstract, row['id'], topic))
+            history_updates.append((abstract, row['id']))
             fetched += 1
             if max_per_topic is not None and fetched >= max_per_topic:
                 break
+
+    # Batch update papers.db
+    if papers_updates:
+        import sqlite3
+        conn = sqlite3.connect(db.db_paths['current'])
+        cur = conn.cursor()
+        cur.executemany("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", papers_updates)
+        conn.commit()
+        conn.close()
+
+    # Batch update history DB (best-effort)
+    if history_updates:
+        try:
+            import sqlite3 as _sqlite3
+            hconn = _sqlite3.connect(db.db_paths['history'])
+            hcur = hconn.cursor()
+            hcur.executemany("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", history_updates)
+            hconn.commit()
+            hconn.close()
+        except Exception:
+            pass
+
     return fetched
 
 
 def _fallback_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto: str, session: requests.Session, min_interval: float, max_per_topic: Optional[int]) -> int:
     """Third pass: remaining above-threshold entries → Semantic Scholar / OpenAlex / PubMed."""
+    # Collect all updates for batch processing
+    papers_updates = []
+    history_updates = []
+
     fetched = 0
     for row in _iter_targets(db, topic, threshold):
         # Skip rows already filled by previous passes
@@ -467,16 +494,34 @@ def _fallback_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto:
         abstract = try_publisher_apis(doi, row.get('feed_name') or '', row.get('link') or '', mailto=mailto, session=session)
         if abstract:
             abstract = _clean_for_db(abstract)
-            import sqlite3
-            conn = sqlite3.connect(db.db_paths['current'])
-            cur = conn.cursor()
-            cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (abstract, row['id'], topic))
-            conn.commit()
-            conn.close()
+            papers_updates.append((abstract, row['id'], topic))
+            history_updates.append((abstract, row['id']))
             fetched += 1
             time.sleep(min_interval)
             if max_per_topic is not None and fetched >= max_per_topic:
                 break
+
+    # Batch update papers.db
+    if papers_updates:
+        import sqlite3
+        conn = sqlite3.connect(db.db_paths['current'])
+        cur = conn.cursor()
+        cur.executemany("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", papers_updates)
+        conn.commit()
+        conn.close()
+
+    # Batch update history DB (best-effort)
+    if history_updates:
+        try:
+            import sqlite3 as _sqlite3
+            hconn = _sqlite3.connect(db.db_paths['history'])
+            hcur = hconn.cursor()
+            hcur.executemany("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", history_updates)
+            hconn.commit()
+            hconn.close()
+        except Exception:
+            pass
+
     return fetched
 
 

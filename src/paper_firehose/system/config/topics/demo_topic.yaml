@@ -44,8 +44,7 @@ feeds:
 
 # Regex filter
 filter:
-  pattern: '(foo.*)|\
-            (.*bar)'
+  pattern: 'graphe[a-z]+'
   fields: ["title", "summary"]
 
 # Ranking configuration
