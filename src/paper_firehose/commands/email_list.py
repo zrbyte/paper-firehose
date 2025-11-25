@@ -23,9 +23,6 @@ logger = logging.getLogger(__name__)
 def _select_entries(db: DatabaseManager, topic: str, *, only_with_summary: bool, limit: Optional[int], min_rank_score: Optional[float]) -> List[Dict[str, Any]]:
     """Return ranked entries for a topic honoring summary/rank filters and limit."""
     entries = db.get_current_entries(topic=topic)
-    # Prefer items with non-empty llm_summary when requested
-    if only_with_summary:
-        entries = [e for e in entries if (e.get('llm_summary') or '').strip()]
     # Optional rank cutoff
     if min_rank_score is not None:
         try:

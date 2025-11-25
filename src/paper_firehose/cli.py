@@ -14,7 +14,6 @@ from .commands import filter as filter_cmd
 from .commands import generate_html as html_cmd
 from .commands import pqa_summary as pqa_cmd
 from .commands import rank as rank_cmd
-from .commands import summarize as summarize_cmd
 from .core.config import ConfigManager, DEFAULT_CONFIG_PATH
 from .core.paths import get_data_dir
 
@@ -120,23 +119,6 @@ def abstracts(
             click.echo("✅ Abstract fetching completed for eligible topics")
     except Exception as exc:  # pragma: no cover - click echoes the message
         click.echo(f"❌ Abstract fetching failed: {exc}", err=True)
-        sys.exit(1)
-
-
-@cli.command("summarize")
-@click.option("--topic", help="Summarize a specific topic only")
-@click.option("--rps", type=float, help="Requests per second throttle (overrides config)")
-@click.pass_context
-def summarize(ctx: click.Context, topic: str | None, rps: float | None) -> None:
-    """Run LLM summarization for top-ranked entries and write into llm_summary."""
-    try:
-        summarize_cmd.run(ctx.obj["config_path"], topic, rps=rps)
-        if topic:
-            click.echo(f"✅ Summarization completed for topic '{topic}'")
-        else:
-            click.echo("✅ Summarization completed for eligible topics")
-    except Exception as exc:  # pragma: no cover - click echoes the message
-        click.echo(f"❌ Summarization failed: {exc}", err=True)
         sys.exit(1)
 
 

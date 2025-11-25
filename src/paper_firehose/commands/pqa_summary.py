@@ -32,6 +32,7 @@ import feedparser
 
 from ..core.config import ConfigManager
 from ..core.database import DatabaseManager
+from ..core.command_utils import resolve_topics
 from ..core.paths import resolve_data_path
 
 logger = logging.getLogger(__name__)
@@ -63,21 +64,12 @@ def _arxiv_user_agent(mailto: str) -> str:
 
 def _iter_ranked_entries(db: DatabaseManager, topic: str, min_rank: float) -> List[Dict[str, Any]]:
     """Fetch ranked DB rows for a topic sorted descending by score."""
-    conn = sqlite3.connect(db.db_paths['current'])
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, topic, title, link, summary, doi, rank_score
-        FROM entries
-        WHERE topic = ? AND COALESCE(rank_score, 0) >= ?
-        ORDER BY rank_score DESC
-        """,
-        (topic, float(min_rank)),
+    rows = db.get_entries_by_criteria(
+        topic=topic,
+        min_rank=float(min_rank),
+        order_by='rank_score DESC'
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-    conn.close()
-    return rows
+    return [dict(row) for row in rows]
 
 
 def _fetch_history_entries_by_ids(db: DatabaseManager, entry_ids: List[str], *, matched_date: Optional[str] = None, feed_like: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -89,30 +81,29 @@ def _fetch_history_entries_by_ids(db: DatabaseManager, entry_ids: List[str], *, 
     """
     if not entry_ids:
         return []
-    import sqlite3
-    conn = sqlite3.connect(db.db_paths['history'])
-    cur = conn.cursor()
-    # Build query
-    base = (
-        "SELECT entry_id, feed_name, topics, title, link, summary, doi, matched_date "
-        "FROM matched_entries WHERE entry_id IN ({placeholders})"
-    )
-    placeholders = ",".join(["?"] * len(entry_ids))
-    q = base.format(placeholders=placeholders)
-    params: List[Any] = list(entry_ids)
-    # Date restriction (match date part of matched_date)
-    if matched_date:
-        q += " AND date(matched_date) = date(?)"
-        params.append(matched_date)
-    # Feed substring match
-    if feed_like:
-        q += " AND LOWER(feed_name) LIKE ?"
-        params.append(f"%{feed_like.lower()}%")
-    # Order by the order of input ids (best-effort): fetch then sort in Python
-    cur.execute(q, params)
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-    conn.close()
+
+    with db.get_connection('history') as conn:
+        cur = conn.cursor()
+        # Build query
+        base = (
+            "SELECT entry_id, feed_name, topics, title, link, summary, doi, matched_date "
+            "FROM matched_entries WHERE entry_id IN ({placeholders})"
+        )
+        placeholders = ",".join(["?"] * len(entry_ids))
+        q = base.format(placeholders=placeholders)
+        params: List[Any] = list(entry_ids)
+        # Date restriction (match date part of matched_date)
+        if matched_date:
+            q += " AND date(matched_date) = date(?)"
+            params.append(matched_date)
+        # Feed substring match
+        if feed_like:
+            q += " AND LOWER(feed_name) LIKE ?"
+            params.append(f"%{feed_like.lower()}%")
+        # Order by the order of input ids (best-effort): fetch then sort in Python
+        cur.execute(q, params)
+        rows = [dict(row) for row in cur.fetchall()]
+
     # Preserve input order
     idx = {eid: i for i, eid in enumerate(entry_ids)}
     rows.sort(key=lambda r: idx.get(r.get('entry_id', ''), 1e9))
@@ -511,48 +502,43 @@ def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: 
     - papers.db: update the row for (id, topic) when topic is provided; otherwise update all rows with id = entry_id.
     - matched_entries_history.db: update row with entry_id
     """
-    import sqlite3
     # Current DB
     try:
-        conn = sqlite3.connect(db.db_paths['current'])
-        cur = conn.cursor()
-        if topic:
-            cur.execute(
-                "UPDATE entries SET paper_qa_summary = ? WHERE id = ? AND topic = ?",
-                (json_summary, entry_id, topic),
-            )
-        else:
-            cur.execute(
-                "UPDATE entries SET paper_qa_summary = ? WHERE id = ?",
-                (json_summary, entry_id),
-            )
-        updated_current = cur.rowcount
-        conn.commit()
-        conn.close()
-        if topic:
-            logger.info(
-                "paper-qa DB write (papers.db): entry_id=%s topic=%s updated_rows=%d",
-                entry_id,
-                topic,
-                updated_current,
-            )
-        else:
-            logger.info(
-                "paper-qa DB write (papers.db): entry_id=%s updated_rows=%d",
-                entry_id,
-                updated_current,
-            )
+        with db.get_connection('current', row_factory=False) as conn:
+            cur = conn.cursor()
+            if topic:
+                cur.execute(
+                    "UPDATE entries SET paper_qa_summary = ? WHERE id = ? AND topic = ?",
+                    (json_summary, entry_id, topic),
+                )
+            else:
+                cur.execute(
+                    "UPDATE entries SET paper_qa_summary = ? WHERE id = ?",
+                    (json_summary, entry_id),
+                )
+            updated_current = cur.rowcount
+            if topic:
+                logger.info(
+                    "paper-qa DB write (papers.db): entry_id=%s topic=%s updated_rows=%d",
+                    entry_id,
+                    topic,
+                    updated_current,
+                )
+            else:
+                logger.info(
+                    "paper-qa DB write (papers.db): entry_id=%s updated_rows=%d",
+                    entry_id,
+                    updated_current,
+                )
     except Exception as e:
         logger.debug("Failed to write to papers.db for %s: %s", entry_id, e)
     # History DB
     try:
-        hconn = sqlite3.connect(db.db_paths['history'])
-        hcur = hconn.cursor()
-        hcur.execute("UPDATE matched_entries SET paper_qa_summary = ? WHERE entry_id = ?", (json_summary, entry_id))
-        updated_history = hcur.rowcount
-        hconn.commit()
-        hconn.close()
-        logger.info("paper-qa DB write (history.db): entry_id=%s updated_rows=%d", entry_id, updated_history)
+        with db.get_connection('history', row_factory=False) as conn:
+            cur = conn.cursor()
+            cur.execute("UPDATE matched_entries SET paper_qa_summary = ? WHERE entry_id = ?", (json_summary, entry_id))
+            updated_history = cur.rowcount
+            logger.info("paper-qa DB write (history.db): entry_id=%s updated_rows=%d", entry_id, updated_history)
     except Exception as e:
         logger.debug("Failed to write to matched_entries_history.db for %s: %s", entry_id, e)
 
@@ -623,7 +609,7 @@ def run(
 
     _ensure_dirs(download_dir, archive_dir)
 
-    topics: List[str] = [topic] if topic else cfg_mgr.get_available_topics()
+    topics = resolve_topics(cfg_mgr, topic)
     mailto = _resolve_mailto(config)
 
     downloaded_paths: List[str] = []

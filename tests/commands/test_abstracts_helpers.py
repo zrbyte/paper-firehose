@@ -11,17 +11,19 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from paper_firehose.commands import abstracts  # noqa: E402
+from paper_firehose.core.text_utils import strip_jats, clean_abstract_for_db  # noqa: E402
+from paper_firehose.core.doi_utils import find_doi_in_text, extract_doi_from_json  # noqa: E402
 
 
 def test_strip_jats_removes_markup():
     raw = "<jats:p>Result &amp; More</jats:p>"
-    assert abstracts._strip_jats(raw) == "Result & More"
-    assert abstracts._strip_jats(None) is None
+    assert strip_jats(raw) == "Result & More"
+    assert strip_jats(None) is None
 
 
 def test_clean_for_db_sanitizes_and_unwraps():
     raw = "Abstract: <b>Graphene advances</b>\u200b  "
-    cleaned = abstracts._clean_for_db(raw)
+    cleaned = clean_abstract_for_db(raw)
     assert cleaned == "Graphene advances"
 
 
@@ -35,7 +37,7 @@ def test_clean_for_db_sanitizes_and_unwraps():
     ],
 )
 def test_find_doi_in_text(text, expected):
-    assert abstracts._find_doi_in_text(text) == expected
+    assert find_doi_in_text(text) == expected
 
 
 def test_extract_doi_from_raw_handles_nested_fields():
@@ -45,7 +47,7 @@ def test_extract_doi_from_raw_handles_nested_fields():
             "content": [{"value": "additional"}],
         }
     )
-    assert abstracts._extract_doi_from_raw(raw) == "10.1111/xyz"
+    assert extract_doi_from_json(raw) == "10.1111/xyz"
 
 
 def test_reconstruct_openalex_inverted_index():

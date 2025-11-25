@@ -45,13 +45,12 @@ class EmailRenderer:
         topic_display_name: str,
         entries: List[Dict[str, Any]],
         *,
-        prefer_llm_summary: bool = True,
         max_items: Optional[int] = None,
     ) -> str:
         """Return HTML body for a single topic.
 
         Entries expected to contain keys: title, link, authors, published_date,
-        feed_name, abstract, summary, llm_summary, rank_score.
+        feed_name, abstract, summary, rank_score.
         """
         today = datetime.date.today().isoformat()
 
@@ -80,11 +79,9 @@ class EmailRenderer:
             feed_name = html.escape((e.get('feed_name') or '').strip())
             score_badge = _fmt_score_badge(e.get('rank_score'))
 
-            # pick content: llm_summary (JSON or text) -> abstract -> summary
-            content_html = self._format_llm_summary(e.get('llm_summary')) if prefer_llm_summary else None
-            if not content_html:
-                body = (e.get('abstract') or '').strip() or (e.get('summary') or '').strip()
-                content_html = html.escape(body) if body else '<em>No abstract/summary.</em>'
+            # pick content: abstract -> summary
+            body = (e.get('abstract') or '').strip() or (e.get('summary') or '').strip()
+            content_html = html.escape(body) if body else '<em>No abstract/summary.</em>'
 
             parts.append(
                 f"""
@@ -260,28 +257,6 @@ class EmailRenderer:
             body_parts.append("<hr>")
         body_parts.append("</body></html>")
         return "\n".join(body_parts)
-
-    def _format_llm_summary(self, llm_summary_raw: Optional[str]) -> Optional[str]:
-        """Convert llm_summary JSON/text into a small HTML block, or None if empty."""
-        if not llm_summary_raw:
-            return None
-        try:
-            import json
-            data = json.loads(llm_summary_raw)
-            summary = html.escape(data.get('summary') or '')
-            topical = html.escape(data.get('topical_relevance') or '')
-            novelty = html.escape(data.get('novelty_impact') or '')
-            bits: List[str] = []
-            if summary:
-                bits.append(f"<div><strong>Summary:</strong> {summary}</div>")
-            if topical:
-                bits.append(f"<div><strong>Topical Relevance:</strong> {topical}</div>")
-            if novelty:
-                bits.append(f"<div><strong>Novelty & Impact:</strong> {novelty}</div>")
-            return "\n".join(bits) if bits else None
-        except Exception:
-            # Fallback to plain text
-            return html.escape(llm_summary_raw)
 
     def _format_pqa_summary(self, pqa_raw: Optional[str]) -> Optional[str]:
         """Format paper_qa_summary JSON for email.

@@ -29,96 +29,14 @@ import requests
 
 from ..core.config import ConfigManager
 from ..core.database import DatabaseManager
+from ..core.http_client import RetryableHTTPClient
+from ..core.doi_utils import find_doi_in_text, extract_doi_from_json
+from ..core.command_utils import resolve_topics
+from ..core.text_utils import strip_jats, clean_abstract_for_db
 import logging
 
 
 CROSSREF_API = "https://api.crossref.org/works/"
-
-
-def _strip_jats(text: str | None) -> Optional[str]:
-    """Remove JATS/HTML tags and unescape entities in Crossref-style strings."""
-    if not text:
-        return text
-    # remove <jats:...> and regular HTML tags
-    text = re.sub(r"</?jats:[^>]+>", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)
-    # unescape entities
-    return htmllib.unescape(text).strip()
-
-
-def _clean_for_db(text: Optional[str]) -> Optional[str]:
-    """Conservative sanitizer for abstracts before storing in DB.
-
-    - Removes JATS/HTML tags and unescapes entities via _strip_jats
-    - Strips stray '<' and '>' characters (common artifact from feeds)
-    - Removes leading feed prefixes like "Abstract" and arXiv announce headers
-    - Normalizes whitespace and removes zero-width characters
-    """
-    if text is None:
-        return None
-    # First remove tags and unescape entities
-    s = _strip_jats(text) or ""
-    # Remove zero-width and BOM-like chars
-    s = s.replace("\u200B", "").replace("\u200C", "").replace("\u200D", "").replace("\uFEFF", "")
-    # Normalize non-breaking spaces
-    s = s.replace("\xa0", " ")
-    # Remove any remaining angle bracket characters which often leak from markup
-    s = s.replace("<", "").replace(">", "")
-    # Drop leading arXiv announce header like:
-    #   "arXiv:2509.09390v1 Announce Type: new Abstract: ..."
-    s = re.sub(r"^\s*arXiv:[^\n]*?(?:Announce\s+Type:\s*\w+\s+)?Abstract:\s*", "", s, flags=re.IGNORECASE)
-    # Drop simple leading "Abstract" or "Abstract:" tokens
-    s = re.sub(r"^\s*Abstract\s*:?[\s\-–—]*", "", s, flags=re.IGNORECASE)
-    # Collapse excessive whitespace
-    s = re.sub(r"[\t\r ]+", " ", s)
-    s = re.sub(r"\n{3,}", "\n\n", s)
-    return s.strip()
-
-
-def _find_doi_in_text(text: Optional[str]) -> Optional[str]:
-    """Return the first DOI-like token found in the provided string."""
-    if not text:
-        return None
-    t = str(text).strip()
-    if t.lower().startswith('doi:'):
-        t = t[4:].strip()
-    m = re.search(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", t, flags=re.IGNORECASE)
-    return m.group(0) if m else None
-
-
-def _extract_doi_from_raw(raw: Optional[str]) -> Optional[str]:
-    """Try to locate a DOI within the feed's raw JSON payload."""
-    if not raw:
-        return None
-    try:
-        obj = json.loads(raw)
-    except Exception:
-        return None
-    # Try common fields and fallbacks
-    for key in [
-        'doi', 'dc_identifier', 'dc:identifier', 'dc.identifier', 'prism:doi',
-        'id', 'link', 'summary', 'description'
-    ]:
-        v = obj.get(key)
-        doi = _find_doi_in_text(v)
-        if doi:
-            return doi
-    # Check nested content and links arrays
-    contents = obj.get('content') or []
-    if isinstance(contents, list):
-        for c in contents:
-            if isinstance(c, dict):
-                doi = _find_doi_in_text(c.get('value') or c.get('content'))
-                if doi:
-                    return doi
-    links = obj.get('links') or []
-    if isinstance(links, list):
-        for l in links:
-            href = l.get('href') if isinstance(l, dict) else str(l)
-            doi = _find_doi_in_text(href)
-            if doi:
-                return doi
-    return None
 
 
 def get_crossref_abstract(doi: str, *, mailto: str, max_retries: int = 3, session: Optional[requests.Session] = None) -> Optional[str]:
@@ -127,41 +45,60 @@ def get_crossref_abstract(doi: str, *, mailto: str, max_retries: int = 3, sessio
     Implements exponential backoff on 429/5xx and honors Retry-After when present.
     Also sends Crossref the mailto parameter.
     """
-    sess = session or requests.Session()
+    # If session is provided, use old logic for compatibility
+    if session:
+        url = f"{CROSSREF_API}{quote(doi)}?mailto={quote(mailto)}"
+        headers = {
+            "User-Agent": f"paper-firehose/abstract-fetcher (mailto:{mailto})"
+        }
+        for attempt in range(max_retries):
+            try:
+                r = session.get(url, headers=headers, timeout=15)
+                if r.status_code == 404:
+                    return None
+                if r.status_code in (429, 500, 502, 503, 504):
+                    ra = r.headers.get("Retry-After")
+                    if ra:
+                        try:
+                            wait = float(ra)
+                        except Exception:
+                            wait = 1.0
+                    else:
+                        wait = min(8.0, 2.0 ** attempt)
+                    time.sleep(wait if wait > 0 else 1.0)
+                    continue
+                r.raise_for_status()
+                data = r.json()
+                msg = data.get("message", {})
+                abstract = msg.get("abstract")
+                if abstract:
+                    return strip_jats(abstract) or None
+                return None
+            except Exception:
+                time.sleep(min(8.0, 2.0 ** attempt))
+                continue
+        return None
+
+    # Use new RetryableHTTPClient for better retry logic
     url = f"{CROSSREF_API}{quote(doi)}?mailto={quote(mailto)}"
     headers = {
-        # Crossref asks for a descriptive UA with a contact email
         "User-Agent": f"paper-firehose/abstract-fetcher (mailto:{mailto})"
     }
-    for attempt in range(max_retries):
-        try:
-            r = sess.get(url, headers=headers, timeout=15)
-            # Exponential backoff on throttling/server errors, prefer Retry-After
-            if r.status_code == 404:
-                return None
-            if r.status_code in (429, 500, 502, 503, 504):
-                ra = r.headers.get("Retry-After")
-                if ra:
-                    try:
-                        wait = float(ra)
-                    except Exception:
-                        wait = 1.0
-                else:
-                    wait = min(8.0, 2.0 ** attempt)
-                time.sleep(wait if wait > 0 else 1.0)
-                continue
-            r.raise_for_status()
-            data = r.json()
-            msg = data.get("message", {})
-            abstract = msg.get("abstract")
-            if abstract:
-                return _strip_jats(abstract) or None
+
+    try:
+        client = RetryableHTTPClient(rps=1.0, max_retries=max_retries)
+        r = client.get_with_retry(url, headers=headers)
+        if r is None:  # 404 case
             return None
-        except Exception:
-            # Network or parsing error → backoff and retry
-            time.sleep(min(8.0, 2.0 ** attempt))
-            continue
-    return None
+
+        data = r.json()
+        msg = data.get("message", {})
+        abstract = msg.get("abstract")
+        if abstract:
+            return strip_jats(abstract) or None
+        return None
+    except Exception:
+        return None
 
 
 def search_crossref_abstract_by_title(title: str, *, mailto: str, max_retries: int = 2, session: Optional[requests.Session] = None) -> Optional[str]:
@@ -172,57 +109,99 @@ def search_crossref_abstract_by_title(title: str, *, mailto: str, max_retries: i
     """
     if not title:
         return None
-    sess = session or requests.Session()
+
+    # If session is provided, use old logic for compatibility
+    if session:
+        base = "https://api.crossref.org/works"
+        params = f"?query.bibliographic={quote(title)}&rows=1&mailto={quote(mailto)}"
+        url = base + params
+        headers = {
+            "User-Agent": f"paper-firehose/abstract-fetcher (mailto:{mailto})"
+        }
+        for attempt in range(max_retries):
+            try:
+                r = session.get(url, headers=headers, timeout=15)
+                if r.status_code == 404:
+                    return None
+                if r.status_code in (429, 500, 502, 503, 504):
+                    ra = r.headers.get("Retry-After")
+                    if ra:
+                        try:
+                            wait = float(ra)
+                        except Exception:
+                            wait = 1.0
+                    else:
+                        wait = min(8.0, 2.0 ** attempt)
+                    time.sleep(wait if wait > 0 else 1.0)
+                    continue
+                r.raise_for_status()
+                data = r.json()
+                items = (data.get('message') or {}).get('items') or []
+                if items:
+                    abstract = items[0].get('abstract')
+                    if abstract:
+                        return strip_jats(abstract) or None
+                return None
+            except Exception:
+                time.sleep(min(8.0, 2.0 ** attempt))
+                continue
+        return None
+
+    # Use new RetryableHTTPClient for better retry logic
     base = "https://api.crossref.org/works"
     params = f"?query.bibliographic={quote(title)}&rows=1&mailto={quote(mailto)}"
     url = base + params
     headers = {
         "User-Agent": f"paper-firehose/abstract-fetcher (mailto:{mailto})"
     }
-    for attempt in range(max_retries):
-        try:
-            r = sess.get(url, headers=headers, timeout=15)
-            if r.status_code == 404:
-                return None
-            if r.status_code in (429, 500, 502, 503, 504):
-                ra = r.headers.get("Retry-After")
-                if ra:
-                    try:
-                        wait = float(ra)
-                    except Exception:
-                        wait = 1.0
-                else:
-                    wait = min(8.0, 2.0 ** attempt)
-                time.sleep(wait if wait > 0 else 1.0)
-                continue
-            r.raise_for_status()
-            data = r.json()
-            items = (data.get('message') or {}).get('items') or []
-            if items:
-                abstract = items[0].get('abstract')
-                if abstract:
-                    return _strip_jats(abstract) or None
+
+    try:
+        client = RetryableHTTPClient(rps=1.0, max_retries=max_retries)
+        r = client.get_with_retry(url, headers=headers)
+        if r is None:  # 404 case
             return None
-        except Exception:
-            time.sleep(min(8.0, 2.0 ** attempt))
-            continue
-    return None
+
+        data = r.json()
+        items = (data.get('message') or {}).get('items') or []
+        if items:
+            abstract = items[0].get('abstract')
+            if abstract:
+                return strip_jats(abstract) or None
+        return None
+    except Exception:
+        return None
 
 
 def get_semantic_scholar_abstract(doi: str, *, session: Optional[requests.Session] = None) -> Optional[str]:
     """Fetch abstract from Semantic Scholar Graph API by DOI (no key needed)."""
     if not doi:
         return None
-    sess = session or requests.Session()
+
     url = f"https://api.semanticscholar.org/graph/v1/paper/DOI:{quote(doi)}?fields=abstract"
-    try:
-        r = sess.get(url, timeout=15)
-        if r.status_code == 404:
+
+    # If session is provided, use old logic for compatibility
+    if session:
+        try:
+            r = session.get(url, timeout=15)
+            if r.status_code == 404:
+                return None
+            r.raise_for_status()
+            data = r.json()
+            abs_txt = data.get('abstract')
+            return strip_jats(abs_txt) if abs_txt else None
+        except Exception:
             return None
-        r.raise_for_status()
+
+    # Use new RetryableHTTPClient for better retry logic
+    try:
+        client = RetryableHTTPClient(rps=1.0, max_retries=3)
+        r = client.get_with_retry(url)
+        if r is None:  # 404 case
+            return None
+
         data = r.json()
         abs_txt = data.get('abstract')
-        return _strip_jats(abs_txt) if abs_txt else None
+        return strip_jats(abs_txt) if abs_txt else None
     except Exception:
         return None
 
@@ -251,17 +230,38 @@ def get_openalex_abstract(doi: str, *, mailto: str, session: Optional[requests.S
     """Fetch an abstract from OpenAlex by DOI, reconstructing when inverted-indexed."""
     if not doi:
         return None
-    sess = session or requests.Session()
+
     url = f"https://api.openalex.org/works/https://doi.org/{quote(doi)}?mailto={quote(mailto)}"
-    try:
-        r = sess.get(url, timeout=15)
-        if r.status_code == 404:
+
+    # If session is provided, use old logic for compatibility
+    if session:
+        try:
+            r = session.get(url, timeout=15)
+            if r.status_code == 404:
+                return None
+            r.raise_for_status()
+            data = r.json()
+            abs_txt = data.get('abstract')
+            if abs_txt:
+                return strip_jats(abs_txt)
+            ii = data.get('abstract_inverted_index')
+            if ii:
+                return _reconstruct_openalex(ii)
             return None
-        r.raise_for_status()
+        except Exception:
+            return None
+
+    # Use new RetryableHTTPClient for better retry logic
+    try:
+        client = RetryableHTTPClient(rps=1.0, max_retries=3)
+        r = client.get_with_retry(url)
+        if r is None:  # 404 case
+            return None
+
         data = r.json()
         abs_txt = data.get('abstract')
         if abs_txt:
-            return _strip_jats(abs_txt)
+            return strip_jats(abs_txt)
         ii = data.get('abstract_inverted_index')
         if ii:
             return _reconstruct_openalex(ii)
@@ -274,32 +274,68 @@ def get_pubmed_abstract_by_doi(doi: str, *, session: Optional[requests.Session] 
     """Look up a DOI in PubMed and return the combined abstract text if available."""
     if not doi:
         return None
-    sess = session or requests.Session()
+
+    # If session is provided, use old logic for compatibility
+    if session:
+        try:
+            # ESearch for PMID by DOI
+            es = session.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                params={"db": "pubmed", "term": f"{doi}[DOI]", "retmode": "json"},
+                timeout=15,
+            )
+            es.raise_for_status()
+            idlist = (es.json().get('esearchresult') or {}).get('idlist') or []
+            if not idlist:
+                return None
+            pmid = idlist[0]
+            # EFetch to get abstract XML
+            ef = session.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+                params={"db": "pubmed", "id": pmid, "retmode": "xml"},
+                timeout=15,
+            )
+            ef.raise_for_status()
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(ef.text)
+            texts = []
+            for at in root.findall('.//AbstractText'):
+                texts.append(''.join(at.itertext()).strip())
+            return strip_jats(' '.join(t for t in texts if t)) if texts else None
+        except Exception:
+            return None
+
+    # Use new RetryableHTTPClient for better retry logic
     try:
+        client = RetryableHTTPClient(rps=0.33, max_retries=3)  # PubMed rate limit: 3 req/sec
+
         # ESearch for PMID by DOI
-        es = sess.get(
+        es = client.get_with_retry(
             "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
-            params={"db": "pubmed", "term": f"{doi}[DOI]", "retmode": "json"},
-            timeout=15,
+            params={"db": "pubmed", "term": f"{doi}[DOI]", "retmode": "json"}
         )
-        es.raise_for_status()
+        if es is None:
+            return None
+
         idlist = (es.json().get('esearchresult') or {}).get('idlist') or []
         if not idlist:
             return None
         pmid = idlist[0]
+
         # EFetch to get abstract XML
-        ef = sess.get(
+        ef = client.get_with_retry(
             "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
-            params={"db": "pubmed", "id": pmid, "retmode": "xml"},
-            timeout=15,
+            params={"db": "pubmed", "id": pmid, "retmode": "xml"}
         )
-        ef.raise_for_status()
+        if ef is None:
+            return None
+
         import xml.etree.ElementTree as ET
         root = ET.fromstring(ef.text)
         texts = []
         for at in root.findall('.//AbstractText'):
             texts.append(''.join(at.itertext()).strip())
-        return _strip_jats(' '.join(t for t in texts if t)) if texts else None
+        return strip_jats(' '.join(t for t in texts if t)) if texts else None
     except Exception:
         return None
 
@@ -331,26 +367,12 @@ def try_publisher_apis(doi: Optional[str], feed_name: str, link: str, *, mailto:
 
 def _iter_targets(db: DatabaseManager, topic: str, threshold: float) -> Iterable[Dict[str, Any]]:
     """Yield ranked DB rows lacking abstracts for the given topic, highest score first."""
-    # Query directly for performance
-    import sqlite3
-    conn = sqlite3.connect(db.db_paths['current'])
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, topic, doi, abstract, rank_score, raw_data, title, feed_name, summary, link
-        FROM entries
-        WHERE topic = ?
-          AND (abstract IS NULL OR TRIM(abstract) = '')
-          AND rank_score IS NOT NULL
-          AND rank_score >= ?
-        ORDER BY rank_score DESC
-        """,
-        (topic, threshold),
-    )
-    cols = [d[0] for d in cur.description]
-    for row in cur.fetchall():
-        yield dict(zip(cols, row))
-    conn.close()
+    # Use DatabaseManager's iter_targets method with additional abstract filtering
+    for row in db.iter_targets(topic=topic, min_rank=threshold):
+        # Filter out rows that already have abstracts
+        abstract = row['abstract']
+        if abstract is None or (isinstance(abstract, str) and abstract.strip() == ''):
+            yield dict(row)
 
 
 def _fill_arxiv_summaries(db: DatabaseManager, topics: Optional[list[str]] = None) -> int:
@@ -358,58 +380,69 @@ def _fill_arxiv_summaries(db: DatabaseManager, topics: Optional[list[str]] = Non
 
     Returns number of rows updated.
     """
-    import sqlite3
-    conn = sqlite3.connect(db.db_paths['current'])
-    cur = conn.cursor()
-    params: list = []
-    topic_filter = ""
-    if topics:
-        placeholders = ",".join(["?"] * len(topics))
-        topic_filter = f" AND topic IN ({placeholders})"
-        params.extend(topics)
-    cur.execute(
-        f"""
-        SELECT id, topic, feed_name, link, summary
-        FROM entries
-        WHERE (abstract IS NULL OR TRIM(abstract) = '')
-          AND (
-                LOWER(COALESCE(feed_name, '')) LIKE '%cond-mat%'
-             OR LOWER(COALESCE(feed_name, '')) LIKE '%arxiv%'
-             OR LOWER(COALESCE(link, '')) LIKE '%arxiv.org%'
-          )
-          {topic_filter}
-        """,
-        params,
-    )
-    rows = cur.fetchall()
-    updated = 0
-    for id_, tpc, feed, link, summary in rows:
+    with db.get_connection('current') as conn:
+        cur = conn.cursor()
+        params: list = []
+        topic_filter = ""
+        if topics:
+            placeholders = ",".join(["?"] * len(topics))
+            topic_filter = f" AND topic IN ({placeholders})"
+            params.extend(topics)
+        cur.execute(
+            f"""
+            SELECT id, topic, feed_name, link, summary
+            FROM entries
+            WHERE (abstract IS NULL OR TRIM(abstract) = '')
+              AND (
+                    LOWER(COALESCE(feed_name, '')) LIKE '%cond-mat%'
+                 OR LOWER(COALESCE(feed_name, '')) LIKE '%arxiv%'
+                 OR LOWER(COALESCE(link, '')) LIKE '%arxiv.org%'
+              )
+              {topic_filter}
+            """,
+            params,
+        )
+        rows = cur.fetchall()
+
+    # Collect all updates for batch processing
+    papers_updates = []
+    history_updates = []
+
+    for row in rows:
+        id_ = row['id']
+        tpc = row['topic']
+        summary = row['summary']
         if not summary:
             continue
-        cleaned = _clean_for_db(summary)
+        cleaned = clean_abstract_for_db(summary)
         if cleaned:
-            cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (cleaned, id_, tpc))
-            updated += 1
-            # Also update history DB (best-effort)
-            try:
-                import sqlite3 as _sqlite3
-                hconn = _sqlite3.connect(db.db_paths['history'])
-                hcur = hconn.cursor()
-                hcur.execute("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", (cleaned, id_))
-                hconn.commit()
-                hconn.close()
-            except Exception:
-                pass
-    conn.commit()
-    conn.close()
-    return updated
+            # Note: DOI stays None for these arXiv entries
+            papers_updates.append((cleaned, None, id_, tpc))
+            history_updates.append((cleaned, None, id_))
+
+    # Batch update papers.db using DatabaseManager method
+    if papers_updates:
+        db.update_abstracts_batch(papers_updates)
+
+    # Batch update history DB (best-effort)
+    if history_updates:
+        try:
+            db.update_history_abstracts_batch(history_updates)
+        except Exception:
+            pass
+
+    return len(papers_updates)
 
 
 def _crossref_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto: str, session: requests.Session, min_interval: float, max_per_topic: Optional[int], max_retries: int = 3) -> int:
     """Second pass: Crossref only (DOI first, then title) for entries above threshold."""
+    # Collect all updates for batch processing
+    papers_updates = []
+    history_updates = []
+
     fetched = 0
     for row in _iter_targets(db, topic, threshold):
-        doi = row.get('doi') or _extract_doi_from_raw(row.get('raw_data'))
+        doi = row.get('doi') or extract_doi_from_json(row.get('raw_data'))
         if not doi:
             try:
                 raw = row.get('raw_data')
@@ -426,46 +459,38 @@ def _crossref_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto:
             abstract = search_crossref_abstract_by_title(row.get('title') or '', mailto=mailto, session=session, max_retries=max_retries)
             time.sleep(min_interval)
         if abstract:
-            abstract = _clean_for_db(abstract)
-            import sqlite3
-            conn = sqlite3.connect(db.db_paths['current'])
-            cur = conn.cursor()
-            cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (abstract, row['id'], topic))
-            conn.commit()
-            conn.close()
-            # Also update history DB (best-effort)
-            try:
-                import sqlite3 as _sqlite3
-                hconn = _sqlite3.connect(db.db_paths['history'])
-                hcur = hconn.cursor()
-                hcur.execute("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", (abstract, row['id']))
-                hconn.commit()
-                hconn.close()
-            except Exception:
-                pass
-            # Also update history DB (best-effort)
-            try:
-                import sqlite3 as _sqlite3
-                hconn = _sqlite3.connect(db.db_paths['history'])
-                hcur = hconn.cursor()
-                hcur.execute("UPDATE matched_entries SET abstract = ? WHERE entry_id = ?", (abstract, row['id']))
-                hconn.commit()
-                hconn.close()
-            except Exception:
-                pass
+            abstract = clean_abstract_for_db(abstract)
+            papers_updates.append((abstract, doi, row['id'], topic))
+            history_updates.append((abstract, doi, row['id']))
             fetched += 1
             if max_per_topic is not None and fetched >= max_per_topic:
                 break
+
+    # Batch update papers.db using DatabaseManager method
+    if papers_updates:
+        db.update_abstracts_batch(papers_updates)
+
+    # Batch update history DB (best-effort)
+    if history_updates:
+        try:
+            db.update_history_abstracts_batch(history_updates)
+        except Exception:
+            pass
+
     return fetched
 
 
 def _fallback_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto: str, session: requests.Session, min_interval: float, max_per_topic: Optional[int]) -> int:
     """Third pass: remaining above-threshold entries → Semantic Scholar / OpenAlex / PubMed."""
+    # Collect all updates for batch processing
+    papers_updates = []
+    history_updates = []
+
     fetched = 0
     for row in _iter_targets(db, topic, threshold):
         # Skip rows already filled by previous passes
         # _iter_targets already filters abstract IS NULL or empty
-        doi = row.get('doi') or _extract_doi_from_raw(row.get('raw_data'))
+        doi = row.get('doi') or extract_doi_from_json(row.get('raw_data'))
         if not doi:
             try:
                 raw = row.get('raw_data')
@@ -476,17 +501,25 @@ def _fallback_pass(db: DatabaseManager, topic: str, threshold: float, *, mailto:
                 pass
         abstract = try_publisher_apis(doi, row.get('feed_name') or '', row.get('link') or '', mailto=mailto, session=session)
         if abstract:
-            abstract = _clean_for_db(abstract)
-            import sqlite3
-            conn = sqlite3.connect(db.db_paths['current'])
-            cur = conn.cursor()
-            cur.execute("UPDATE entries SET abstract = ? WHERE id = ? AND topic = ?", (abstract, row['id'], topic))
-            conn.commit()
-            conn.close()
+            abstract = clean_abstract_for_db(abstract)
+            papers_updates.append((abstract, doi, row['id'], topic))
+            history_updates.append((abstract, doi, row['id']))
             fetched += 1
             time.sleep(min_interval)
             if max_per_topic is not None and fetched >= max_per_topic:
                 break
+
+    # Batch update papers.db using DatabaseManager method
+    if papers_updates:
+        db.update_abstracts_batch(papers_updates)
+
+    # Batch update history DB (best-effort)
+    if history_updates:
+        try:
+            db.update_history_abstracts_batch(history_updates)
+        except Exception:
+            pass
+
     return fetched
 
 
@@ -505,7 +538,7 @@ def run(config_path: str, topic: Optional[str] = None, *, mailto: Optional[str] 
     config = cfg.load_config()
     db = DatabaseManager(config)
 
-    topics = [topic] if topic else cfg.get_available_topics()
+    topics = resolve_topics(cfg, topic)
     # Default threshold
     defaults = (config.get('defaults') or {})
     global_thresh = float(defaults.get('rank_threshold', 0.35))
