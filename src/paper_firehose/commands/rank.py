@@ -29,7 +29,9 @@ import re
 
 from ..core.config import ConfigManager
 from ..core.database import DatabaseManager
+from ..core.command_utils import resolve_topics
 from ..core.paths import get_system_path, resolve_data_dir
+from ..core.text_utils import strip_accents, normalize_name, parse_name_parts, names_match
 from ..processors.st_ranker import STRanker
 
 logger = logging.getLogger(__name__)
@@ -135,54 +137,6 @@ def _build_entry_text(entry: Dict[str, Any]) -> str:
     return (entry.get("title") or "").strip()
 
 
-def _strip_accents(text: str) -> str:
-    """Return ASCII-ish text by removing accent marks via Unicode normalization."""
-    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
-
-
-def _norm_name(text: str) -> str:
-    """Normalize a human name for loose matching (strip accents/punctuation/case)."""
-    t = _strip_accents(text or "").lower()
-    t = re.sub(r"[^a-z\s\-]", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
-
-
-def _parse_name_parts(name: str) -> tuple[str, List[str]]:
-    """Return (lastname, initials[]) from a human name.
-
-    Handles "Last, First M" and "First M Last" styles, ignores accents/case.
-    """
-    if not name:
-        return "", []
-    # Preserve comma pattern before normalization for ordering hint
-    if "," in name:
-        last_raw, _, rest_raw = name.partition(",")
-        last = _norm_name(last_raw)
-        rest = _norm_name(rest_raw)
-        tokens = rest.split()
-    else:
-        n = _norm_name(name)
-        tokens = n.split()
-        last = tokens[-1] if tokens else ""
-        tokens = tokens[:-1]
-    initials = [t[0] for t in tokens if t]
-    return last, initials
-
-
-def _names_match(a: str, b: str) -> bool:
-    """Heuristic author-name comparator supporting initials and comma forms."""
-    la, ia = _parse_name_parts(a)
-    lb, ib = _parse_name_parts(b)
-    if not la or not lb:
-        return False
-    if la != lb:
-        return False
-    if ia and ib and not set(ia).intersection(ib):
-        return False
-    return True
-
-
 def _entry_has_preferred_author(entry: Dict[str, Any], preferred_authors: List[str]) -> bool:
     """Return True when entry authors overlap with the preferred author patterns."""
     if not preferred_authors:
@@ -194,7 +148,7 @@ def _entry_has_preferred_author(entry: Dict[str, Any], preferred_authors: List[s
         return False
     for want in preferred_authors:
         for have in authors:
-            if _names_match(have, want):
+            if names_match(have, want):
                 return True
     return False
 
@@ -217,11 +171,7 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
     config = cfg_mgr.load_config()
     db = DatabaseManager(config)
 
-    topics: List[str]
-    if topic:
-        topics = [topic]
-    else:
-        topics = cfg_mgr.get_available_topics()
+    topics = resolve_topics(cfg_mgr, topic)
 
     for topic_name in topics:
         try:

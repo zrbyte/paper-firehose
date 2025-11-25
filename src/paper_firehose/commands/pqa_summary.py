@@ -32,6 +32,7 @@ import feedparser
 
 from ..core.config import ConfigManager
 from ..core.database import DatabaseManager
+from ..core.command_utils import resolve_topics
 from ..core.paths import resolve_data_path
 
 logger = logging.getLogger(__name__)
@@ -608,7 +609,7 @@ def run(
 
     _ensure_dirs(download_dir, archive_dir)
 
-    topics: List[str] = [topic] if topic else cfg_mgr.get_available_topics()
+    topics = resolve_topics(cfg_mgr, topic)
     mailto = _resolve_mailto(config)
 
     downloaded_paths: List[str] = []

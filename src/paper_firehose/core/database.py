@@ -17,6 +17,7 @@ import logging
 import glob
 
 from .paths import resolve_data_file
+from .doi_utils import extract_doi_from_entry
 
 logger = logging.getLogger(__name__)
 
@@ -625,71 +626,7 @@ class DatabaseManager:
         including 'summary', 'summary_detail.value', and 'content[].value'.
         Returns a DOI string if found, otherwise None.
         """
-        import re
-
-        # DOI regex from Crossref guidelines (simplified)
-        doi_re = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", re.IGNORECASE)
-
-        def find_in_text(text: str | None) -> Optional[str]:
-            """Search a text blob for a DOI pattern, stripping common prefixes first."""
-            if not text:
-                return None
-            # Strip common prefixes like 'doi:'
-            text = str(text).strip()
-            if text.lower().startswith('doi:'):
-                text = text[4:].strip()
-            m = doi_re.search(text)
-            return m.group(0) if m else None
-
-        # Direct fields
-        for key in ['doi', 'dc_identifier', 'dc:identifier', 'dc.identifier', 'dcIdentifier', 'prism:doi', 'prism_doi', 'guid']:
-            doi = find_in_text(entry.get(key))
-            if doi:
-                return doi
-
-        # Check id and link fields
-        for key in ['id', 'link']:
-            doi = find_in_text(entry.get(key))
-            if doi:
-                return doi
-
-        # Check summary fields (plain and detailed)
-        doi = find_in_text(entry.get('summary'))
-        if doi:
-            return doi
-        summary_detail = entry.get('summary_detail') or {}
-        if isinstance(summary_detail, dict):
-            doi = find_in_text(summary_detail.get('value'))
-            if doi:
-                return doi
-        # Some feeds use 'description' instead of 'summary'
-        doi = find_in_text(entry.get('description'))
-        if doi:
-            return doi
-
-        # Check content list for embedded DOI text
-        contents = entry.get('content') or []
-        if isinstance(contents, list):
-            for c in contents:
-                if isinstance(c, dict):
-                    doi = find_in_text(c.get('value') or c.get('content'))
-                    if doi:
-                        return doi
-
-        # Check links array for hrefs
-        links = entry.get('links') or []
-        if isinstance(links, list):
-            for l in links:
-                href = None
-                if isinstance(l, dict):
-                    href = l.get('href')
-                else:
-                    href = str(l)
-                doi = find_in_text(href)
-                if doi:
-                    return doi
-
-        return None
+        return extract_doi_from_entry(entry)
 
     @contextmanager
     def get_connection(self, db_key: str = 'current', row_factory: bool = True):

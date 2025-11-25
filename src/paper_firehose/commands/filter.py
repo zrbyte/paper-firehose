@@ -10,6 +10,7 @@ from typing import Optional
 
 from ..core.config import ConfigManager
 from ..core.database import DatabaseManager
+from ..core.command_utils import resolve_topics
 from ..processors.feed_processor import FeedProcessor
 
 logger = logging.getLogger(__name__)
@@ -55,11 +56,10 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         feed_processor = FeedProcessor(db_manager, config_manager)
         
         # Determine topics to process
+        topics_to_process = resolve_topics(config_manager, topic)
         if topic:
-            topics_to_process = [topic]
             logger.info(f"Processing specific topic: {topic}")
         else:
-            topics_to_process = config_manager.get_available_topics()
             logger.info(f"Processing all topics: {topics_to_process}")
         
         # Process each topic
