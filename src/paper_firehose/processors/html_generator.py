@@ -184,30 +184,36 @@ class HTMLGenerator:
             f.write(updated_html)
         logger.info(f"Generated ranked HTML file from database: {output_path}")
 
-    def generate_pqa_summarized_html_from_database(self, db_manager, topic_name: str, output_path: str, title: str = None) -> None:
+    def generate_pqa_summarized_html_from_database(self, db_manager, topic_name: str, output_path: str, title: str = None, description: str = None) -> None:
         """
-        Generate an HTML file with entries that have paper_qa_summary for a specific topic.
+        Generate an HTML file with all ranked entries for a specific topic.
 
-        Uses a yellow-highlighted box and a "Fulltext summary" heading, and
-        renders Summary and Methods sections from the JSON payload.
+        Entries with paper_qa_summary show the full PQA summary box.
+        Entries without paper_qa_summary show just the abstract/summary (like ranked HTML).
+        All entries are sorted by rank_score descending.
         """
         if title is None:
             title = f"PDF Summaries - {topic_name}"
 
-        self._create_new_html_file(output_path, title)
+        self._create_new_html_file(output_path, title, description)
 
+        # Get all entries with rank scores (same as ranked HTML)
         entries = db_manager.get_current_entries(topic=topic_name)
-        summarized_entries = [e for e in entries if e.get('paper_qa_summary') and e.get('paper_qa_summary').strip()]
+        ranked_entries = [e for e in entries if e.get('rank_score') is not None]
 
-        if not summarized_entries:
-            html_parts = ['<p class="no-entries">No PDF-based summaries available for this topic.</p>']
+        if not ranked_entries:
+            html_parts = ['<p class="no-entries">No ranked entries available for this topic.</p>']
         else:
-            summarized_entries.sort(key=lambda e: (e.get('rank_score') or 0.0), reverse=True)
+            # Sort by rank_score descending (same as ranked HTML)
+            ranked_entries.sort(key=lambda e: (e.get('rank_score') or 0.0), reverse=True)
+
+            # Count entries with summaries
+            summarized_count = sum(1 for e in ranked_entries if e.get('paper_qa_summary') and e.get('paper_qa_summary').strip())
 
             html_parts = []
-            html_parts.append(f'<div class="entry-count">{len(summarized_entries)} summarized entries (sorted by rank score)</div>')
+            html_parts.append(f'<div class="entry-count" data-entry-counter="true">{len(ranked_entries)} ranked entries (highest score first, {summarized_count} with PDF summaries)</div>')
 
-            for idx, entry in enumerate(summarized_entries):
+            for idx, entry in enumerate(ranked_entries):
                 title_text = self.process_text(entry.get('title', 'No title'))
                 link = entry.get('link', '#')
                 authors = self.process_text(entry.get('authors', ''))
@@ -216,8 +222,10 @@ class HTMLGenerator:
                 pqa_raw = entry.get('paper_qa_summary', '')
                 abstract_raw = entry.get('abstract', '')
                 summary_raw = entry.get('summary', '')
-                context_text = self.process_text(abstract_raw if (abstract_raw and abstract_raw.strip()) else summary_raw)
                 rank_score = entry.get('rank_score')
+
+                # Check if this entry has a PQA summary
+                has_pqa_summary = pqa_raw and pqa_raw.strip()
 
                 dropdown_id = f"abstract_{topic_name}_{idx}".replace(' ', '_').replace('-', '_')
 
@@ -228,35 +236,74 @@ class HTMLGenerator:
                     score_str = f"{score_trunc:.2f}"
                     score_badge = f' <span class="badge">Score {score_str}</span>'
 
-                pqa_html = self._format_pqa_summary(pqa_raw)
+                # Determine tag based on whether entry has PQA summary
+                tag_label = 'PDF summary' if has_pqa_summary else 'Ranked'
+                tag_class = 'tag-pqa' if has_pqa_summary else 'tag-ranked'
 
-                entry_html = f'''
-<div class="entry">
-    <div class="entry-title">
-        <h3><a href="{link}" target="_blank">{title_text}</a>{score_badge}</h3>
-    </div>
-    <div class="entry-authors"><strong>Authors:</strong> {authors}</div>
-    <div class="entry-feed"><strong>{feed_name_entry}</strong></div>
-    <div class="entry-published"><em>Published:</em> {published}</div>
-    <div class="pqa-summary">
-        <h4 class="pqa-heading">Fulltext summary</h4>
-        {pqa_html}
-    </div>'''
+                # Build entry using same grid structure as ranked HTML
+                entry_html = [
+                    '<div class="entry" data-entry-type="summarized">',
+                    '  <div class="entry-grid">',
+                    '    <div class="entry-info">',
+                    '      <div class="entry-title">',
+                    f'        <h3><a href="{link}" target="_blank" rel="noopener noreferrer">{title_text}</a>{score_badge}</h3>',
+                    '      </div>',
+                    '      <div class="entry-meta">',
+                    f'        <span class="meta-item"><strong>Authors:</strong> {authors}</span>',
+                    f'        <span class="meta-item"><em>Published:</em> {published}</span>',
+                    '      </div>',
+                    '      <div class="entry-tags">',
+                    f'        <span class="tag tag-feed">{feed_name_entry or "Unknown feed"}</span>',
+                    f'        <span class="tag {tag_class}">{tag_label}</span>',
+                    '      </div>',
+                    '      <div class="entry-actions">',
+                    f'        <a class="action-link" href="{link}" target="_blank" rel="noopener noreferrer">Open article</a>',
+                    '      </div>',
+                    '    </div>',
+                    '    <div class="entry-content">',
+                ]
 
-                if context_text:
-                    feed_name_entry = self.process_text(entry.get('feed_name', ''))
-                    entry_html += f'''
-    <div class="abstract-toggle">
-        <button onclick="toggleAbstract('{dropdown_id}')">Show/Hide Original Abstract</button>
-    </div>
-    <div id="{dropdown_id}" class="abstract-content">
-        <strong>Original Abstract/Summary:</strong><br>
-        {context_text}
-        <div class="entry-feed"><strong>{feed_name_entry}</strong></div>
-    </div>'''
+                # Show PQA summary if available, otherwise show abstract/summary (like ranked HTML)
+                if has_pqa_summary:
+                    pqa_html = self._format_pqa_summary(pqa_raw)
+                    entry_html.extend([
+                        '      <div class="pqa-summary">',
+                        '        <h4 class="pqa-heading">Fulltext summary</h4>',
+                        f'        {pqa_html}',
+                        '      </div>',
+                    ])
 
-                entry_html += '</div>'
-                html_parts.append(entry_html)
+                    # Add abstract toggle for entries with PQA summary
+                    context_text = self.process_text(abstract_raw if (abstract_raw and abstract_raw.strip()) else summary_raw)
+                    if context_text:
+                        entry_html.extend([
+                            '      <div class="abstract-toggle">',
+                            f'        <button class="toggle-button" onclick="toggleAbstract(\'{dropdown_id}\')">Show/Hide Original Abstract</button>',
+                            '      </div>',
+                            f'      <div id="{dropdown_id}" class="abstract-content">',
+                            '        <strong>Original Abstract/Summary:</strong><br>',
+                            f'        {context_text}',
+                            '      </div>',
+                        ])
+                else:
+                    # No PQA summary - show abstract/summary like in ranked HTML
+                    body_text = self.process_text(abstract_raw if (abstract_raw and abstract_raw.strip()) else summary_raw)
+                    entry_html.extend([
+                        '      <div class="summary-section ranked-summary">',
+                        f'        <p>{body_text}</p>',
+                        '      </div>',
+                    ])
+
+                entry_html.extend([
+                    '      <div class="entry-actions entry-actions--mobile">',
+                    f'        <a class="action-link" href="{link}" target="_blank" rel="noopener noreferrer">Open article</a>',
+                    '      </div>',
+                    '    </div>',
+                    '  </div>',
+                    '</div>'
+                ])
+
+                html_parts.append('\n'.join(line for line in entry_html if line.strip() != ""))
 
         js_script = '''
 <script>
