@@ -131,10 +131,11 @@ class FeedProcessor:
         
         matched_entries = []
         priority_journals = self.config.get_priority_journals()
-        
+        enabled_feeds = self.config.get_enabled_feeds()
+
         for feed_key, entries in entries_per_feed.items():
             is_priority_feed = feed_key in priority_journals
-            feed_display_name = self.config.get_enabled_feeds().get(feed_key, {}).get('name', feed_key)
+            feed_display_name = enabled_feeds.get(feed_key, {}).get('name', feed_key)
             
             for entry in entries:
                 entry_id = self.db.compute_entry_id(entry)
