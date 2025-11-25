@@ -78,3 +78,56 @@ def test_load_topic_config_supports_yml_extension(tmp_path):
 
     assert data["name"] == "My Topic"
     assert data["feeds"] == ["test-feed"]
+
+
+def test_config_manager_no_reseed_if_dir_exists(tmp_path):
+    """If topics/secrets directories already exist, no new template files should be added."""
+
+    # Step 1: Create initial config with empty topics directory
+    config_dir = tmp_path / "config_test"
+    config_dir.mkdir()
+    config_path = config_dir / "config.yaml"
+
+    # Create empty topics and secrets directories
+    topics_dir = config_dir / "topics"
+    topics_dir.mkdir()
+    secrets_dir = config_dir / "secrets"
+    secrets_dir.mkdir()
+
+    # Add one custom topic file
+    custom_topic = topics_dir / "my_custom_topic.yaml"
+    custom_topic.write_text(
+        (
+            "name: \"Custom Topic\"\n"
+            "feeds:\n"
+            "  - test-feed\n"
+            "filter:\n"
+            "  pattern: \"test\"\n"
+        ),
+        encoding="utf-8",
+    )
+
+    # Record initial files
+    initial_topic_files = set(f.name for f in topics_dir.iterdir())
+    initial_secret_files = set(f.name for f in secrets_dir.iterdir()) if secrets_dir.exists() else set()
+
+    # Step 2: Create ConfigManager (which runs _ensure_default_config)
+    cfg = ConfigManager(str(config_path))
+
+    # Step 3: Verify no new files were added to topics
+    final_topic_files = set(f.name for f in topics_dir.iterdir())
+    assert final_topic_files == initial_topic_files, (
+        f"No new topic files should be added. "
+        f"Initial: {initial_topic_files}, Final: {final_topic_files}"
+    )
+
+    # Step 4: Verify no new files were added to secrets
+    final_secret_files = set(f.name for f in secrets_dir.iterdir()) if secrets_dir.exists() else set()
+    assert final_secret_files == initial_secret_files, (
+        f"No new secret files should be added. "
+        f"Initial: {initial_secret_files}, Final: {final_secret_files}"
+    )
+
+    # Step 5: Verify the custom topic still exists and is loadable
+    assert custom_topic.exists()
+    assert "my_custom_topic" in cfg.get_available_topics()

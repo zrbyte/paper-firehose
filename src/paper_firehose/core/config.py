@@ -181,35 +181,42 @@ class ConfigManager:
                 logger.info("Created fallback default config.yaml at %s", config_file)
 
         topics_dir = Path(self.base_dir) / "topics"
-        topics_dir.mkdir(parents=True, exist_ok=True)
         secrets_dir = Path(self.base_dir) / "secrets"
+
+        # Only seed templates if directories don't exist (one-time initialization)
+        topics_existed = topics_dir.exists()
+        secrets_existed = secrets_dir.exists()
+
+        topics_dir.mkdir(parents=True, exist_ok=True)
         secrets_dir.mkdir(parents=True, exist_ok=True)
 
         created_topic = False
-        try:
-            if _copy_tree(_TEMPLATE_TOPICS_DIR, topics_dir):
-                created_topic = True
-        except Exception as exc:
-            logger.warning("Failed to copy topics template tree: %s", exc)
-
-        try:
-            _copy_tree(_TEMPLATE_SECRETS_DIR, secrets_dir)
-        except Exception as exc:
-            logger.warning("Failed to copy secrets template tree: %s", exc)
-
-        # Ensure critical secret placeholders exist even if the template tree lacks them
-        placeholders = {
-            "email_password.env": _DEFAULT_EMAIL_SECRET,
-            "openaikulcs.env": _DEFAULT_OPENAI_SECRET,
-        }
-        for filename, content in placeholders.items():
-            target = secrets_dir / filename
-            if target.exists():
-                continue
+        if not topics_existed:
             try:
-                target.write_text(content, encoding="utf-8")
+                if _copy_tree(_TEMPLATE_TOPICS_DIR, topics_dir):
+                    created_topic = True
             except Exception as exc:
-                logger.warning("Failed to create placeholder secret %s: %s", target, exc)
+                logger.warning("Failed to copy topics template tree: %s", exc)
+
+        if not secrets_existed:
+            try:
+                _copy_tree(_TEMPLATE_SECRETS_DIR, secrets_dir)
+            except Exception as exc:
+                logger.warning("Failed to copy secrets template tree: %s", exc)
+
+            # Ensure critical secret placeholders exist even if the template tree lacks them
+            placeholders = {
+                "email_password.env": _DEFAULT_EMAIL_SECRET,
+                "openaikulcs.env": _DEFAULT_OPENAI_SECRET,
+            }
+            for filename, content in placeholders.items():
+                target = secrets_dir / filename
+                if target.exists():
+                    continue
+                try:
+                    target.write_text(content, encoding="utf-8")
+                except Exception as exc:
+                    logger.warning("Failed to create placeholder secret %s: %s", target, exc)
 
         if not any(topics_dir.glob("*.yml")) and not any(topics_dir.glob("*.yaml")):
             default_topic_path = topics_dir / "example.yaml"
@@ -222,11 +229,14 @@ class ConfigManager:
                 if not item.is_dir() or item.name in {"topics", "secrets"}:
                     continue
                 dest_dir = Path(self.base_dir) / item.name
+                # Only seed templates if directory doesn't exist (one-time initialization)
+                dest_existed = dest_dir.exists()
                 dest_dir.mkdir(parents=True, exist_ok=True)
-                try:
-                    _copy_tree(item, dest_dir)
-                except Exception as exc:
-                    logger.warning("Failed to copy template directory %s: %s", item, exc)
+                if not dest_existed:
+                    try:
+                        _copy_tree(item, dest_dir)
+                    except Exception as exc:
+                        logger.warning("Failed to copy template directory %s: %s", item, exc)
 
         if created_topic:
             self._topics.clear()
