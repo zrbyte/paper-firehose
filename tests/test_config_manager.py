@@ -34,7 +34,6 @@ def test_config_manager_creates_defaults(tmp_path):
     assert secrets_dir.is_dir(), "secrets directory should be created for credential storage"
     assert (secrets_dir / "email_password.env").exists(), "default SMTP password placeholder should be copied"
     assert (secrets_dir / "mailing_lists.yaml").exists(), "sample recipients file should be copied"
-    assert (secrets_dir / "openaikulcs.env").exists(), "OpenAI API key placeholder should be copied"
 
     # Ensure the manager can load the generated configuration without errors
     data = cfg.load_config()

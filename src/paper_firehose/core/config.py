@@ -21,7 +21,6 @@ _TEMPLATE_TOPICS_DIR = _TEMPLATE_DIR / "topics"
 _TEMPLATE_SECRETS_DIR = _TEMPLATE_DIR / "secrets"
 
 _DEFAULT_EMAIL_SECRET = "# Placeholder SMTP password file. Replace with real credentials.\n"
-_DEFAULT_OPENAI_SECRET = "# Placeholder OpenAI API key file for summarize/pqa commands.\n"
 
 _DEFAULT_CONFIG_TEMPLATE = """# Auto-generated default configuration for paper-firehose
 database:
@@ -207,7 +206,6 @@ class ConfigManager:
             # Ensure critical secret placeholders exist even if the template tree lacks them
             placeholders = {
                 "email_password.env": _DEFAULT_EMAIL_SECRET,
-                "openaikulcs.env": _DEFAULT_OPENAI_SECRET,
             }
             for filename, content in placeholders.items():
                 target = secrets_dir / filename

@@ -7,8 +7,6 @@ database:
 llm:
   model: "gpt-5-mini"
   api_key_env: "OPENAI_API_KEY"
-  # Optional: override the default key location (~/.paper_firehose/secrets/openaikulcs.env)
-  # api_key_file: "secrets/openaikulcs.env"
   # Fallback model if the primary is unavailable/unsupported
   model_fallback: "gpt-5-nano"
   # Slower by default to be polite to API

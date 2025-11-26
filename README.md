@@ -137,7 +137,6 @@ Files to edit
 - `config/config.yaml`: global settings (DB paths, feeds, paper‑qa, defaults, optional email/SMTP)
 - `config/topics/<topic>.yaml`: topic name/description, feeds, regex filter, ranking, abstract fetch and output filenames
 - `config/secrets/`: secret material that should not be committed. These secrets can be either stored as `*.env` files or as environment variables.
-  - `openaikulcs.env`: OpenAI API key for `pqa_summary`
   - `email_password.env`: SMTP password (referenced by `email.smtp.password_file`)
   - `mailing_lists.yaml`: optional per‑recipient overrides for `email`:
     ```yaml
