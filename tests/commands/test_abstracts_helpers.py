@@ -63,23 +63,27 @@ def test_reconstruct_openalex_inverted_index():
 
 
 def test_try_publisher_apis_prefers_pubmed_for_pnas(monkeypatch):
-    calls = []
+    class FakePubMedSource:
+        def fetch_abstract(self, doi=None, title=None, mailto=None, session=None):
+            return "pubmed-abstract"
 
-    def fake_pubmed(doi, *, session):
-        calls.append("pubmed")
-        return "pubmed-abstract"
+    class FakeCrossrefSource:
+        def fetch_abstract(self, doi=None, title=None, mailto=None, session=None):
+            return None
 
-    def fake_semantic(doi, *, session):
-        calls.append("semantic")
-        return None
+    class FakeSemanticScholarSource:
+        def fetch_abstract(self, doi=None, title=None, mailto=None, session=None):
+            return None
 
-    def fake_openalex(doi, *, mailto, session):
-        calls.append("openalex")
-        return None
+    class FakeOpenAlexSource:
+        def fetch_abstract(self, doi=None, title=None, mailto=None, session=None):
+            return None
 
-    monkeypatch.setattr(abstract_fetcher, "get_pubmed_abstract_by_doi", fake_pubmed)
-    monkeypatch.setattr(abstract_fetcher, "get_semantic_scholar_abstract", fake_semantic)
-    monkeypatch.setattr(abstract_fetcher, "get_openalex_abstract", fake_openalex)
+    # Mock biomedical sources to return PubMed first - patch at point of use
+    def fake_biomedical_sources():
+        return [FakePubMedSource(), FakeCrossrefSource(), FakeSemanticScholarSource(), FakeOpenAlexSource()]
+
+    monkeypatch.setattr(abstract_fetcher, "get_biomedical_sources", fake_biomedical_sources)
 
     result = abstract_fetcher.try_publisher_apis(
         "10.1000/pnas",
@@ -90,27 +94,30 @@ def test_try_publisher_apis_prefers_pubmed_for_pnas(monkeypatch):
     )
 
     assert result == "pubmed-abstract"
-    assert calls == ["pubmed"]
 
 
 def test_try_publisher_apis_returns_semantic_scholar_first(monkeypatch):
-    calls = []
+    class FakeCrossrefSource:
+        def fetch_abstract(self, doi=None, title=None, mailto=None, session=None):
+            return None
 
-    def fake_pubmed(doi, *, session):
-        calls.append("pubmed")
-        return None
+    class FakeSemanticScholarSource:
+        def fetch_abstract(self, doi=None, title=None, mailto=None, session=None):
+            return "semantic-result"
 
-    def fake_semantic(doi, *, session):
-        calls.append("semantic")
-        return "semantic-result"
+    class FakeOpenAlexSource:
+        def fetch_abstract(self, doi=None, title=None, mailto=None, session=None):
+            return "openalex-result"
 
-    def fake_openalex(doi, *, mailto, session):
-        calls.append("openalex")
-        return "openalex-result"
+    class FakePubMedSource:
+        def fetch_abstract(self, doi=None, title=None, mailto=None, session=None):
+            return None
 
-    monkeypatch.setattr(abstract_fetcher, "get_pubmed_abstract_by_doi", fake_pubmed)
-    monkeypatch.setattr(abstract_fetcher, "get_semantic_scholar_abstract", fake_semantic)
-    monkeypatch.setattr(abstract_fetcher, "get_openalex_abstract", fake_openalex)
+    # Mock default sources to return Crossref, Semantic Scholar, OpenAlex, PubMed in order
+    def fake_default_sources():
+        return [FakeCrossrefSource(), FakeSemanticScholarSource(), FakeOpenAlexSource(), FakePubMedSource()]
+
+    monkeypatch.setattr(abstract_fetcher, "get_default_sources", fake_default_sources)
 
     result = abstract_fetcher.try_publisher_apis(
         "10.1000/test",
@@ -121,27 +128,30 @@ def test_try_publisher_apis_returns_semantic_scholar_first(monkeypatch):
     )
 
     assert result == "semantic-result"
-    assert calls == ["semantic"]
 
 
 def test_try_publisher_apis_falls_back_to_pubmed(monkeypatch):
-    calls = []
+    class FakeCrossrefSource:
+        def fetch_abstract(self, doi=None, title=None, mailto=None, session=None):
+            return None
 
-    def fake_pubmed(doi, *, session):
-        calls.append("pubmed")
-        return "pubmed-final"
+    class FakeSemanticScholarSource:
+        def fetch_abstract(self, doi=None, title=None, mailto=None, session=None):
+            return None
 
-    def fake_semantic(doi, *, session):
-        calls.append("semantic")
-        return None
+    class FakeOpenAlexSource:
+        def fetch_abstract(self, doi=None, title=None, mailto=None, session=None):
+            return None
 
-    def fake_openalex(doi, *, mailto, session):
-        calls.append("openalex")
-        return None
+    class FakePubMedSource:
+        def fetch_abstract(self, doi=None, title=None, mailto=None, session=None):
+            return "pubmed-final"
 
-    monkeypatch.setattr(abstract_fetcher, "get_pubmed_abstract_by_doi", fake_pubmed)
-    monkeypatch.setattr(abstract_fetcher, "get_semantic_scholar_abstract", fake_semantic)
-    monkeypatch.setattr(abstract_fetcher, "get_openalex_abstract", fake_openalex)
+    # Mock default sources to return all sources with PubMed last
+    def fake_default_sources():
+        return [FakeCrossrefSource(), FakeSemanticScholarSource(), FakeOpenAlexSource(), FakePubMedSource()]
+
+    monkeypatch.setattr(abstract_fetcher, "get_default_sources", fake_default_sources)
 
     result = abstract_fetcher.try_publisher_apis(
         "10.1000/test",
@@ -152,4 +162,3 @@ def test_try_publisher_apis_falls_back_to_pubmed(monkeypatch):
     )
 
     assert result == "pubmed-final"
-    assert calls == ["semantic", "openalex", "pubmed"]

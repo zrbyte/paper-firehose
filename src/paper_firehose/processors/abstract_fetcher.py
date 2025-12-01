@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 import json
+import logging
 from typing import Optional, Dict, Any, Iterable
 
 import requests
@@ -23,6 +24,48 @@ from ..core.apis import (
 )
 from ..core.doi_utils import extract_doi_from_json
 from ..core.text_utils import clean_abstract_for_db
+from ..core.abstract_source import AbstractSource, get_default_sources, get_biomedical_sources
+
+
+logger = logging.getLogger(__name__)
+
+
+def try_abstract_sources(
+    sources: list[AbstractSource],
+    doi: Optional[str],
+    title: Optional[str],
+    *,
+    mailto: str,
+    session: Optional[requests.Session]
+) -> Optional[str]:
+    """Try fetching abstract from a list of sources in order.
+
+    Args:
+        sources: List of AbstractSource instances to try in order
+        doi: Digital Object Identifier (optional)
+        title: Paper title (optional)
+        mailto: Contact email for API calls
+        session: requests.Session for API calls
+
+    Returns:
+        Abstract text or None if not found from any source
+    """
+    for source in sources:
+        source_name = source.__class__.__name__
+        try:
+            result = source.fetch_abstract(
+                doi=doi, title=title, mailto=mailto, session=session
+            )
+            if result:
+                logger.debug(f"Abstract fetched successfully from {source_name}")
+                return result
+        except Exception as e:
+            logger.warning(f"Failed to fetch abstract from {source_name}: {e}")
+            # Continue to next source on error
+            continue
+
+    logger.debug(f"No abstract found from {len(sources)} sources (doi={doi}, title={title[:50] if title else None}...)")
+    return None
 
 
 def try_publisher_apis(
@@ -50,21 +93,13 @@ def try_publisher_apis(
     fn = (feed_name or '').lower()
     domain = (link or '').lower()
 
-    # PNAS or biomedical journals: try PubMed first
+    # Choose appropriate source list based on journal type
     if 'pnas' in fn or 'pnas.org' in domain:
-        abs_txt = get_pubmed_abstract_by_doi(doi or '', session=session)
-        if abs_txt:
-            return abs_txt
-    # Generic: Semantic Scholar then OpenAlex
-    abs_txt = get_semantic_scholar_abstract(doi or '', session=session)
-    if abs_txt:
-        return abs_txt
-    abs_txt = get_openalex_abstract(doi or '', mailto=mailto, session=session)
-    if abs_txt:
-        return abs_txt
-    # Final PubMed attempt even if not PNAS (some Nature/Science items are indexed)
-    abs_txt = get_pubmed_abstract_by_doi(doi or '', session=session)
-    return abs_txt
+        sources = get_biomedical_sources()
+    else:
+        sources = get_default_sources()
+
+    return try_abstract_sources(sources, doi, None, mailto=mailto, session=session)
 
 
 def iter_targets(
@@ -151,8 +186,8 @@ def fill_arxiv_summaries(
     if history_updates:
         try:
             db.update_history_abstracts_batch(history_updates)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to update history database in fill_arxiv_summaries: {e}", exc_info=True)
 
     return len(papers_updates)
 
@@ -196,8 +231,8 @@ def crossref_pass(
                 if raw:
                     obj = json.loads(raw)
                     doi = obj.get('arxiv_doi') or obj.get('arXiv_doi')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to extract arXiv DOI from raw_data for entry {row.get('id')}: {e}")
         abstract: Optional[str] = None
         if doi:
             abstract = get_crossref_abstract(doi, mailto=mailto, session=session, max_retries=max_retries)
@@ -221,8 +256,8 @@ def crossref_pass(
     if history_updates:
         try:
             db.update_history_abstracts_batch(history_updates)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to update history database: {e}", exc_info=True)
 
     return fetched
 
@@ -266,8 +301,8 @@ def fallback_pass(
                 if raw:
                     obj = json.loads(raw)
                     doi = obj.get('arxiv_doi') or obj.get('arXiv_doi')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to extract arXiv DOI from raw_data for entry {row.get('id')}: {e}")
         abstract = try_publisher_apis(doi, row.get('feed_name') or '', row.get('link') or '', mailto=mailto, session=session)
         if abstract:
             abstract = clean_abstract_for_db(abstract)
@@ -286,7 +321,7 @@ def fallback_pass(
     if history_updates:
         try:
             db.update_history_abstracts_batch(history_updates)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to update history database: {e}", exc_info=True)
 
     return fetched
