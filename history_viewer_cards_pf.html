@@ -193,12 +193,14 @@
       border-radius: 18px;
       box-shadow: 0 24px 60px rgba(15, 23, 42, 0.14);
       border: 1px solid rgba(148, 163, 184, 0.18);
-      overflow: hidden;
+      overflow: clip;
+      max-width: 100%;
     }
 
     .entry-grid {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+      max-width: 100%;
     }
 
     .entry-info {
@@ -208,6 +210,9 @@
       display: flex;
       flex-direction: column;
       gap: 18px;
+      min-width: 0;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
     }
 
     .entry-content {
@@ -216,6 +221,11 @@
       display: flex;
       flex-direction: column;
       gap: 18px;
+      min-width: 0;
+      max-width: 100%;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+      overflow: hidden;
     }
 
     .entry-title h3 {
@@ -223,6 +233,9 @@
       font-size: 1.18rem;
       line-height: 1.38;
       letter-spacing: -0.01em;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+      word-break: break-word;
     }
 
     .entry-journal {
@@ -268,6 +281,8 @@
       gap: 6px;
       font-size: 0.95rem;
       color: var(--text-secondary);
+      overflow-wrap: break-word;
+      word-wrap: break-word;
     }
 
     .entry-tags {
@@ -334,16 +349,32 @@
       pointer-events: none;
     }
 
+    .entry-figure {
+      max-width: 100%;
+      width: 100%;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
     .entry-figure img {
       width: 100%;
+      max-width: 100%;
+      height: auto;
       border-radius: 16px;
       box-shadow: 0 16px 40px rgba(15, 23, 42, 0.2);
+      display: block;
+      object-fit: contain;
+      box-sizing: border-box;
     }
 
     .summary-section {
       line-height: 1.65;
       font-size: 0.96rem;
       color: var(--text-primary);
+      overflow-wrap: break-word;
+      word-wrap: break-word;
     }
 
     .llm-summary,
@@ -352,6 +383,8 @@
       padding: 18px 20px;
       line-height: 1.65;
       font-size: 0.96rem;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
     }
 
     .llm-summary {
@@ -369,6 +402,8 @@
       border-radius: 12px;
       padding: 12px 18px;
       background: rgba(241, 245, 249, 0.7);
+      overflow-wrap: break-word;
+      word-wrap: break-word;
     }
 
     .abstract-details summary {
@@ -434,6 +469,22 @@
       }
     }
 
+    @media (max-width: 1040px) and (orientation: portrait) {
+      .entry-content {
+        padding: 24px 28px;
+      }
+
+      .entry-content img {
+        width: 80% !important;
+        max-width: 80% !important;
+        height: auto !important;
+        display: block !important;
+        margin: 0 auto !important;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.15);
+        border-radius: 12px;
+      }
+    }
+
     @media (max-width: 780px) {
       body {
         font-size: 0.84rem;
@@ -460,6 +511,16 @@
       .entry-title h3 {
         font-size: 1.14rem;
       }
+
+      .entry-content img {
+        width: 80% !important;
+        max-width: 80% !important;
+        height: auto !important;
+        display: block !important;
+        margin: 0 auto !important;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.15);
+        border-radius: 12px;
+      }
     }
 
     @media (max-width: 540px) {
@@ -469,6 +530,25 @@
 
       .controls-panel {
         border-radius: 16px;
+      }
+
+      .entry-info,
+      .entry-content {
+        padding: 20px 18px;
+      }
+
+      .content-wrapper {
+        padding: 0 16px;
+      }
+
+      .entry-content img {
+        width: 80% !important;
+        max-width: 80% !important;
+        height: auto !important;
+        display: block !important;
+        margin: 0 auto !important;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.15);
+        border-radius: 12px;
       }
 
       button {
@@ -481,6 +561,23 @@
 
       .load-more-controls button {
         width: 100%;
+      }
+    }
+
+    @media (max-width: 1040px) and (orientation: landscape) {
+      .entry-info,
+      .entry-content {
+        padding: 16px 20px;
+      }
+
+      .entry-content img {
+        width: 80% !important;
+        max-width: 80% !important;
+        height: auto !important;
+        display: block !important;
+        margin: 0 auto !important;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.15);
+        border-radius: 12px;
       }
     }
   </style>
