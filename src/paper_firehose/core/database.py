@@ -178,20 +178,20 @@ class DatabaseManager:
                 try:
                     cursor.execute("ALTER TABLE matched_entries ADD COLUMN llm_summary TEXT")
                     columns.add('llm_summary')
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Column llm_summary may already exist: {e}")
             if 'paper_qa_summary' not in columns:
                 try:
                     cursor.execute("ALTER TABLE matched_entries ADD COLUMN paper_qa_summary TEXT")
                     columns.add('paper_qa_summary')
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Column paper_qa_summary may already exist: {e}")
             if 'rank_score' not in columns:
                 try:
                     cursor.execute("ALTER TABLE matched_entries ADD COLUMN rank_score REAL")
                     columns.add('rank_score')
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Column rank_score may already exist: {e}")
 
         need_recreate = (len(columns) == 0) or (not required_columns.issubset(columns))
 
@@ -289,8 +289,8 @@ class DatabaseManager:
             if 'paper_qa_summary' not in columns:
                 try:
                     cursor.execute("ALTER TABLE entries ADD COLUMN paper_qa_summary TEXT")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Column paper_qa_summary may already exist in entries table: {e}")
 
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_entries_topic_status 
@@ -613,9 +613,9 @@ class DatabaseManager:
                 match = re.search(r'(\d{4}-\d{2}-\d{2})', published_str)
                 if match:
                     return match.group(1)
-            except Exception:
-                pass
-        
+            except Exception as e:
+                logger.debug(f"Failed to parse published date '{published_str}': {e}")
+
         # Fallback to current date
         return datetime.date.today().isoformat()
 

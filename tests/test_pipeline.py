@@ -19,6 +19,7 @@ from paper_firehose.commands import generate_html as html_cmd
 from paper_firehose.commands import pqa_summary as pqa_cmd
 from paper_firehose.commands import rank as rank_cmd
 import paper_firehose.core.config as core_config
+from paper_firehose.processors import abstract_fetcher
 
 
 class DummyRanker:
@@ -107,7 +108,8 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
     monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(data_dir))
 
     # Avoid external model downloads and heavy dependencies during ranking
-    monkeypatch.setattr(rank_cmd, "_ensure_local_model", lambda spec: spec)
+    from paper_firehose.core import model_manager
+    monkeypatch.setattr(model_manager, "ensure_local_model", lambda spec: spec)
     monkeypatch.setattr(rank_cmd, "STRanker", DummyRanker)
 
     def fake_fill_arxiv_summaries(db_manager, topics=None):
@@ -142,9 +144,12 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
     ):
         return 0
 
-    monkeypatch.setattr(abstracts_cmd, "_fill_arxiv_summaries", fake_fill_arxiv_summaries)
-    monkeypatch.setattr(abstracts_cmd, "_crossref_pass", fake_crossref_pass)
-    monkeypatch.setattr(abstracts_cmd, "_fallback_pass", fake_fallback_pass)
+    # Patch at the point of use (abstracts_cmd) not at definition (abstract_fetcher)
+    # because abstracts.py imports these functions at module level
+    import paper_firehose.commands.abstracts as abstracts_module
+    monkeypatch.setattr(abstracts_module, "fill_arxiv_summaries", fake_fill_arxiv_summaries)
+    monkeypatch.setattr(abstracts_module, "crossref_pass", fake_crossref_pass)
+    monkeypatch.setattr(abstracts_module, "fallback_pass", fake_fallback_pass)
 
     def fake_download_pdf(pdf_url, dest_path, *, mailto, session=None, max_retries=3):
         Path(dest_path).write_bytes(b"0" * 12000)
