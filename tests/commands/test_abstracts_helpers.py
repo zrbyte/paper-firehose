@@ -10,9 +10,15 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from paper_firehose.commands import abstracts  # noqa: E402
 from paper_firehose.core.text_utils import strip_jats, clean_abstract_for_db  # noqa: E402
 from paper_firehose.core.doi_utils import find_doi_in_text, extract_doi_from_json  # noqa: E402
+from paper_firehose.core.apis import openalex_client  # noqa: E402
+from paper_firehose.processors import abstract_fetcher  # noqa: E402
+from paper_firehose.core.apis import (  # noqa: E402
+    get_pubmed_abstract_by_doi,
+    get_semantic_scholar_abstract,
+    get_openalex_abstract,
+)
 
 
 def test_strip_jats_removes_markup():
@@ -52,7 +58,7 @@ def test_extract_doi_from_raw_handles_nested_fields():
 
 def test_reconstruct_openalex_inverted_index():
     inverted = {"hello": [0, 2], "world": [1]}
-    result = abstracts._reconstruct_openalex(inverted)
+    result = openalex_client._reconstruct_openalex(inverted)
     assert result == "hello world hello"
 
 
@@ -71,11 +77,11 @@ def test_try_publisher_apis_prefers_pubmed_for_pnas(monkeypatch):
         calls.append("openalex")
         return None
 
-    monkeypatch.setattr(abstracts, "get_pubmed_abstract_by_doi", fake_pubmed)
-    monkeypatch.setattr(abstracts, "get_semantic_scholar_abstract", fake_semantic)
-    monkeypatch.setattr(abstracts, "get_openalex_abstract", fake_openalex)
+    monkeypatch.setattr(abstract_fetcher, "get_pubmed_abstract_by_doi", fake_pubmed)
+    monkeypatch.setattr(abstract_fetcher, "get_semantic_scholar_abstract", fake_semantic)
+    monkeypatch.setattr(abstract_fetcher, "get_openalex_abstract", fake_openalex)
 
-    result = abstracts.try_publisher_apis(
+    result = abstract_fetcher.try_publisher_apis(
         "10.1000/pnas",
         "PNAS Proceedings",
         "https://pnas.org/paper",
@@ -102,11 +108,11 @@ def test_try_publisher_apis_returns_semantic_scholar_first(monkeypatch):
         calls.append("openalex")
         return "openalex-result"
 
-    monkeypatch.setattr(abstracts, "get_pubmed_abstract_by_doi", fake_pubmed)
-    monkeypatch.setattr(abstracts, "get_semantic_scholar_abstract", fake_semantic)
-    monkeypatch.setattr(abstracts, "get_openalex_abstract", fake_openalex)
+    monkeypatch.setattr(abstract_fetcher, "get_pubmed_abstract_by_doi", fake_pubmed)
+    monkeypatch.setattr(abstract_fetcher, "get_semantic_scholar_abstract", fake_semantic)
+    monkeypatch.setattr(abstract_fetcher, "get_openalex_abstract", fake_openalex)
 
-    result = abstracts.try_publisher_apis(
+    result = abstract_fetcher.try_publisher_apis(
         "10.1000/test",
         "Generic Journal",
         "https://example.org/article",
@@ -133,11 +139,11 @@ def test_try_publisher_apis_falls_back_to_pubmed(monkeypatch):
         calls.append("openalex")
         return None
 
-    monkeypatch.setattr(abstracts, "get_pubmed_abstract_by_doi", fake_pubmed)
-    monkeypatch.setattr(abstracts, "get_semantic_scholar_abstract", fake_semantic)
-    monkeypatch.setattr(abstracts, "get_openalex_abstract", fake_openalex)
+    monkeypatch.setattr(abstract_fetcher, "get_pubmed_abstract_by_doi", fake_pubmed)
+    monkeypatch.setattr(abstract_fetcher, "get_semantic_scholar_abstract", fake_semantic)
+    monkeypatch.setattr(abstract_fetcher, "get_openalex_abstract", fake_openalex)
 
-    result = abstracts.try_publisher_apis(
+    result = abstract_fetcher.try_publisher_apis(
         "10.1000/test",
         "Other Journal",
         "https://example.org/article",
