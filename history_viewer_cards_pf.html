@@ -580,6 +580,204 @@
         border-radius: 12px;
       }
     }
+
+    /* Mobile Carousel Styles - Only visible on mobile */
+    @media (max-width: 1040px) {
+      .view-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 18px;
+        background: rgba(37, 99, 235, 0.12);
+        color: #1d4ed8;
+        border: none;
+        border-radius: 12px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 10px 26px rgba(37, 99, 235, 0.16);
+        transition: transform 0.1s ease, box-shadow 0.1s ease;
+        margin-top: 12px;
+      }
+
+      .view-toggle:hover {
+        transform: translateY(-1px);
+      }
+
+      .view-toggle.active {
+        background: var(--accent);
+        color: #f8fafc;
+        box-shadow: 0 14px 34px rgba(37, 99, 235, 0.28);
+      }
+
+      .carousel-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1000;
+        display: none;
+      }
+
+      .carousel-container.active {
+        display: block;
+      }
+
+      .carousel-backdrop {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(15, 23, 42, 0.75);
+        backdrop-filter: blur(4px);
+      }
+
+      .carousel-wrapper {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        overflow: hidden;
+      }
+
+      .carousel-track-container {
+        width: 100%;
+        max-width: 600px;
+        height: 100%;
+        max-height: 85vh;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .carousel-close {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        width: 44px;
+        height: 44px;
+        background: rgba(255, 255, 255, 0.95);
+        border: none;
+        border-radius: 50%;
+        font-size: 28px;
+        line-height: 1;
+        color: #1f2937;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.2s ease, background 0.2s ease;
+      }
+
+      .carousel-close:hover {
+        transform: scale(1.1);
+        background: #ffffff;
+      }
+
+      .carousel-nav {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 44px;
+        height: 44px;
+        background: rgba(255, 255, 255, 0.95);
+        border: none;
+        border-radius: 50%;
+        font-size: 32px;
+        line-height: 1;
+        color: #1f2937;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.2s ease, background 0.2s ease, opacity 0.2s ease;
+      }
+
+      .carousel-nav:hover:not(:disabled) {
+        transform: translateY(-50%) scale(1.1);
+        background: #ffffff;
+      }
+
+      .carousel-nav:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+      }
+
+      .carousel-prev {
+        left: 20px;
+      }
+
+      .carousel-next {
+        right: 20px;
+      }
+
+      .carousel-track {
+        width: 100%;
+        max-width: 600px;
+        height: 100%;
+        max-height: 85vh;
+        position: relative;
+        display: flex;
+        flex-direction: row;
+        transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+        will-change: transform;
+      }
+
+      .carousel-track.no-transition {
+        transition: none;
+      }
+
+      .carousel-card-wrapper {
+        width: 600px;
+        max-width: calc(100vw - 40px);
+        flex-shrink: 0;
+        height: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 0 10px;
+        box-sizing: border-box;
+      }
+
+      .carousel-track .entry {
+        width: 100%;
+        margin: 0;
+        box-shadow: 0 8px 32px rgba(15, 23, 42, 0.2);
+      }
+
+      .carousel-indicator {
+        position: absolute;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255, 255, 255, 0.95);
+        padding: 8px 20px;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #1f2937;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        z-index: 10;
+      }
+    }
+
+    /* Desktop: Hide carousel completely */
+    @media (min-width: 1041px) {
+      .view-toggle {
+        display: none !important;
+      }
+
+      .carousel-container {
+        display: none !important;
+      }
+    }
   </style>
   <script>
     window.MathJax = {
@@ -627,6 +825,9 @@
       <div class="status-line">
         <span id="status" class="status-text"></span>
       </div>
+      <button id="viewToggle" class="view-toggle" type="button">
+        <span class="icon">▤</span> Carousel View
+      </button>
     </section>
 
     <div id="entryCount" class="entry-count" style="display:none"></div>
@@ -634,6 +835,24 @@
     <div id="loadMoreControls" class="load-more-controls" style="display:none">
       <button id="loadMoreBtn" class="button-secondary" type="button">Load 50 more</button>
       <button id="loadAllBtn" class="button-secondary" type="button">Show all</button>
+    </div>
+
+    <!-- Mobile Carousel Container -->
+    <div id="carouselContainer" class="carousel-container">
+      <div class="carousel-backdrop"></div>
+      <div class="carousel-wrapper">
+        <button class="carousel-close" aria-label="Close carousel">×</button>
+        <button class="carousel-nav carousel-prev" aria-label="Previous">‹</button>
+        <button class="carousel-nav carousel-next" aria-label="Next">›</button>
+        <div class="carousel-track-container">
+          <div class="carousel-track">
+            <!-- Cards will be inserted here by JavaScript -->
+          </div>
+        </div>
+        <div class="carousel-indicator">
+          <span id="currentIndex">1</span> / <span id="totalCount">0</span>
+        </div>
+      </div>
     </div>
   </main>
 
@@ -1182,6 +1401,407 @@
           }
         }, 50);
       }
+    })();
+  </script>
+
+  <!-- Mobile Carousel Module -->
+  <script>
+    (function() {
+      // Mobile Carousel Manager
+      const MobileCarousel = {
+        enabled: false,
+        active: false,
+        currentIndex: 0,
+        entries: [],
+
+        // DOM elements
+        viewToggle: null,
+        carouselContainer: null,
+        carouselTrack: null,
+        prevBtn: null,
+        nextBtn: null,
+        closeBtn: null,
+        backdrop: null,
+        currentIndexSpan: null,
+        totalCountSpan: null,
+
+        init() {
+          // Only enable on mobile
+          if (window.innerWidth > 1040) {
+            this.enabled = false;
+            return;
+          }
+
+          this.enabled = true;
+          this.cacheElements();
+          this.setupEventListeners();
+          this.loadPreference();
+        },
+
+        cacheElements() {
+          this.viewToggle = document.getElementById('viewToggle');
+          this.carouselContainer = document.getElementById('carouselContainer');
+          this.carouselTrackContainer = this.carouselContainer.querySelector('.carousel-track-container');
+          this.carouselTrack = this.carouselContainer.querySelector('.carousel-track');
+          this.prevBtn = this.carouselContainer.querySelector('.carousel-prev');
+          this.nextBtn = this.carouselContainer.querySelector('.carousel-next');
+          this.closeBtn = this.carouselContainer.querySelector('.carousel-close');
+          this.backdrop = this.carouselContainer.querySelector('.carousel-backdrop');
+          this.currentIndexSpan = document.getElementById('currentIndex');
+          this.totalCountSpan = document.getElementById('totalCount');
+        },
+
+        setupEventListeners() {
+          if (!this.enabled) return;
+
+          // Toggle button
+          this.viewToggle.addEventListener('click', () => {
+            this.toggleCarousel();
+          });
+
+          // Close button
+          this.closeBtn.addEventListener('click', () => {
+            this.closeCarousel();
+          });
+
+          // Backdrop click to close
+          this.backdrop.addEventListener('click', () => {
+            this.closeCarousel();
+          });
+
+          // Navigation buttons
+          this.prevBtn.addEventListener('click', () => {
+            this.previous();
+          });
+
+          this.nextBtn.addEventListener('click', () => {
+            this.next();
+          });
+
+          // Keyboard navigation
+          document.addEventListener('keydown', (e) => {
+            if (!this.active) return;
+
+            if (e.key === 'Escape') {
+              this.closeCarousel();
+            } else if (e.key === 'ArrowLeft') {
+              this.previous();
+            } else if (e.key === 'ArrowRight') {
+              this.next();
+            }
+          });
+
+          // Window resize handler
+          window.addEventListener('resize', () => {
+            if (window.innerWidth > 1040) {
+              // Switched to desktop
+              this.closeCarousel();
+              this.enabled = false;
+            } else if (window.innerWidth <= 1040 && !this.enabled) {
+              // Switched to mobile
+              this.enabled = true;
+            }
+          });
+
+          // Touch gesture support
+          this.setupTouchGestures();
+        },
+
+        setupTouchGestures() {
+          let touchStartX = 0;
+          let touchStartY = 0;
+          let touchStartTime = 0;
+          let startTransform = 0;
+          let isSwiping = false;
+          let swipeDirectionDetermined = false;
+          let animationFrameId = null;
+          let lastDeltaX = 0;
+
+          this.carouselTrackContainer.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            touchStartTime = Date.now();
+            isSwiping = false;
+            swipeDirectionDetermined = false;
+            lastDeltaX = 0;
+
+            // Get current transform value based on container width
+            const cardWidth = this.carouselTrackContainer.offsetWidth;
+            startTransform = -this.currentIndex * cardWidth;
+
+            // Disable transition for immediate feedback
+            this.carouselTrack.classList.add('no-transition');
+          }, { passive: true });
+
+          this.carouselTrackContainer.addEventListener('touchmove', (e) => {
+            const deltaX = e.touches[0].clientX - touchStartX;
+            const deltaY = e.touches[0].clientY - touchStartY;
+
+            // Determine swipe direction on first significant move
+            if (!swipeDirectionDetermined && (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5)) {
+              swipeDirectionDetermined = true;
+              // Is this primarily a horizontal swipe?
+              isSwiping = Math.abs(deltaX) > Math.abs(deltaY);
+            }
+
+            // If this is a horizontal swipe, handle it
+            if (isSwiping) {
+              // Prevent default scrolling for horizontal swipes
+              e.preventDefault();
+
+              lastDeltaX = deltaX;
+
+              // Apply resistance at boundaries
+              let adjustedDeltaX = deltaX;
+              const atStart = this.currentIndex === 0;
+              const atEnd = this.currentIndex === this.entries.length - 1;
+
+              if ((atStart && deltaX > 0) || (atEnd && deltaX < 0)) {
+                // Add resistance when swiping beyond boundaries
+                adjustedDeltaX = deltaX * 0.3;
+              }
+
+              // Use requestAnimationFrame for smooth rendering
+              if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+              }
+
+              animationFrameId = requestAnimationFrame(() => {
+                const newTransform = startTransform + adjustedDeltaX;
+                this.carouselTrack.style.transform = `translateX(${newTransform}px)`;
+              });
+            }
+          }, { passive: false });
+
+          this.carouselTrackContainer.addEventListener('touchend', (e) => {
+            // If this was vertical scrolling (not horizontal swiping), don't interfere
+            // Just cleanup state and let the browser handle the scroll naturally
+            if (!isSwiping) {
+              if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+              }
+              isSwiping = false;
+              swipeDirectionDetermined = false;
+              lastDeltaX = 0;
+              return; // Exit early - don't snap back for vertical scrolls
+            }
+
+            // Handle horizontal swipe gestures
+            const deltaTime = Date.now() - touchStartTime;
+            const velocity = Math.abs(lastDeltaX) / Math.max(deltaTime, 1);
+
+            // Determine if swipe was significant
+            const threshold = 60; // pixels (reduced from 80)
+            const velocityThreshold = 0.4; // pixels/ms (reduced from 0.5)
+
+            const shouldNavigate = (Math.abs(lastDeltaX) > threshold || velocity > velocityThreshold) && isSwiping;
+
+            // Re-enable transition for snap effect
+            this.carouselTrack.classList.remove('no-transition');
+
+            if (shouldNavigate) {
+              if (lastDeltaX > 0 && this.currentIndex > 0) {
+                // Swipe right - go to previous
+                this.previous();
+              } else if (lastDeltaX < 0 && this.currentIndex < this.entries.length - 1) {
+                // Swipe left - go to next
+                this.next();
+              } else {
+                // At boundary - snap back
+                this.goToIndex(this.currentIndex);
+              }
+            } else {
+              // Not enough swipe - snap back to current position
+              this.goToIndex(this.currentIndex);
+            }
+
+            // Cleanup
+            if (animationFrameId) {
+              cancelAnimationFrame(animationFrameId);
+              animationFrameId = null;
+            }
+            isSwiping = false;
+            swipeDirectionDetermined = false;
+            lastDeltaX = 0;
+          }, { passive: true });
+
+          // Cancel animation frame if touch is cancelled
+          this.carouselTrackContainer.addEventListener('touchcancel', () => {
+            if (animationFrameId) {
+              cancelAnimationFrame(animationFrameId);
+              animationFrameId = null;
+            }
+
+            // Re-enable transition and snap back
+            this.carouselTrack.classList.remove('no-transition');
+            this.goToIndex(this.currentIndex);
+
+            isSwiping = false;
+            swipeDirectionDetermined = false;
+            lastDeltaX = 0;
+          }, { passive: true });
+        },
+
+        toggleCarousel() {
+          if (this.active) {
+            this.closeCarousel();
+          } else {
+            this.openCarousel();
+          }
+        },
+
+        openCarousel() {
+          if (!this.enabled) return;
+
+          // Get current filtered entries
+          const entriesList = document.getElementById('entries');
+          const entryElements = entriesList.querySelectorAll('.entry');
+
+          if (entryElements.length === 0) {
+            alert('No entries to display');
+            return;
+          }
+
+          // Clone entries to carousel
+          this.entries = Array.from(entryElements);
+          this.currentIndex = 0;
+
+          // Clear and populate carousel track with wrappers
+          this.carouselTrack.innerHTML = '';
+          this.entries.forEach((entry) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'carousel-card-wrapper';
+            const clone = entry.cloneNode(true);
+            wrapper.appendChild(clone);
+            this.carouselTrack.appendChild(wrapper);
+          });
+
+          // Set initial position
+          this.carouselTrack.style.transform = 'translateX(0)';
+
+          // Show carousel
+          this.carouselContainer.classList.add('active');
+          this.active = true;
+
+          // Update button text and state
+          this.viewToggle.classList.add('active');
+          this.viewToggle.innerHTML = '<span class="icon">☰</span> List View';
+
+          // Update indicator
+          this.updateIndicator();
+          this.updateNavigationButtons();
+
+          // Hide list view
+          entriesList.style.display = 'none';
+          document.getElementById('entryCount').style.display = 'none';
+          document.getElementById('loadMoreControls').style.display = 'none';
+
+          // Save preference
+          this.savePreference('carousel');
+        },
+
+        closeCarousel() {
+          if (!this.active) return;
+
+          this.carouselContainer.classList.remove('active');
+          this.active = false;
+
+          // Update button text
+          this.viewToggle.classList.remove('active');
+          this.viewToggle.innerHTML = '<span class="icon">▤</span> Carousel View';
+
+          // Show list view
+          const entriesList = document.getElementById('entries');
+          entriesList.style.display = '';
+          document.getElementById('entryCount').style.display = '';
+
+          // Show load more controls if needed
+          const total = window.filteredRowsCache ? window.filteredRowsCache.length : 0;
+          const shown = entriesList.querySelectorAll('.entry').length;
+          if (total > shown) {
+            document.getElementById('loadMoreControls').style.display = 'flex';
+          }
+
+          // Save preference
+          this.savePreference('list');
+        },
+
+        previous() {
+          if (this.currentIndex > 0) {
+            this.goToIndex(this.currentIndex - 1);
+          }
+        },
+
+        next() {
+          if (this.currentIndex < this.entries.length - 1) {
+            this.goToIndex(this.currentIndex + 1);
+          }
+        },
+
+        goToIndex(index) {
+          if (index < 0 || index >= this.entries.length) return;
+
+          this.currentIndex = index;
+
+          // Calculate translation based on container width (visible area)
+          const cardWidth = this.carouselTrackContainer.offsetWidth;
+          const translateX = -index * cardWidth;
+
+          // Apply smooth transition
+          this.carouselTrack.classList.remove('no-transition');
+          this.carouselTrack.style.transform = `translateX(${translateX}px)`;
+
+          // Scroll each wrapper to top
+          const wrappers = this.carouselTrack.querySelectorAll('.carousel-card-wrapper');
+          if (wrappers[index]) {
+            wrappers[index].scrollTop = 0;
+          }
+
+          this.updateIndicator();
+          this.updateNavigationButtons();
+        },
+
+        updateIndicator() {
+          this.currentIndexSpan.textContent = this.currentIndex + 1;
+          this.totalCountSpan.textContent = this.entries.length;
+        },
+
+        updateNavigationButtons() {
+          this.prevBtn.disabled = (this.currentIndex === 0);
+          this.nextBtn.disabled = (this.currentIndex === this.entries.length - 1);
+        },
+
+        loadPreference() {
+          try {
+            const pref = localStorage.getItem('mobileViewPreference');
+            // Don't auto-open carousel, just remember preference for next toggle
+            // User must explicitly click to enter carousel mode
+          } catch (e) {
+            // Ignore localStorage errors
+          }
+        },
+
+        savePreference(view) {
+          try {
+            localStorage.setItem('mobileViewPreference', view);
+          } catch (e) {
+            // Ignore localStorage errors
+          }
+        }
+      };
+
+      // Initialize carousel when DOM is ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+          MobileCarousel.init();
+        });
+      } else {
+        MobileCarousel.init();
+      }
+
+      // Expose to window for debugging
+      window.MobileCarousel = MobileCarousel;
     })();
   </script>
 </body>
