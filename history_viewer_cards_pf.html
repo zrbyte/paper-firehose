@@ -442,6 +442,12 @@
       min-width: 150px;
     }
 
+    .load-more-controls .hint {
+      color: var(--text-secondary);
+      font-style: italic;
+      font-size: 0.9em;
+    }
+
     @media (min-width: 1200px) {
       body {
         font-size: 0.82rem;
@@ -837,6 +843,14 @@
       <button id="loadAllBtn" class="button-secondary" type="button">Show all</button>
     </div>
 
+    <!-- Archive Button -->
+    <div id="archiveControls" class="load-more-controls" style="display:none">
+      <button id="loadArchiveBtn" class="button-primary" type="button">
+        📚 Load Full Archive
+      </button>
+      <span class="hint" id="archiveHint" style="margin-left: 12px;"></span>
+    </div>
+
     <!-- Mobile Carousel Container -->
     <div id="carouselContainer" class="carousel-container">
       <div class="carousel-backdrop"></div>
@@ -858,7 +872,8 @@
 
   <script>
     (function() {
-      const DEFAULT_DB_URL_DISPLAY = 'matched_entries_history.latest.db';
+      const DEFAULT_DB_URL_RECENT = 'matched_entries_history.recent.db';
+      const DEFAULT_DB_URL_FULL = 'matched_entries_history.db';
       const DEFAULT_PAGE_SIZE = 50;
       const LOAD_MORE_STEP = 50;
 
@@ -868,7 +883,8 @@
       let allRows = [];
       let filteredRowsCache = [];
       let displayCount = DEFAULT_PAGE_SIZE;
-      let currentDbUrl = DEFAULT_DB_URL_DISPLAY;
+      let currentDbUrl = DEFAULT_DB_URL_RECENT;
+      let isFullArchiveLoaded = false;
 
       function $(id) {
         return document.getElementById(id);
@@ -1265,7 +1281,17 @@
         list.style.display = '';
         $('entryCount').style.display = '';
         $('entryCount').textContent = `${total} entries (showing ${shown})`;
-        $('status').textContent = `Showing ${shown} of ${total} entries.`;
+
+        // Update status message based on archive state
+        if (isFullArchiveLoaded) {
+          $('status').textContent = `Showing ${shown} of ${total} entries (full archive).`;
+          $('archiveControls').style.display = 'none';
+        } else {
+          $('status').textContent = `Showing ${shown} recent entries (last 60 days).`;
+          $('archiveControls').style.display = 'flex';
+          $('archiveHint').textContent = 'Load full archive to see all entries';
+        }
+
         updateLoadMoreControls(total, shown);
 
         if (window.MathJax && MathJax.typesetPromise) {
@@ -1332,11 +1358,16 @@
           if (urlOverride != null) {
             currentDbUrl = url;
           }
+
+          // Track if loading full archive
+          if (url === DEFAULT_DB_URL_FULL || url.endsWith('matched_entries_history.db')) {
+            isFullArchiveLoaded = true;
+          }
+
           const bytes = await loadFromURL(url);
           await loadDB(bytes);
-          $('status').textContent = filteredRowsCache.length
-            ? `Showing ${Math.min(displayCount, filteredRowsCache.length)} of ${filteredRowsCache.length} entries.`
-            : 'Loaded, but no entries found.';
+
+          // Status message is now set in renderEntries() which is called by loadDB -> applyFilterAndRender
         } catch (err) {
           console.error(err);
           $('status').textContent = 'Error: ' + (err.message || err);
@@ -1391,6 +1422,28 @@
       $('loadAllBtn').addEventListener('click', () => {
         displayCount = filteredRowsCache.length;
         renderEntries();
+      });
+
+      $('loadArchiveBtn').addEventListener('click', async () => {
+        if (isFullArchiveLoaded) return; // Already loaded
+
+        const btn = $('loadArchiveBtn');
+        btn.disabled = true;
+        btn.textContent = 'Loading full archive...';
+
+        try {
+          // Load full database
+          await loadDatabase(DEFAULT_DB_URL_FULL);
+
+          // Hide archive button (done in renderEntries)
+          // Update status (done in renderEntries)
+
+        } catch (err) {
+          console.error('Failed to load full archive:', err);
+          btn.textContent = '📚 Error - Try Again';
+          btn.disabled = false;
+          $('status').textContent = 'Error loading full archive: ' + (err.message || err);
+        }
       });
 
       tryAutoLoadFromQuery();
