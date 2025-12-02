@@ -10,6 +10,7 @@ import click
 
 from .commands import abstracts as abstracts_cmd
 from .commands import email_list as email_cmd
+from .commands import export_recent as export_recent_cmd
 from .commands import filter as filter_cmd
 from .commands import generate_html as html_cmd
 from .commands import pqa_summary as pqa_cmd
@@ -68,6 +69,20 @@ def generate_html(ctx: click.Context, topic: str | None) -> None:
             click.echo("✅ HTML generated for all topics")
     except Exception as exc:  # pragma: no cover - click echoes the message
         click.echo(f"❌ HTML generation failed: {exc}", err=True)
+        sys.exit(1)
+
+
+@cli.command("export-recent")
+@click.option("--days", default=60, type=int, help="Number of days to include (default: 60)")
+@click.option("--output", default=None, help="Output filename (default: matched_entries_history.recent.db)")
+@click.pass_context
+def export_recent(ctx: click.Context, days: int, output: str | None) -> None:
+    """Export recent entries to a smaller database file for faster web loading."""
+    try:
+        export_recent_cmd.run(ctx.obj["config_path"], days, output)
+        click.echo(f"✅ Exported entries from last {days} days successfully")
+    except Exception as exc:  # pragma: no cover - click echoes the message
+        click.echo(f"❌ Export-recent command failed: {exc}", err=True)
         sys.exit(1)
 
 

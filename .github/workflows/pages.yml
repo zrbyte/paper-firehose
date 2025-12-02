@@ -181,6 +181,7 @@ jobs:
           paper-firehose --config "$CONFIG_PATH" email
 
           paper-firehose --config "$CONFIG_PATH" html
+          paper-firehose --config "$CONFIG_PATH" export-recent --days 60
 
           echo "✅ Pipeline completed successfully"
 
@@ -248,6 +249,13 @@ jobs:
             update_db "$DB_SEEN" "all_feed_entries"
             update_db "$DB_CURRENT" "papers"
 
+            # Add recent database (no versioning needed)
+            if [ -f "$GITHUB_WORKSPACE/.paper_firehose/matched_entries_history.recent.db" ]; then
+              cp "$GITHUB_WORKSPACE/.paper_firehose/matched_entries_history.recent.db" "assets/matched_entries_history.recent.db"
+              git add -f "assets/matched_entries_history.recent.db"
+              echo "✅ Updated recent database"
+            fi
+
             # Remove old snapshot directory if it exists
             if [ -d "assets/db_history" ]; then
               git rm -rf "assets/db_history" || rm -rf "assets/db_history"
@@ -291,6 +299,11 @@ jobs:
             cp -r "$PAPER_FIREHOSE_DATA_DIR"/html site/html || true
           fi
           cp history_viewer*.html site/ 2>/dev/null || true
+
+          # Copy databases for history viewer
+          cp "$PAPER_FIREHOSE_DATA_DIR/matched_entries_history.db" site/ 2>/dev/null || true
+          cp "$PAPER_FIREHOSE_DATA_DIR/matched_entries_history.recent.db" site/ 2>/dev/null || true
+
           touch site/.nojekyll
 
       - uses: actions/upload-pages-artifact@v3

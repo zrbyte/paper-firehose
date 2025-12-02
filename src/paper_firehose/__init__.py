@@ -10,6 +10,7 @@ from .commands import rank as rank_cmd
 from .commands import abstracts as abstracts_cmd
 from .commands import pqa_summary as pqa_summary_cmd
 from .commands import email_list as email_cmd
+from .commands import export_recent as export_recent_cmd
 from .core.config import ConfigManager, DEFAULT_CONFIG_PATH
 from .core.database import DatabaseManager
 from .core.paths import resolve_data_path
@@ -30,6 +31,7 @@ __all__ = [
     'status',
     'html',
     'generate_html',
+    'export_recent',
 ]
 
 
@@ -139,6 +141,25 @@ def email(
         dry_run=dry_run,
         recipients_file=recipients_file,
     )
+
+
+def export_recent(
+    days: int = 60,
+    output_name: Optional[str] = None,
+    config_path: Optional[str] = None,
+) -> None:
+    """Export recent entries from matched_entries_history.db to a smaller database.
+
+    Creates a filtered database containing only entries from the last N days for
+    faster initial page loads in the history viewer HTML.
+
+    Args:
+        days: Number of days to include (default: 60)
+        output_name: Optional output filename (default: matched_entries_history.recent.db)
+        config_path: Path to main YAML config; defaults to repo config.
+    """
+    cfg_path = config_path or _DEFAULT_CONFIG
+    export_recent_cmd.run(cfg_path, days, output_name)
 
 
 def purge(days: Optional[int] = None, all_data: bool = False, config_path: Optional[str] = None) -> None:
