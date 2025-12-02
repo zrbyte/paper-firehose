@@ -74,18 +74,23 @@ class HTMLGenerator:
         # Read the template file we just created
         with open(output_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
-        
-        # Find insertion point (before </body>)
-        insert_position = html_content.rfind('</body>')
-        if insert_position == -1:
-            insert_position = len(html_content)
-        
-        # Insert entries content
-        updated_html = (
-            html_content[:insert_position]
-            + '\n'.join(entries_html)
-            + html_content[insert_position:]
-        )
+
+        # Try to insert at CONTENT_PLACEHOLDER first, fallback to before </body>
+        insert_position = html_content.find('<!-- CONTENT_PLACEHOLDER -->')
+        if insert_position != -1:
+            # Replace the placeholder
+            updated_html = html_content.replace('<!-- CONTENT_PLACEHOLDER -->', '\n'.join(entries_html))
+        else:
+            # Fallback to old behavior (before </body>)
+            insert_position = html_content.rfind('</body>')
+            if insert_position == -1:
+                insert_position = len(html_content)
+            # Insert entries content
+            updated_html = (
+                html_content[:insert_position]
+                + '\n'.join(entries_html)
+                + html_content[insert_position:]
+            )
         
         # Write the complete content
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -176,10 +181,17 @@ class HTMLGenerator:
 
         with open(output_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
-        insert_position = html_content.rfind('</body>')
-        if insert_position == -1:
-            insert_position = len(html_content)
-        updated_html = html_content[:insert_position] + '\n'.join(html_parts) + html_content[insert_position:]
+        # Try to insert at CONTENT_PLACEHOLDER first, fallback to before </body>
+        insert_position = html_content.find('<!-- CONTENT_PLACEHOLDER -->')
+        if insert_position != -1:
+            # Replace the placeholder
+            updated_html = html_content.replace('<!-- CONTENT_PLACEHOLDER -->', '\n'.join(html_parts))
+        else:
+            # Fallback to old behavior
+            insert_position = html_content.rfind('</body>')
+            if insert_position == -1:
+                insert_position = len(html_content)
+            updated_html = html_content[:insert_position] + '\n'.join(html_parts) + html_content[insert_position:]
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(updated_html)
         logger.info(f"Generated ranked HTML file from database: {output_path}")
@@ -316,16 +328,22 @@ function toggleAbstract(id) {
         with open(output_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
 
-        insert_position = html_content.rfind('</body>')
-        if insert_position == -1:
-            insert_position = len(html_content)
-
-        updated_html = (
-            html_content[:insert_position]
-            + '\n'.join(html_parts)
-            + js_script
-            + html_content[insert_position:]
-        )
+        # Try to insert at CONTENT_PLACEHOLDER first, fallback to before </body>
+        content_to_insert = '\n'.join(html_parts) + js_script
+        insert_position = html_content.find('<!-- CONTENT_PLACEHOLDER -->')
+        if insert_position != -1:
+            # Replace the placeholder
+            updated_html = html_content.replace('<!-- CONTENT_PLACEHOLDER -->', content_to_insert)
+        else:
+            # Fallback to old behavior
+            insert_position = html_content.rfind('</body>')
+            if insert_position == -1:
+                insert_position = len(html_content)
+            updated_html = (
+                html_content[:insert_position]
+                + content_to_insert
+                + html_content[insert_position:]
+            )
 
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(updated_html)
@@ -438,7 +456,7 @@ function toggleAbstract(id) {
             template
             .replace("%{title}", title)
             .replace("%{date}", current_date)
-            .replace("%{content}", "")
+            .replace("%{content}", "<!-- CONTENT_PLACEHOLDER -->")
         )
 
         if subtitle_text:
