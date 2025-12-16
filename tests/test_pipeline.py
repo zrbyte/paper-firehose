@@ -155,7 +155,7 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
         Path(dest_path).write_bytes(b"0" * 12000)
         return True
 
-    def fake_call_paperqa_on_pdf(pdf_path, *, question):
+    def fake_call_paperqa_on_pdf(pdf_path, *, question, llm=None, summary_llm=None):
         return json.dumps({"summary": "Graphene summary for experts", "methods": "Graphene methods"})
 
     monkeypatch.setattr(pqa_cmd, "_download_pdf", fake_download_pdf)
