@@ -344,10 +344,23 @@ def _cleanup_archive(archive_dir: str, *, max_age_days: int = 30) -> None:
         logger.info("Removed %d archived PDFs older than %d days", removed, max_age_days)
 
 
-def _call_paperqa_on_pdf(pdf_path: str, *, question: str) -> Optional[str]:
-    """Summarize a PDF using paper-qa if available; return raw string answer."""
+def _call_paperqa_on_pdf(
+    pdf_path: str,
+    *,
+    question: str,
+    llm: Optional[str] = None,
+    summary_llm: Optional[str] = None,
+) -> Optional[str]:
+    """Summarize a PDF using paper-qa if available; return raw string answer.
+
+    Args:
+        pdf_path: Path to the PDF file to summarize.
+        question: The question/prompt to ask paper-qa about the PDF.
+        llm: LLM model for paper-qa (e.g., 'gpt-4o', 'gpt-5.2'). If None, uses paper-qa default.
+        summary_llm: Summary LLM model. If None, uses paper-qa default.
+    """
     try:
-        from paperqa import Docs  # type: ignore
+        from paperqa import Settings, ask  # type: ignore
     except Exception as e:
         logger.error("paperqa not installed or import failed: %s", e)
         return None
@@ -366,25 +379,21 @@ def _call_paperqa_on_pdf(pdf_path: str, *, question: str) -> Optional[str]:
         except Exception:
             return None
 
-    async def _run_async() -> Any:
-        """Run the paper-qa pipeline using async APIs when available."""
-        docs = Docs()
-        # Prefer async methods when available; fall back to sync versions.
-        add_fn = getattr(docs, "aadd", None)
-        if callable(add_fn):
-            await add_fn(pdf_path)
-        else:
-            res = docs.add(pdf_path)
-            if inspect.isawaitable(res):
-                await res
+    # Build Settings with configured LLM models and paper directory
+    pdf_dir = os.path.dirname(os.path.abspath(pdf_path))
+    settings_kwargs: Dict[str, Any] = {'paper_directory': pdf_dir}
+    if llm:
+        settings_kwargs['llm'] = llm
+    if summary_llm:
+        settings_kwargs['summary_llm'] = summary_llm
 
-        query_fn = getattr(docs, "aquery", None)
-        if callable(query_fn):
-            return await query_fn(question)
-        result = docs.query(question)
-        if inspect.isawaitable(result):
-            return await result
-        return result
+    if llm or summary_llm:
+        logger.info("Using paper-qa with llm=%s, summary_llm=%s", llm or 'default', summary_llm or 'default')
+
+    async def _run_async() -> Any:
+        """Run the paper-qa pipeline using the ask() API."""
+        settings = Settings(**settings_kwargs)
+        return await ask(question, settings=settings)
 
     try:
         try:
@@ -803,6 +812,10 @@ def run(
         _cleanup_archive(archive_dir)
         return
 
+    # Extract LLM model settings from config
+    pqa_llm = paperqa_cfg.get('llm') or None
+    pqa_summary_llm = paperqa_cfg.get('summary_llm') or None
+
     summarized = 0
     for eid, aid, pdf_path, tctx in summarize_targets:
         # Build paper-qa question from config (per-item to allow topic-aware placeholder substitution)
@@ -822,7 +835,12 @@ def run(
             except Exception:
                 pass
         # For manual arxiv mode, eid may be None; skip DB write if missing
-        raw_ans = _call_paperqa_on_pdf(pdf_path, question=question)
+        raw_ans = _call_paperqa_on_pdf(
+            pdf_path,
+            question=question,
+            llm=pqa_llm,
+            summary_llm=pqa_summary_llm,
+        )
         if not raw_ans:
             continue
         # Output the raw paper-qa response for inspection
