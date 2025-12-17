@@ -2,7 +2,7 @@
 
 Being well read is a pillar of good science, but the volume of new papers makes it impossible to truly keep up to date. Paper-firehose is a way to filter the flood of new papers, so that it becomes a trickle, that one can go through in less than 5 minutes a day. It can check daily the RSS feeds of journals you are interested in and throw out results that are not relevant to your interests. The papers that remain get ranked by how relevant they are to keywords you specify. Our research group uses this to keep up to date with new papers that appear in our field.
 
-Matched papers get stored in an SQLite database. Based on this one can generate HTML pages or an email digest. Optionally full‑text (paper-qa) summaries of preprints from arXiv can also be generated. Have a look at a [demo](https://zrbyte.github.io/paper-firehose/results_primary_summary.html) of how the resulting list looks like, when we gather the daily new papers appearing in the field of 2D, van der Waals materials.
+Matched papers get stored in an SQLite database. Based on this one can generate HTML pages or an email digest. Optionally full‑text (paper-qa) summaries of preprints from arXiv can also be generated. Have a look at a [demo](https://zrbyte.github.io/paper-firehose/results_perovskites_summary.html) of how the resulting list looks like, when we gather the daily new papers appearing in the field of 2D, van der Waals materials.
 
 Documentation: [zrbyte.github.io/paper-firehose](https://zrbyte.github.io/paper-firehose/index.html)
 
