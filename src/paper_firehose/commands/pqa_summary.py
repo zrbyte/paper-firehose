@@ -365,6 +365,19 @@ def _call_paperqa_on_pdf(
         logger.error("paperqa not installed or import failed: %s", e)
         return None
 
+    # Configure litellm for GPT-5 compatibility
+    # GPT-5 models only support temperature=1, so we need to handle unsupported params
+    try:
+        import litellm
+        # Check if using GPT-5 model
+        is_gpt5 = (llm and 'gpt-5' in llm.lower()) or (summary_llm and 'gpt-5' in summary_llm.lower())
+        if is_gpt5:
+            # Enable dropping unsupported params for GPT-5 models
+            litellm.drop_params = True
+            logger.info("Enabled litellm.drop_params for GPT-5 model compatibility")
+    except Exception as e:
+        logger.debug("Could not configure litellm: %s", e)
+
     def _extract_answer(ans_obj: Any) -> Optional[str]:
         """Normalize paper-qa answer objects down to a clean string, if present."""
         for attr in ("answer", "formatted_answer"):
