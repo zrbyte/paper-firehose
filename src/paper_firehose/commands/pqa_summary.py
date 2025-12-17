@@ -25,6 +25,7 @@ import sqlite3
 import asyncio
 import threading
 import inspect
+import warnings
 from typing import Dict, Any, List, Optional, Tuple
 
 import requests
@@ -36,6 +37,12 @@ from ..core.command_utils import resolve_topics
 from ..core.paths import resolve_data_path
 
 logger = logging.getLogger(__name__)
+
+# Suppress noisy async/litellm warnings that clutter output
+logging.getLogger("litellm").setLevel(logging.ERROR)
+logging.getLogger("asyncio").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", message=".*bound to a different event loop.*")
+warnings.filterwarnings("ignore", message=".*coroutine.*was never awaited.*")
 
 
 ARXIV_API = "https://export.arxiv.org/api/query"
@@ -380,16 +387,107 @@ def _call_paperqa_on_pdf(
 
     def _extract_answer(ans_obj: Any) -> Optional[str]:
         """Normalize paper-qa answer objects down to a clean string, if present."""
-        for attr in ("answer", "formatted_answer"):
-            val = getattr(ans_obj, attr, None)
-            if isinstance(val, str) and val.strip():
-                return val.strip()
+        # Direct string case
         if isinstance(ans_obj, str) and ans_obj.strip():
             return ans_obj.strip()
+
+        # Handle Pydantic models (AnswerResponse, PQASession, etc.)
+        # Try Pydantic-specific methods first
+        if hasattr(ans_obj, 'model_dump'):
+            try:
+                data = ans_obj.model_dump()
+                logger.debug(f"Pydantic model_dump() returned keys: {list(data.keys())}")
+
+                # AnswerResponse typically has a 'session' field containing the actual session data
+                if 'session' in data and isinstance(data['session'], dict):
+                    session = data['session']
+                    logger.debug(f"Found session dict with keys: {list(session.keys())[:10]}")
+                    # Look for answer in session
+                    for key in ('answer', 'formatted_answer', 'response', 'content', 'text', 'raw_answer'):
+                        if key in session and isinstance(session[key], str) and session[key].strip():
+                            logger.debug(f"Extracted answer from session['{key}']")
+                            return session[key].strip()
+
+                # Try common answer field names in the dumped dict
+                for key in ('answer', 'formatted_answer', 'response', 'content', 'text'):
+                    if key in data and isinstance(data[key], str) and data[key].strip():
+                        logger.debug(f"Extracted answer from Pydantic model via model_dump()['{key}']")
+                        return data[key].strip()
+
+                # If no direct hit, look for any field containing JSON-like content
+                for key, value in data.items():
+                    if isinstance(value, str) and value.strip():
+                        # Check if this looks like our expected JSON format
+                        if re.search(r'\{["\s]*summary["\s]*:', value):
+                            logger.debug(f"Found JSON-like content in model_dump()['{key}']")
+                            return value.strip()
+                    # Also check nested dicts (like session)
+                    elif isinstance(value, dict):
+                        for subkey, subvalue in value.items():
+                            if isinstance(subvalue, str) and subvalue.strip():
+                                if re.search(r'\{["\s]*summary["\s]*:', subvalue):
+                                    logger.debug(f"Found JSON-like content in model_dump()['{key}']['{subkey}']")
+                                    return subvalue.strip()
+            except Exception as e:
+                logger.warning(f"Failed to extract from model_dump(): {e}")
+
+        # Try get_summary() method (common in paper-qa AnswerResponse)
+        # Note: get_summary() may be async (coroutine) in newer paper-qa versions
+        if hasattr(ans_obj, 'get_summary') and callable(getattr(ans_obj, 'get_summary', None)):
+            try:
+                summary = ans_obj.get_summary()
+                # Check if it's a coroutine (async method) - we can't await it in sync context
+                if inspect.iscoroutine(summary):
+                    logger.debug("get_summary() returned coroutine (async method), skipping")
+                elif isinstance(summary, str) and summary.strip():
+                    logger.debug("Extracted answer from get_summary() method")
+                    # Check if it's a formatted string with "Answer: " prefix or similar
+                    # Try to extract just the JSON part if present
+                    json_match = re.search(r'\{["\s]*summary["\s]*:', summary)
+                    if json_match:
+                        # Found JSON starting with "summary" field
+                        # Try to extract the complete JSON object
+                        json_start = json_match.start()
+                        logger.debug("Extracted JSON from formatted summary")
+                        return summary[json_start:].strip()
+                    return summary.strip()
+            except Exception as e:
+                logger.debug(f"Failed to call get_summary(): {e}")
+
+        # Try extracting from common attributes directly
+        for attr in ("answer", "formatted_answer", "content", "text", "response", "raw_answer"):
+            try:
+                val = getattr(ans_obj, attr, None)
+                # Handle callable attributes (properties)
+                if callable(val):
+                    try:
+                        val = val()
+                    except Exception:
+                        continue
+                if isinstance(val, str) and val.strip():
+                    logger.debug(f"Extracted answer from attribute '{attr}'")
+                    return val.strip()
+            except Exception as e:
+                logger.debug(f"Failed to access attribute '{attr}': {e}")
+                continue
+
+        # If we have an object that looks like a session/response, log its type and available attributes
+        obj_type = type(ans_obj).__name__
+        logger.warning(
+            f"Could not extract clean answer from {obj_type}. "
+            f"Available attributes: {[a for a in dir(ans_obj) if not a.startswith('_')][:20]}"
+        )
+
+        # Last resort: convert to string but warn about it
         try:
             s = str(ans_obj).strip()
-            return s if s else None
-        except Exception:
+            if s and len(s) < 10000:  # Only if not too large
+                # Check if it looks like a repr() dump (contains object address)
+                if ' at 0x' in s or 'object at ' in s:
+                    logger.error(f"Falling back to str() representation of {obj_type}, this may not be clean")
+                return s if s else None
+        except Exception as e:
+            logger.error(f"Failed to convert answer object to string: {e}")
             return None
 
     # Build Settings with configured LLM models and paper directory
@@ -411,6 +509,7 @@ def _call_paperqa_on_pdf(
     try:
         try:
             ans_obj = asyncio.run(_run_async())
+            logger.debug(f"paper-qa returned type: {type(ans_obj).__name__}")
             return _extract_answer(ans_obj)
         except RuntimeError as exc:
             if "event loop" not in str(exc).lower():
@@ -438,7 +537,9 @@ def _call_paperqa_on_pdf(
         if 'error' in error:
             raise error['error']
 
-        return _extract_answer(outcome.get('value'))
+        ans_obj = outcome.get('value')
+        logger.debug(f"paper-qa returned type (via thread): {type(ans_obj).__name__}")
+        return _extract_answer(ans_obj)
     except Exception as e:
         logger.error("paperqa query failed for %s: %s", pdf_path, e)
         return None
@@ -855,13 +956,22 @@ def run(
             summary_llm=pqa_summary_llm,
         )
         if not raw_ans:
+            logger.warning("No answer returned from paper-qa for arXiv:%s (entry_id=%s)", aid, eid or "-")
             continue
+
         # Output the raw paper-qa response for inspection
         try:
-            logger.info("paper-qa raw response (entry_id=%s, arXiv=%s):\n%s", eid or "-", aid, raw_ans)
-        except Exception:
+            # Truncate very long responses for readability
+            display_ans = raw_ans if len(raw_ans) < 2000 else raw_ans[:2000] + "\n... (truncated)"
+            logger.info("=" * 80)
+            logger.info("Paper-QA Summary for arXiv:%s (entry_id=%s)", aid, eid or "-")
+            logger.info("=" * 80)
+            logger.info("%s", display_ans)
+            logger.info("=" * 80)
+        except Exception as e:
             # Best-effort logging; ignore formatting failures
-            pass
+            logger.debug("Failed to log paper-qa response: %s", e)
+
         # Normalize and write
         norm = _normalize_summary_json(raw_ans)
         if not norm:
