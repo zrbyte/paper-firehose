@@ -734,6 +734,13 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   filterEntries();
 
+  // Render LaTeX/math with MathJax after content is loaded
+  if (window.MathJax && MathJax.typesetPromise) {
+    MathJax.typesetPromise().catch(function(err) {
+      console.error('MathJax typeset error:', err);
+    });
+  }
+
   var backToTop = document.getElementById('back-to-top');
   if (backToTop) {
     var toggleVisibility = function() {
@@ -1041,6 +1048,13 @@ document.addEventListener('DOMContentLoaded', function() {
       // Update indicator
       this.updateIndicator();
       this.updateNavigationButtons();
+
+      // Render LaTeX in cloned carousel entries
+      if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetPromise([this.carouselTrack]).catch(function(err) {
+          console.error('MathJax carousel typeset error:', err);
+        });
+      }
 
       // Hide list view
       entriesContainer.style.display = 'none';

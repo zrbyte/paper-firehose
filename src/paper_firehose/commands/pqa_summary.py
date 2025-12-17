@@ -366,6 +366,8 @@ def _call_paperqa_on_pdf(
         llm: LLM model for paper-qa (e.g., 'gpt-4o', 'gpt-5.2'). If None, uses paper-qa default.
         summary_llm: Summary LLM model. If None, uses paper-qa default.
     """
+    import tempfile
+
     try:
         from paperqa import Settings, ask  # type: ignore
     except Exception as e:
@@ -390,6 +392,25 @@ def _call_paperqa_on_pdf(
         # Direct string case
         if isinstance(ans_obj, str) and ans_obj.strip():
             return ans_obj.strip()
+
+        # PRIORITY: Try to get raw answer before formatted versions (for GPT-5.2 compatibility)
+        # Paper-qa's get_summary() adds headers, so try raw_answer/answer first
+        for attr in ("raw_answer", "answer"):
+            try:
+                val = getattr(ans_obj, attr, None)
+                if callable(val):
+                    try:
+                        val = val()
+                    except Exception:
+                        continue
+                if isinstance(val, str) and val.strip():
+                    # Check if this looks like raw JSON (without headers)
+                    if val.strip().startswith('{') or re.search(r'\{["\s]*summary["\s]*:', val):
+                        logger.debug(f"Extracted RAW answer from attribute '{attr}' (bypassing formatting)")
+                        return val.strip()
+            except Exception as e:
+                logger.debug(f"Failed to access attribute '{attr}': {e}")
+                continue
 
         # Handle Pydantic models (AnswerResponse, PQASession, etc.)
         # Try Pydantic-specific methods first
@@ -473,10 +494,23 @@ def _call_paperqa_on_pdf(
 
         # If we have an object that looks like a session/response, log its type and available attributes
         obj_type = type(ans_obj).__name__
+        attrs = [a for a in dir(ans_obj) if not a.startswith('_')]
         logger.warning(
             f"Could not extract clean answer from {obj_type}. "
-            f"Available attributes: {[a for a in dir(ans_obj) if not a.startswith('_')][:20]}"
+            f"Available attributes: {attrs[:30]}"
         )
+
+        # Debug: try to show sample content from each string attribute
+        logger.debug("Sample content from string attributes:")
+        for attr in attrs[:15]:
+            try:
+                val = getattr(ans_obj, attr, None)
+                if callable(val):
+                    continue
+                if isinstance(val, str) and val:
+                    logger.debug(f"  {attr}: {val[:100]}...")
+            except Exception:
+                pass
 
         # Last resort: convert to string but warn about it
         try:
@@ -490,59 +524,77 @@ def _call_paperqa_on_pdf(
             logger.error(f"Failed to convert answer object to string: {e}")
             return None
 
-    # Build Settings with configured LLM models and paper directory
-    pdf_dir = os.path.dirname(os.path.abspath(pdf_path))
-    settings_kwargs: Dict[str, Any] = {'paper_directory': pdf_dir}
-    if llm:
-        settings_kwargs['llm'] = llm
-    if summary_llm:
-        settings_kwargs['summary_llm'] = summary_llm
-
-    if llm or summary_llm:
-        logger.info("Using paper-qa with llm=%s, summary_llm=%s", llm or 'default', summary_llm or 'default')
-
-    async def _run_async() -> Any:
-        """Run the paper-qa pipeline using the ask() API."""
-        settings = Settings(**settings_kwargs)
-        return await ask(question, settings=settings)
+    # CRITICAL FIX: Create isolated temporary directory for each PDF to prevent
+    # paper-qa from indexing multiple PDFs and mixing up their content.
+    # paper-qa's paper_directory setting indexes ALL PDFs in the directory,
+    # which causes summaries to be mixed up when processing multiple papers.
+    temp_dir = tempfile.mkdtemp(prefix='paperqa_')
+    temp_pdf_path = os.path.join(temp_dir, os.path.basename(pdf_path))
 
     try:
+        # Copy PDF to isolated temporary directory
+        shutil.copy2(pdf_path, temp_pdf_path)
+        logger.debug(f"Processing PDF in isolated directory: {temp_dir}")
+
+        # Build Settings with configured LLM models and isolated temp directory
+        settings_kwargs: Dict[str, Any] = {'paper_directory': temp_dir}
+        if llm:
+            settings_kwargs['llm'] = llm
+        if summary_llm:
+            settings_kwargs['summary_llm'] = summary_llm
+
+        if llm or summary_llm:
+            logger.info("Using paper-qa with llm=%s, summary_llm=%s", llm or 'default', summary_llm or 'default')
+
+        async def _run_async() -> Any:
+            """Run the paper-qa pipeline using the ask() API."""
+            settings = Settings(**settings_kwargs)
+            return await ask(question, settings=settings)
+
         try:
-            ans_obj = asyncio.run(_run_async())
-            logger.debug(f"paper-qa returned type: {type(ans_obj).__name__}")
-            return _extract_answer(ans_obj)
-        except RuntimeError as exc:
-            if "event loop" not in str(exc).lower():
-                raise
-
-        outcome: Dict[str, Any] = {}
-        error: Dict[str, BaseException] = {}
-
-        def _worker() -> None:
-            """Bridge paper-qa async calls into a background event loop."""
-            new_loop = asyncio.new_event_loop()
             try:
-                asyncio.set_event_loop(new_loop)
-                outcome['value'] = new_loop.run_until_complete(_run_async())
-            except BaseException as exc:  # capture to re-raise outside thread
-                error['error'] = exc
-            finally:
-                asyncio.set_event_loop(None)
-                new_loop.close()
+                ans_obj = asyncio.run(_run_async())
+                logger.debug(f"paper-qa returned type: {type(ans_obj).__name__}")
+                return _extract_answer(ans_obj)
+            except RuntimeError as exc:
+                if "event loop" not in str(exc).lower():
+                    raise
 
-        thread = threading.Thread(target=_worker, daemon=True)
-        thread.start()
-        thread.join()
+            outcome: Dict[str, Any] = {}
+            error: Dict[str, BaseException] = {}
 
-        if 'error' in error:
-            raise error['error']
+            def _worker() -> None:
+                """Bridge paper-qa async calls into a background event loop."""
+                new_loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(new_loop)
+                    outcome['value'] = new_loop.run_until_complete(_run_async())
+                except BaseException as exc:  # capture to re-raise outside thread
+                    error['error'] = exc
+                finally:
+                    asyncio.set_event_loop(None)
+                    new_loop.close()
 
-        ans_obj = outcome.get('value')
-        logger.debug(f"paper-qa returned type (via thread): {type(ans_obj).__name__}")
-        return _extract_answer(ans_obj)
-    except Exception as e:
-        logger.error("paperqa query failed for %s: %s", pdf_path, e)
-        return None
+            thread = threading.Thread(target=_worker, daemon=True)
+            thread.start()
+            thread.join()
+
+            if 'error' in error:
+                raise error['error']
+
+            ans_obj = outcome.get('value')
+            logger.debug(f"paper-qa returned type (via thread): {type(ans_obj).__name__}")
+            return _extract_answer(ans_obj)
+        except Exception as e:
+            logger.error("paperqa query failed for %s: %s", pdf_path, e)
+            return None
+    finally:
+        # Clean up temporary directory
+        try:
+            shutil.rmtree(temp_dir)
+            logger.debug(f"Cleaned up temporary directory: {temp_dir}")
+        except Exception as e:
+            logger.warning(f"Failed to clean up temporary directory {temp_dir}: {e}")
 
 
 def _normalize_summary_json(raw: str) -> Optional[str]:
@@ -571,6 +623,26 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
         try:
             obj = json.loads(txt)
             return obj if isinstance(obj, dict) else None
+        except json.JSONDecodeError:
+            # GPT-5.2 sometimes returns JSON with unescaped newlines in strings
+            # Try fixing by escaping newlines within quoted strings
+            try:
+                # This is a simple heuristic: escape literal \n characters
+                # but only if they appear to be inside JSON string values
+                import re
+                # Find all string values in JSON and escape their newlines
+                def escape_newlines_in_strings(match):
+                    s = match.group(0)
+                    # Escape newlines and tabs in the string value
+                    return s.replace('\n', '\\n').replace('\t', '\\t').replace('\r', '\\r')
+
+                # Match JSON string values: "..." (handling escaped quotes)
+                pattern = r'"(?:[^"\\]|\\.)*"'
+                fixed = re.sub(pattern, escape_newlines_in_strings, txt)
+                obj = json.loads(fixed)
+                return obj if isinstance(obj, dict) else None
+            except Exception:
+                return None
         except Exception:
             return None
 
@@ -580,17 +652,55 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
             return ''
         return v if isinstance(v, str) else str(v)
 
+    # Strip paper-qa formatting headers (e.g., "Fulltext summary\nSummary\n")
     cleaned = _strip_fences(raw)
+    # Remove common paper-qa headers
+    for header in ['Fulltext summary', 'Summary', 'Methods', 'Answer']:
+        lines = cleaned.split('\n')
+        cleaned = '\n'.join(line for line in lines if line.strip() != header)
+    cleaned = cleaned.strip()
+
+    # First try: parse as-is
     data = _parse_obj(cleaned)
+
     if data is None:
-        # Try extract JSON between braces
+        # Second try: extract JSON between outermost braces
         s = cleaned
         start = s.find('{')
         end = s.rfind('}')
         if start != -1 and end != -1 and end > start:
-            data = _parse_obj(s[start:end+1])
+            potential_json = s[start:end+1]
+            data = _parse_obj(potential_json)
+
+            # If parse failed, try unescaping quotes (handles `\"methods\":\"...\"` case)
+            if data is None and '\\\"' in potential_json:
+                try:
+                    # Fix escaped quotes inside the JSON
+                    unescaped = potential_json.replace('\\\"', '"')
+                    # But this might create invalid JSON with nested quotes
+                    # Try a more targeted fix: look for the pattern `"summary":"...\"methods\"..."`
+                    # and split it into proper top-level keys
+                    if '"summary":"' in unescaped and '","methods":"' not in unescaped and '"methods":"' in unescaped:
+                        # Pattern: {"summary":"... "methods":"..."} where methods is inside summary
+                        # Find where "methods" starts within the summary value
+                        import re
+                        # Use non-greedy match but handle the closing brace properly
+                        match = re.search(r'"summary"\s*:\s*"(.*?)\s*"\s*"methods"\s*:\s*"\s*"(.*?)"\s*}', unescaped, re.DOTALL)
+                        if not match:
+                            # Try alternative pattern without extra quotes
+                            match = re.search(r'"summary"\s*:\s*"(.*?)\\n\\n"methods"\s*:\s*"(.*?)"', unescaped, re.DOTALL)
+                        if match:
+                            summary_val = match.group(1).strip()
+                            methods_val = match.group(2).strip()
+                            # Clean up escape sequences
+                            summary_val = summary_val.replace('\\n', '\n').replace('\\t', '\t')
+                            methods_val = methods_val.replace('\\n', '\n').replace('\\t', '\t')
+                            data = {'summary': summary_val, 'methods': methods_val}
+                except Exception:
+                    pass
 
     if data is None:
+        # Last resort: wrap everything as summary
         out = {
             'summary': cleaned.strip(),
             'methods': '',
@@ -965,8 +1075,9 @@ def run(
             display_ans = raw_ans if len(raw_ans) < 2000 else raw_ans[:2000] + "\n... (truncated)"
             logger.info("=" * 80)
             logger.info("Paper-QA Summary for arXiv:%s (entry_id=%s)", aid, eid or "-")
+            logger.info("Model: llm=%s, summary_llm=%s", pqa_llm or 'default', pqa_summary_llm or 'default')
             logger.info("=" * 80)
-            logger.info("%s", display_ans)
+            logger.info("RAW ANSWER (first 500 chars):\n%s", raw_ans[:500] if raw_ans else "None")
             logger.info("=" * 80)
         except Exception as e:
             # Best-effort logging; ignore formatting failures

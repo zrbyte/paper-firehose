@@ -48,5 +48,15 @@
 <h1>New papers on %{date}</h1>
 <hr>
 %{content}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Render LaTeX/math with MathJax after content is loaded
+  if (window.MathJax && MathJax.typesetPromise) {
+    MathJax.typesetPromise().catch(function(err) {
+      console.error('MathJax typeset error:', err);
+    });
+  }
+});
+</script>
 </body>
 </html>
