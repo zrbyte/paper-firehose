@@ -394,10 +394,48 @@ class SMTPSender:
         msg['Subject'] = subject
         msg['From'] = from_addr
         msg['To'] = ", ".join(to_addrs)
-        msg.set_content(text_body or "HTML email; open in an HTML-capable client.")
+        msg['Reply-To'] = from_addr
+
+        # Add anti-spam headers
+        msg['X-Mailer'] = 'Paper Firehose Research Digest'
+        msg['List-Unsubscribe'] = f'<mailto:{from_addr}?subject=unsubscribe>'
+        msg['Precedence'] = 'bulk'
+
+        # Generate proper plain text version if not provided
+        if not text_body:
+            text_body = self._html_to_text(html_body)
+
+        msg.set_content(text_body)
         msg.add_alternative(html_body, subtype='html')
 
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(self.host, self.port, context=context) as server:
             server.login(self.username, password)
             server.send_message(msg)
+
+    def _html_to_text(self, html_body: str) -> str:
+        """Convert HTML email body to plain text for multipart email."""
+        import re
+
+        # Remove HTML tags but preserve structure
+        text = html_body
+
+        # Replace headers with text equivalents
+        text = re.sub(r'<h1[^>]*>(.*?)</h1>', r'\n\1\n' + '='*50 + '\n', text, flags=re.DOTALL)
+        text = re.sub(r'<h2[^>]*>(.*?)</h2>', r'\n\n\1\n' + '-'*40 + '\n', text, flags=re.DOTALL)
+
+        # Replace links with [text](url) format
+        text = re.sub(r'<a[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', r'\2 (\1)', text, flags=re.DOTALL)
+
+        # Remove style tags and their content
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
+
+        # Remove all remaining HTML tags
+        text = re.sub(r'<[^>]+>', ' ', text)
+
+        # Clean up whitespace
+        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)  # Multiple blank lines to double
+        text = re.sub(r' +', ' ', text)  # Multiple spaces to single
+        text = text.strip()
+
+        return text
