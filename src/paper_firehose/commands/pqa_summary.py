@@ -531,10 +531,18 @@ def _call_paperqa_on_pdf(
     temp_dir = tempfile.mkdtemp(prefix='paperqa_')
     temp_pdf_path = os.path.join(temp_dir, os.path.basename(pdf_path))
 
+    # Save original working directory to restore later
+    original_cwd = os.getcwd()
+
     try:
         # Copy PDF to isolated temporary directory
         shutil.copy2(pdf_path, temp_pdf_path)
         logger.debug(f"Processing PDF in isolated directory: {temp_dir}")
+
+        # CRITICAL: Change to temp directory to prevent paper-qa from discovering
+        # files in the original CWD (e.g., .claude/plugins/ directory on VPS)
+        os.chdir(temp_dir)
+        logger.debug(f"Changed working directory to: {temp_dir}")
 
         # Build Settings with configured LLM models and isolated temp directory
         settings_kwargs: Dict[str, Any] = {'paper_directory': temp_dir}
@@ -589,6 +597,13 @@ def _call_paperqa_on_pdf(
             logger.error("paperqa query failed for %s: %s", pdf_path, e)
             return None
     finally:
+        # Restore original working directory
+        try:
+            os.chdir(original_cwd)
+            logger.debug(f"Restored working directory to: {original_cwd}")
+        except Exception as e:
+            logger.warning(f"Failed to restore working directory: {e}")
+
         # Clean up temporary directory
         try:
             shutil.rmtree(temp_dir)
