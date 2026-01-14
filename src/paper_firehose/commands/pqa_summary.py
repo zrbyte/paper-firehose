@@ -531,21 +531,37 @@ def _call_paperqa_on_pdf(
     temp_dir = tempfile.mkdtemp(prefix='paperqa_')
     temp_pdf_path = os.path.join(temp_dir, os.path.basename(pdf_path))
 
-    # Save original working directory to restore later
+    # Create isolated index directory within temp to prevent paper-qa from
+    # using a shared/persistent index that discovers files from HOME directory
+    temp_index_dir = os.path.join(temp_dir, 'index')
+    os.makedirs(temp_index_dir, exist_ok=True)
+
+    # Save original working directory and PQA_HOME to restore later
     original_cwd = os.getcwd()
+    original_pqa_home = os.environ.get('PQA_HOME')
 
     try:
         # Copy PDF to isolated temporary directory
         shutil.copy2(pdf_path, temp_pdf_path)
         logger.debug(f"Processing PDF in isolated directory: {temp_dir}")
 
+        # CRITICAL: Set PQA_HOME to temp directory to prevent paper-qa from
+        # using ~/.pqa/ which contains persistent index that discovers HOME files
+        os.environ['PQA_HOME'] = temp_dir
+        logger.debug(f"Set PQA_HOME to: {temp_dir}")
+
         # CRITICAL: Change to temp directory to prevent paper-qa from discovering
         # files in the original CWD (e.g., .claude/plugins/ directory on VPS)
         os.chdir(temp_dir)
         logger.debug(f"Changed working directory to: {temp_dir}")
 
-        # Build Settings with configured LLM models and isolated temp directory
-        settings_kwargs: Dict[str, Any] = {'paper_directory': temp_dir}
+        # Build Settings with configured LLM models and BOTH isolated directories
+        # paper_directory: where to look for papers
+        # index_directory: where to store the Tantivy search index
+        settings_kwargs: Dict[str, Any] = {
+            'paper_directory': temp_dir,
+            'index_directory': temp_index_dir,
+        }
         if llm:
             settings_kwargs['llm'] = llm
         if summary_llm:
@@ -603,6 +619,16 @@ def _call_paperqa_on_pdf(
             logger.debug(f"Restored working directory to: {original_cwd}")
         except Exception as e:
             logger.warning(f"Failed to restore working directory: {e}")
+
+        # Restore original PQA_HOME environment variable
+        try:
+            if original_pqa_home is not None:
+                os.environ['PQA_HOME'] = original_pqa_home
+            elif 'PQA_HOME' in os.environ:
+                del os.environ['PQA_HOME']
+            logger.debug("Restored PQA_HOME environment variable")
+        except Exception as e:
+            logger.warning(f"Failed to restore PQA_HOME: {e}")
 
         # Clean up temporary directory
         try:
