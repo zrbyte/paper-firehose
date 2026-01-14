@@ -351,6 +351,33 @@ def _cleanup_archive(archive_dir: str, *, max_age_days: int = 30) -> None:
         logger.info("Removed %d archived PDFs older than %d days", removed, max_age_days)
 
 
+def _restore_environment(original_cwd: str, original_pqa_home: Optional[str], temp_dir: str) -> None:
+    """Restore original working directory and PQA_HOME, then clean up temp directory."""
+    # Restore original working directory
+    try:
+        os.chdir(original_cwd)
+        logger.debug(f"Restored working directory to: {original_cwd}")
+    except Exception as e:
+        logger.warning(f"Failed to restore working directory: {e}")
+
+    # Restore original PQA_HOME environment variable
+    try:
+        if original_pqa_home is not None:
+            os.environ['PQA_HOME'] = original_pqa_home
+        elif 'PQA_HOME' in os.environ:
+            del os.environ['PQA_HOME']
+        logger.debug("Restored PQA_HOME environment variable")
+    except Exception as e:
+        logger.warning(f"Failed to restore PQA_HOME: {e}")
+
+    # Clean up temporary directory
+    try:
+        shutil.rmtree(temp_dir)
+        logger.debug(f"Cleaned up temporary directory: {temp_dir}")
+    except Exception as e:
+        logger.warning(f"Failed to clean up temporary directory {temp_dir}: {e}")
+
+
 def _call_paperqa_on_pdf(
     pdf_path: str,
     *,
@@ -367,11 +394,32 @@ def _call_paperqa_on_pdf(
         summary_llm: Summary LLM model. If None, uses paper-qa default.
     """
     import tempfile
+    import pathlib
+
+    # CRITICAL: Create temp directory and set PQA_HOME BEFORE importing paperqa
+    # Paper-qa reads PQA_HOME at import time and caches it, so we must set it first
+    temp_dir = tempfile.mkdtemp(prefix='paperqa_')
+    temp_index_dir = os.path.join(temp_dir, 'index')
+    os.makedirs(temp_index_dir, exist_ok=True)
+
+    # Save original environment to restore later
+    original_cwd = os.getcwd()
+    original_pqa_home = os.environ.get('PQA_HOME')
+
+    # Set PQA_HOME BEFORE importing paperqa
+    os.environ['PQA_HOME'] = temp_dir
+    logger.debug(f"Set PQA_HOME to: {temp_dir} (before paperqa import)")
+
+    # Change to temp directory BEFORE importing paperqa
+    os.chdir(temp_dir)
+    logger.debug(f"Changed working directory to: {temp_dir} (before paperqa import)")
 
     try:
         from paperqa import Settings, ask  # type: ignore
     except Exception as e:
         logger.error("paperqa not installed or import failed: %s", e)
+        # Restore environment before returning
+        _restore_environment(original_cwd, original_pqa_home, temp_dir)
         return None
 
     # Configure litellm for GPT-5 compatibility
@@ -524,43 +572,19 @@ def _call_paperqa_on_pdf(
             logger.error(f"Failed to convert answer object to string: {e}")
             return None
 
-    # CRITICAL FIX: Create isolated temporary directory for each PDF to prevent
-    # paper-qa from indexing multiple PDFs and mixing up their content.
-    # paper-qa's paper_directory setting indexes ALL PDFs in the directory,
-    # which causes summaries to be mixed up when processing multiple papers.
-    temp_dir = tempfile.mkdtemp(prefix='paperqa_')
+    # Copy PDF to isolated temporary directory (temp_dir was created above, before import)
     temp_pdf_path = os.path.join(temp_dir, os.path.basename(pdf_path))
 
-    # Create isolated index directory within temp to prevent paper-qa from
-    # using a shared/persistent index that discovers files from HOME directory
-    temp_index_dir = os.path.join(temp_dir, 'index')
-    os.makedirs(temp_index_dir, exist_ok=True)
-
-    # Save original working directory and PQA_HOME to restore later
-    original_cwd = os.getcwd()
-    original_pqa_home = os.environ.get('PQA_HOME')
-
     try:
-        # Copy PDF to isolated temporary directory
         shutil.copy2(pdf_path, temp_pdf_path)
         logger.debug(f"Processing PDF in isolated directory: {temp_dir}")
-
-        # CRITICAL: Set PQA_HOME to temp directory to prevent paper-qa from
-        # using ~/.pqa/ which contains persistent index that discovers HOME files
-        os.environ['PQA_HOME'] = temp_dir
-        logger.debug(f"Set PQA_HOME to: {temp_dir}")
-
-        # CRITICAL: Change to temp directory to prevent paper-qa from discovering
-        # files in the original CWD (e.g., .claude/plugins/ directory on VPS)
-        os.chdir(temp_dir)
-        logger.debug(f"Changed working directory to: {temp_dir}")
 
         # Build Settings with configured LLM models and BOTH isolated directories
         # paper_directory: where to look for papers
         # index_directory: where to store the Tantivy search index
         settings_kwargs: Dict[str, Any] = {
-            'paper_directory': temp_dir,
-            'index_directory': temp_index_dir,
+            'paper_directory': pathlib.Path(temp_dir),
+            'index_directory': pathlib.Path(temp_index_dir),
         }
         if llm:
             settings_kwargs['llm'] = llm
@@ -613,29 +637,7 @@ def _call_paperqa_on_pdf(
             logger.error("paperqa query failed for %s: %s", pdf_path, e)
             return None
     finally:
-        # Restore original working directory
-        try:
-            os.chdir(original_cwd)
-            logger.debug(f"Restored working directory to: {original_cwd}")
-        except Exception as e:
-            logger.warning(f"Failed to restore working directory: {e}")
-
-        # Restore original PQA_HOME environment variable
-        try:
-            if original_pqa_home is not None:
-                os.environ['PQA_HOME'] = original_pqa_home
-            elif 'PQA_HOME' in os.environ:
-                del os.environ['PQA_HOME']
-            logger.debug("Restored PQA_HOME environment variable")
-        except Exception as e:
-            logger.warning(f"Failed to restore PQA_HOME: {e}")
-
-        # Clean up temporary directory
-        try:
-            shutil.rmtree(temp_dir)
-            logger.debug(f"Cleaned up temporary directory: {temp_dir}")
-        except Exception as e:
-            logger.warning(f"Failed to clean up temporary directory {temp_dir}: {e}")
+        _restore_environment(original_cwd, original_pqa_home, temp_dir)
 
 
 def _normalize_summary_json(raw: str) -> Optional[str]:
