@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper_firehose"
-version = "0.2.12"
+version = "0.2.13"
 description = "Filter, rank, and summarize research-paper RSS feeds."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -23,6 +23,7 @@ dependencies = [
     "requests",
     "openai>=1.30.0",
     "paper-qa",
+    "Pillow",  # Required by pypdf for PDF image extraction in paper-qa
 ]
 classifiers = [
     "Intended Audience :: Science/Research",
