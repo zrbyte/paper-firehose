@@ -8,6 +8,7 @@ import sys
 
 import click
 
+from . import __version__
 from .commands import abstracts as abstracts_cmd
 from .commands import email_list as email_cmd
 from .commands import export_recent as export_recent_cmd
@@ -26,6 +27,7 @@ logging.basicConfig(
 
 
 @click.group()
+@click.version_option(version=__version__, prog_name="paper-firehose")
 @click.option(
     "--config",
     default=str(DEFAULT_CONFIG_PATH),

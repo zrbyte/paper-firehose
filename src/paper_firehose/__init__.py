@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import logging
 import os
+from importlib.metadata import version as _get_version, PackageNotFoundError
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Version from package metadata (defined in pyproject.toml)
+try:
+    __version__ = _get_version("paper_firehose")
+except PackageNotFoundError:
+    __version__ = "0.0.0.dev"  # Fallback for editable installs without metadata
 
 from .commands import filter as filter_cmd
 from .commands import rank as rank_cmd
@@ -21,6 +28,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_CONFIG = str(DEFAULT_CONFIG_PATH)
 
 __all__ = [
+    '__version__',
     'filter',
     'rank',
     'abstracts',
