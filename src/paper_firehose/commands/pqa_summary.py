@@ -75,6 +75,7 @@ import asyncio
 import threading
 import inspect
 import warnings
+import pathlib
 from typing import Dict, Any, List, Optional, Tuple
 
 import requests
@@ -95,6 +96,45 @@ warnings.filterwarnings("ignore", message=".*coroutine.*was never awaited.*")
 
 
 ARXIV_API = "https://export.arxiv.org/api/query"
+
+
+def _build_paperqa_settings_kwargs(
+    settings_cls: type,
+    *,
+    paper_dir: str,
+    index_dir: str,
+    llm: Optional[str],
+    summary_llm: Optional[str],
+) -> Dict[str, Any]:
+    """Build Settings kwargs compatible across paper-qa versions."""
+    fields = getattr(settings_cls, "model_fields", None)
+    if fields is None:
+        fields = getattr(settings_cls, "__fields__", None)
+    field_names = set(fields.keys()) if fields else set()
+
+    settings_kwargs: Dict[str, Any] = {}
+    paper_path = pathlib.Path(paper_dir)
+    index_path = pathlib.Path(index_dir)
+
+    if "agent" in field_names:
+        settings_kwargs["agent"] = {
+            "index": {
+                "paper_directory": paper_path,
+                "index_directory": index_path,
+            }
+        }
+
+    if "paper_directory" in field_names:
+        settings_kwargs["paper_directory"] = paper_path
+    if "index_directory" in field_names:
+        settings_kwargs["index_directory"] = index_path
+
+    if llm:
+        settings_kwargs["llm"] = llm
+    if summary_llm:
+        settings_kwargs["summary_llm"] = summary_llm
+
+    return settings_kwargs
 
 
 def _ensure_dirs(download_dir: str, archive_dir: str) -> None:
@@ -532,7 +572,6 @@ class PaperQASession:
             If paper-qa is not installed or fails to import.
         """
         import tempfile
-        import pathlib
 
         # ============================================================
         # STEP 1: Create session directory structure
@@ -715,8 +754,6 @@ class PaperQASession:
                 if answer:
                     data = json.loads(answer)
         """
-        import pathlib
-
         # ============================================================
         # Validate session state
         # ============================================================
@@ -755,14 +792,13 @@ class PaperQASession:
             # ============================================================
             # We explicitly set paper_directory and index_directory to
             # ensure paper-qa uses our per-PDF directories, not defaults.
-            settings_kwargs: Dict[str, Any] = {
-                'paper_directory': pathlib.Path(paper_dir),
-                'index_directory': pathlib.Path(index_dir),
-            }
-            if self.llm:
-                settings_kwargs['llm'] = self.llm
-            if self.summary_llm:
-                settings_kwargs['summary_llm'] = self.summary_llm
+            settings_kwargs = _build_paperqa_settings_kwargs(
+                self._settings_class,
+                paper_dir=paper_dir,
+                index_dir=index_dir,
+                llm=self.llm,
+                summary_llm=self.summary_llm,
+            )
 
             if self.llm or self.summary_llm:
                 logger.info("Using paper-qa with llm=%s, summary_llm=%s",
@@ -777,6 +813,22 @@ class PaperQASession:
             # - Jupyter/nested: spawn a thread with its own loop
             async def _run_async() -> Any:
                 settings = self._settings_class(**settings_kwargs)
+                agent_index = getattr(getattr(settings, "agent", None), "index", None)
+                paper_dir_dbg = (
+                    agent_index.paper_directory
+                    if agent_index is not None
+                    else getattr(settings, "paper_directory", None)
+                )
+                index_dir_dbg = (
+                    agent_index.index_directory
+                    if agent_index is not None
+                    else getattr(settings, "index_directory", None)
+                )
+                logger.debug(
+                    "PaperQASession settings: paper_dir=%s index_dir=%s",
+                    paper_dir_dbg,
+                    index_dir_dbg,
+                )
                 return await self._ask_func(question, settings=settings)
 
             try:
@@ -952,8 +1004,6 @@ def _call_paperqa_on_pdf(
         summary_llm: Summary LLM model. If None, uses paper-qa default.
     """
     import tempfile
-    import pathlib
-
     # CRITICAL: Create temp directory and set PQA_HOME BEFORE importing paperqa
     # Paper-qa reads PQA_HOME at import time and caches it, so we must set it first
     temp_dir = tempfile.mkdtemp(prefix='paperqa_')
@@ -1140,14 +1190,13 @@ def _call_paperqa_on_pdf(
         # Build Settings with configured LLM models and BOTH isolated directories
         # paper_directory: where to look for papers
         # index_directory: where to store the Tantivy search index
-        settings_kwargs: Dict[str, Any] = {
-            'paper_directory': pathlib.Path(temp_dir),
-            'index_directory': pathlib.Path(temp_index_dir),
-        }
-        if llm:
-            settings_kwargs['llm'] = llm
-        if summary_llm:
-            settings_kwargs['summary_llm'] = summary_llm
+        settings_kwargs = _build_paperqa_settings_kwargs(
+            Settings,
+            paper_dir=temp_dir,
+            index_dir=temp_index_dir,
+            llm=llm,
+            summary_llm=summary_llm,
+        )
 
         if llm or summary_llm:
             logger.info("Using paper-qa with llm=%s, summary_llm=%s", llm or 'default', summary_llm or 'default')
