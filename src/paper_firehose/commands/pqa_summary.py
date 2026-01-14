@@ -39,7 +39,7 @@ We use a context manager that:
 1. Creates ONE temp directory for the entire summarization session
 2. Sets ``PQA_HOME`` and changes working directory BEFORE importing paperqa
 3. Imports paperqa ONCE (it correctly caches the session directory)
-4. Processes each PDF: copy in → summarize → remove → clear index
+4. Processes each PDF in isolated paper/index directories
 5. Cleans up the session directory on exit
 
 This ensures paperqa always sees a valid, consistent environment throughout
@@ -420,16 +420,14 @@ class PaperQASession:
 
         Session Start
         ├── Create /tmp/paperqa_session_xxx/
-        ├── Create /tmp/paperqa_session_xxx/index/
         ├── Set PQA_HOME=/tmp/paperqa_session_xxx
         ├── Change CWD to /tmp/paperqa_session_xxx
         └── Import paperqa (caches /tmp/paperqa_session_xxx) ✓
 
         For each PDF:
-        ├── Copy PDF to /tmp/paperqa_session_xxx/
-        ├── Run paper-qa ask() → indexes PDF, generates answer
-        ├── Remove PDF from temp directory
-        └── Clear index directory (prevents cross-contamination)
+        ├── Create /tmp/paperqa_session_xxx/paper_*/ and index_*/ dirs
+        ├── Copy PDF into paper_*/ and run ask() with those dirs
+        └── Remove per-PDF dirs to keep runs isolated
 
         Session End
         ├── Restore original CWD
@@ -442,9 +440,8 @@ class PaperQASession:
     1. **Single import**: paperqa is imported exactly once per session, so
        it correctly caches the session's temp directory.
 
-    2. **Index clearing**: After each PDF, we clear the index directory to
-       prevent papers from mixing. Paper-qa's Tantivy index persists and
-       would otherwise accumulate all PDFs.
+    2. **Per-PDF isolation**: Each PDF gets its own paper/index directories,
+       so there is no cross-contamination or stale index state between runs.
 
     3. **PDF removal**: We remove each PDF after processing to ensure
        paper-qa only sees one PDF at a time during indexing.
@@ -460,8 +457,6 @@ class PaperQASession:
         The summary LLM model (e.g., 'gpt-4o-mini').
     temp_dir : str or None
         Path to the session's temporary directory (set on __enter__).
-    temp_index_dir : str or None
-        Path to the Tantivy index directory within temp_dir.
     original_cwd : str or None
         The working directory before session start (for restoration).
     original_pqa_home : str or None
@@ -502,7 +497,6 @@ class PaperQASession:
 
         # Session state (populated in __enter__)
         self.temp_dir: Optional[str] = None
-        self.temp_index_dir: Optional[str] = None
         self.original_cwd: Optional[str] = None
         self.original_pqa_home: Optional[str] = None
 
@@ -544,11 +538,8 @@ class PaperQASession:
         # STEP 1: Create session directory structure
         # ============================================================
         # We use a unique temp directory per session. All PDFs will be
-        # copied here, processed, then removed. The index subdirectory
-        # stores paper-qa's Tantivy search index.
+        # copied here, processed, then removed.
         self.temp_dir = tempfile.mkdtemp(prefix='paperqa_session_')
-        self.temp_index_dir = os.path.join(self.temp_dir, 'index')
-        os.makedirs(self.temp_index_dir, exist_ok=True)
 
         # ============================================================
         # STEP 2: Save original environment for restoration in __exit__
@@ -675,16 +666,15 @@ class PaperQASession:
 
         This method handles the per-PDF processing workflow:
 
-        1. Copy the PDF to the session's temp directory
-        2. Build paper-qa Settings with our isolated directories
+        1. Create per-PDF paper and index directories
+        2. Copy the PDF into the per-PDF paper directory
+        3. Build paper-qa Settings with those isolated directories
         3. Run paper-qa's ask() function asynchronously
         4. Extract the answer string from paper-qa's response object
-        5. Clean up: remove PDF and clear index to prevent cross-contamination
+        5. Clean up: remove per-PDF directories to keep runs isolated
 
-        The index clearing in step 5 is critical: paper-qa's Tantivy index
-        persists between ask() calls, so without clearing it, paper-qa
-        would see all previously processed PDFs when answering questions
-        about the current PDF.
+        Each run uses fresh directories, so paper-qa only sees one PDF
+        per call without having to clear or reconcile a shared index.
 
         Parameters
         ----------
@@ -735,18 +725,28 @@ class PaperQASession:
             return None
 
         # ============================================================
-        # STEP 1: Copy PDF to session temp directory
+        # STEP 1: Create per-PDF paper/index directories
         # ============================================================
-        # We copy rather than move/link to preserve the original and
-        # ensure paper-qa can read it from our controlled location.
+        # Use per-PDF dirs to avoid stale index entries or cross-contamination.
+        import tempfile
+
+        paper_dir = tempfile.mkdtemp(prefix='paper_', dir=self.temp_dir)
+        index_dir = tempfile.mkdtemp(prefix='index_', dir=self.temp_dir)
         pdf_name = os.path.basename(pdf_path)
-        temp_pdf_path = os.path.join(self.temp_dir, pdf_name)
+        temp_pdf_path = os.path.join(paper_dir, pdf_name)
 
         try:
             shutil.copy2(pdf_path, temp_pdf_path)
             logger.debug(f"Copied PDF to session: {temp_pdf_path}")
         except Exception as e:
             logger.error(f"Failed to copy PDF {pdf_path}: {e}")
+            try:
+                if os.path.exists(paper_dir):
+                    shutil.rmtree(paper_dir)
+                if os.path.exists(index_dir):
+                    shutil.rmtree(index_dir)
+            except Exception:
+                pass
             return None
 
         try:
@@ -754,10 +754,10 @@ class PaperQASession:
             # STEP 2: Build paper-qa Settings
             # ============================================================
             # We explicitly set paper_directory and index_directory to
-            # ensure paper-qa uses our session directories, not defaults.
+            # ensure paper-qa uses our per-PDF directories, not defaults.
             settings_kwargs: Dict[str, Any] = {
-                'paper_directory': pathlib.Path(self.temp_dir),
-                'index_directory': pathlib.Path(self.temp_index_dir),
+                'paper_directory': pathlib.Path(paper_dir),
+                'index_directory': pathlib.Path(index_dir),
             }
             if self.llm:
                 settings_kwargs['llm'] = self.llm
@@ -821,26 +821,16 @@ class PaperQASession:
             return None
         finally:
             # ============================================================
-            # STEP 5: Clean up PDF and index
+            # STEP 5: Clean up per-PDF directories
             # ============================================================
-            # Remove the PDF so the next call only sees its own PDF
             try:
-                if os.path.exists(temp_pdf_path):
-                    os.remove(temp_pdf_path)
-                    logger.debug(f"Removed PDF from session: {temp_pdf_path}")
+                if os.path.exists(paper_dir):
+                    shutil.rmtree(paper_dir)
+                if os.path.exists(index_dir):
+                    shutil.rmtree(index_dir)
+                logger.debug("Cleaned up per-PDF paper/index dirs")
             except Exception as e:
-                logger.warning(f"Failed to remove temp PDF: {e}")
-
-            # Clear the index directory to prevent cross-contamination
-            # between PDFs. Paper-qa's Tantivy index persists and would
-            # otherwise accumulate all processed PDFs.
-            try:
-                if self.temp_index_dir and os.path.exists(self.temp_index_dir):
-                    shutil.rmtree(self.temp_index_dir)
-                    os.makedirs(self.temp_index_dir, exist_ok=True)
-                    logger.debug("Cleared session index directory")
-            except Exception as e:
-                logger.warning(f"Failed to clear index directory: {e}")
+                logger.warning(f"Failed to clean up per-PDF dirs: {e}")
 
     @staticmethod
     def _extract_answer(ans_obj: Any) -> Optional[str]:
