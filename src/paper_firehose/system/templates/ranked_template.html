@@ -1031,10 +1031,24 @@ document.addEventListener('DOMContentLoaded', function() {
 
       // Clear and populate carousel track with wrappers
       this.carouselTrack.innerHTML = '';
-      this.entries.forEach((entry) => {
+      this.entries.forEach((entry, idx) => {
         const wrapper = document.createElement('div');
         wrapper.className = 'carousel-card-wrapper';
         const clone = entry.cloneNode(true);
+
+        // Fix abstract toggle buttons - cloned IDs cause getElementById conflicts
+        // Re-wire onclick handlers to work within the cloned element
+        const abstractContent = clone.querySelector('.abstract-content');
+        const toggleButton = clone.querySelector('.abstract-toggle button');
+        if (abstractContent && toggleButton) {
+          // Remove old ID to avoid conflicts
+          abstractContent.removeAttribute('id');
+          // Replace onclick with a closure that works on this specific element
+          toggleButton.onclick = function() {
+            abstractContent.classList.toggle('show');
+          };
+        }
+
         wrapper.appendChild(clone);
         this.carouselTrack.appendChild(wrapper);
       });
