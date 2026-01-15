@@ -155,12 +155,24 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
         Path(dest_path).write_bytes(b"0" * 12000)
         return True
 
-    def fake_call_paperqa_on_pdf(pdf_path, *, question, llm=None, summary_llm=None):
-        return json.dumps({"summary": "Graphene summary for experts", "methods": "Graphene methods"})
+    # Mock PaperQASession to avoid actual paper-qa calls
+    class MockPaperQASession:
+        def __init__(self, llm=None, summary_llm=None):
+            self.llm = llm
+            self.summary_llm = summary_llm
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def summarize_pdf(self, pdf_path, question):
+            return json.dumps({"summary": "Graphene summary for experts", "methods": "Graphene methods"})
 
     monkeypatch.setattr(pqa_cmd, "_download_pdf", fake_download_pdf)
     monkeypatch.setattr(pqa_cmd, "_query_arxiv_api_for_pdf", lambda arxiv_id, *, mailto, session=None: f"https://arxiv.org/pdf/{arxiv_id}.pdf")
-    monkeypatch.setattr(pqa_cmd, "_call_paperqa_on_pdf", fake_call_paperqa_on_pdf)
+    monkeypatch.setattr(pqa_cmd, "PaperQASession", MockPaperQASession)
     monkeypatch.setattr(pqa_cmd, "_resolve_arxiv_id", lambda entry: "2501.12345v1")
     monkeypatch.setattr(pqa_cmd.time, "sleep", lambda *_args, **_kwargs: None)
 
