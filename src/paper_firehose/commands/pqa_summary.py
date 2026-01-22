@@ -1372,6 +1372,26 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
 
     methods_val = _first_nonempty(('methods', 'method', 'approach', 'methodology', 'experimental_setup'))
 
+    # CRITICAL FIX: Check for double-encoded JSON
+    # If summary_val looks like a JSON object (starts with '{'), try parsing it
+    # This handles the case where paper-qa returns: {"summary": "{\"summary\":\"...\",\"methods\":\"...\"}"}
+    if summary_val.strip().startswith('{'):
+        try:
+            nested_data = json.loads(summary_val)
+            if isinstance(nested_data, dict):
+                # Extract the actual summary and methods from the nested structure
+                nested_summary = nested_data.get('summary', '')
+                nested_methods = nested_data.get('methods', '')
+                if nested_summary:
+                    logger.debug("Detected double-encoded JSON; extracting nested values")
+                    summary_val = nested_summary
+                    # Only override methods_val if we found it in nested data and current methods_val is empty
+                    if nested_methods and not methods_val.strip():
+                        methods_val = nested_methods
+        except (json.JSONDecodeError, ValueError):
+            # Not valid JSON, use as-is
+            pass
+
     out = {
         'summary': summary_val,
         'methods': methods_val,

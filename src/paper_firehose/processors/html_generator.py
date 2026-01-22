@@ -413,6 +413,21 @@ function toggleAbstract(id) {
             summary_raw = data.get('summary')
             methods_raw = data.get('methods')
 
+            # CRITICAL FIX: Check for double-encoded JSON
+            # If summary_raw looks like a JSON string, try parsing it
+            if summary_raw and isinstance(summary_raw, str) and summary_raw.strip().startswith('{'):
+                try:
+                    nested_data = json.loads(summary_raw)
+                    if isinstance(nested_data, dict):
+                        logger.debug("Detected double-encoded JSON in HTML rendering; extracting nested values")
+                        summary_raw = nested_data.get('summary', summary_raw)
+                        # Only use nested methods if current methods_raw is empty
+                        if not methods_raw or not str(methods_raw).strip():
+                            methods_raw = nested_data.get('methods', methods_raw)
+                except (json.JSONDecodeError, ValueError):
+                    # Not valid JSON, use as-is
+                    pass
+
             summary_text = self.process_text(summary_raw if (summary_raw is not None and str(summary_raw).strip()) else 'No summary provided')
             methods_text = self.process_text(methods_raw if (methods_raw is not None and str(methods_raw).strip()) else 'No methods provided')
 

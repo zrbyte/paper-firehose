@@ -271,8 +271,26 @@ class EmailRenderer:
             data = json.loads(pqa_raw)
             if not isinstance(data, dict):
                 raise ValueError("not an object")
-            summary = html.escape(data.get('summary') or '')
-            methods = html.escape(data.get('methods') or '')
+
+            summary_val = data.get('summary') or ''
+            methods_val = data.get('methods') or ''
+
+            # CRITICAL FIX: Check for double-encoded JSON
+            # If summary_val looks like a JSON string, try parsing it
+            if summary_val and isinstance(summary_val, str) and summary_val.strip().startswith('{'):
+                try:
+                    nested_data = json.loads(summary_val)
+                    if isinstance(nested_data, dict):
+                        summary_val = nested_data.get('summary', summary_val)
+                        # Only use nested methods if current methods_val is empty
+                        if not methods_val:
+                            methods_val = nested_data.get('methods', methods_val)
+                except (json.JSONDecodeError, ValueError):
+                    # Not valid JSON, use as-is
+                    pass
+
+            summary = html.escape(summary_val)
+            methods = html.escape(methods_val)
             parts: List[str] = []
             if summary:
                 parts.append(f"<div><strong>Summary:</strong> {summary}</div>")
