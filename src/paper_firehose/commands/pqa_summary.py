@@ -134,6 +134,15 @@ def _build_paperqa_settings_kwargs(
     if summary_llm:
         settings_kwargs["summary_llm"] = summary_llm
 
+    # DISABLE VISION API / MEDIA ENRICHMENT to reduce costs
+    # This prevents paper-qa from sending images to gpt-4o vision API
+    # Media enrichment adds one LLM call per image/table in the PDF,
+    # which can cost ~$10-15 per paper with vision models.
+    if "parsing" in field_names:
+        settings_kwargs["parsing"] = {
+            "use_doc_details": False,  # Disable detailed parsing with vision
+        }
+
     return settings_kwargs
 
 
