@@ -98,6 +98,30 @@ warnings.filterwarnings("ignore", message=".*coroutine.*was never awaited.*")
 ARXIV_API = "https://export.arxiv.org/api/query"
 
 
+def _get_topic_paperqa_config(topic_cfg: Dict[str, Any], topic_name: str) -> Dict[str, Any]:
+    """Extract paperqa config from topic config.
+
+    Args:
+        topic_cfg: Topic config dict (must have 'paperqa' key)
+        topic_name: Topic name for logging
+
+    Returns:
+        Topic's paperqa config dict
+
+    Raises:
+        ValueError: If topic has no paperqa section
+    """
+    topic_pqa = topic_cfg.get('paperqa')
+    if not topic_pqa:
+        raise ValueError(
+            f"Topic '{topic_name}' missing required 'paperqa' section. "
+            "All topics must define paper-qa settings."
+        )
+
+    logger.info("Loaded paperqa config for topic '%s'", topic_name)
+    return topic_pqa
+
+
 def _build_paperqa_settings_kwargs(
     settings_cls: type,
     *,
@@ -1511,14 +1535,6 @@ def run(
     config = cfg_mgr.load_config()
     db = DatabaseManager(config)
 
-    paperqa_cfg = (config.get('paperqa') or {})
-    min_rank = float(paperqa_cfg.get('download_rank_threshold', 0.35))
-    max_retries = int(paperqa_cfg.get('max_retries', 3))
-    # arXiv API guidance suggests ~1 request/3 seconds; use the stricter of config and this default
-    rps_cfg = float(paperqa_cfg.get('rps', 0.3))
-    rps_eff = rps if rps is not None else rps_cfg
-    min_interval = max(3.0, 1.0 / max(rps_eff, 0.01))
-
     _ensure_dirs(download_dir, archive_dir)
 
     topics = resolve_topics(cfg_mgr, topic)
@@ -1533,6 +1549,11 @@ def run(
 
     # Manual mode: download specific arXiv IDs/URLs if provided
     if arxiv:
+        # Manual mode: use hardcoded defaults since no topic specified
+        DEFAULT_MAX_RETRIES = 3
+        DEFAULT_RPS = 0.3
+        min_interval_default = max(3.0, 1.0 / max(DEFAULT_RPS, 0.01))
+
         ids: List[str] = []
         for a in arxiv:
             nid = _normalize_arxiv_arg(a)
@@ -1557,7 +1578,7 @@ def run(
                 summarize_targets.append((None, arxiv_id, dest_path, None))
                 continue
             pdf_url = _query_arxiv_api_for_pdf(arxiv_id, mailto=mailto, session=sess) or f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-            ok = _download_pdf(pdf_url, dest_path, mailto=mailto, session=sess, max_retries=max_retries)
+            ok = _download_pdf(pdf_url, dest_path, mailto=mailto, session=sess, max_retries=DEFAULT_MAX_RETRIES)
             if ok:
                 downloaded_paths.append(dest_path)
                 summarize_targets.append((None, arxiv_id, dest_path, None))
@@ -1570,7 +1591,7 @@ def run(
                 except Exception:
                     pass
                 logger.warning("Failed to download PDF for arXiv:%s", arxiv_id)
-            time.sleep(min_interval)
+            time.sleep(min_interval_default)
 
         _move_to_archive(downloaded_paths, archive_dir)
         # Replace any targets that were in download_dir with archive paths
@@ -1587,6 +1608,11 @@ def run(
 
     # History-by-IDs mode: look up entries in history DB by entry_id and download
     if entry_ids:
+        # History mode: use hardcoded defaults since entries span multiple topics
+        DEFAULT_MAX_RETRIES = 3
+        DEFAULT_RPS = 0.3
+        min_interval_default = max(3.0, 1.0 / max(DEFAULT_RPS, 0.01))
+
         rows = _fetch_history_entries_by_ids(db, entry_ids, matched_date=history_date, feed_like=history_feed_like if use_history else None)
         logger.info("History lookup: requested=%d, found=%d (date=%s, feed~%s)", len(entry_ids), len(rows), history_date or '-', history_feed_like or '-')
         for row in rows:
@@ -1621,7 +1647,7 @@ def run(
                 summarize_targets.append((row.get('entry_id'), arxiv_id, dest_path, topic_ctx))
                 continue
             pdf_url = _query_arxiv_api_for_pdf(arxiv_id, mailto=mailto, session=sess) or f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-            ok = _download_pdf(pdf_url, dest_path, mailto=mailto, session=sess, max_retries=max_retries)
+            ok = _download_pdf(pdf_url, dest_path, mailto=mailto, session=sess, max_retries=DEFAULT_MAX_RETRIES)
             if ok:
                 downloaded_paths.append(dest_path)
                 summarize_targets.append((row.get('entry_id'), arxiv_id, dest_path, topic_ctx))
@@ -1634,7 +1660,7 @@ def run(
                 except Exception:
                     pass
                 logger.warning("Failed to download PDF for arXiv:%s (entry_id=%s)", arxiv_id, row.get('entry_id'))
-            time.sleep(min_interval)
+            time.sleep(min_interval_default)
 
         _move_to_archive(downloaded_paths, archive_dir)
         # Repair target paths to point at archive if needed
@@ -1651,10 +1677,27 @@ def run(
         if topic and t != topic:
             continue
 
-        rows = _iter_ranked_entries(db, t, min_rank)
+        # Load topic config and extract paperqa settings
+        try:
+            topic_cfg = cfg_mgr.load_topic_config(t)
+            paperqa_cfg_topic = _get_topic_paperqa_config(topic_cfg, t)
+        except ValueError as e:
+            logger.error(str(e))
+            continue  # Skip topics without paperqa config
+        except Exception as e:
+            logger.error("Failed to load topic config for '%s': %s. Skipping.", t, e)
+            continue
+
+        # Extract topic-specific settings
+        min_rank_topic = float(paperqa_cfg_topic.get('download_rank_threshold', 0.35))
+        max_retries_topic = int(paperqa_cfg_topic.get('max_retries', 3))
+        rps_topic = float(paperqa_cfg_topic.get('rps', 0.3))
+        min_interval_topic = max(3.0, 1.0 / max(rps_topic, 0.01))
+
+        rows = _iter_ranked_entries(db, t, min_rank_topic)
         if limit is not None:
             rows = rows[: int(limit)]
-        logger.info("Topic '%s': %d candidates with rank >= %.2f", t, len(rows), min_rank)
+        logger.info("Topic '%s': %d candidates with rank >= %.2f", t, len(rows), min_rank_topic)
         total_candidates += len(rows)
 
         for row in rows:
@@ -1682,7 +1725,7 @@ def run(
                 continue
 
             pdf_url = _query_arxiv_api_for_pdf(arxiv_id, mailto=mailto, session=sess) or f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-            ok = _download_pdf(pdf_url, dest_path, mailto=mailto, session=sess, max_retries=max_retries)
+            ok = _download_pdf(pdf_url, dest_path, mailto=mailto, session=sess, max_retries=max_retries_topic)
             if ok:
                 downloaded_paths.append(dest_path)
                 summarize_targets.append((row['id'], arxiv_id, dest_path, t))
@@ -1698,7 +1741,7 @@ def run(
                 logger.warning("Failed to download PDF for arXiv:%s", arxiv_id)
 
             # Polite delay (minimum 3 seconds per ToU; also covers PDF request)
-            time.sleep(min_interval)
+            time.sleep(min_interval_topic)
 
     # Move all successfully downloaded PDFs to archive dir
     _move_to_archive(downloaded_paths, archive_dir)
@@ -1715,63 +1758,81 @@ def run(
         _cleanup_archive(archive_dir)
         return
 
-    # Extract LLM model settings from config
-    pqa_llm = paperqa_cfg.get('llm') or None
-    pqa_summary_llm = paperqa_cfg.get('summary_llm') or None
-
     summarized = 0
 
-    # Use PaperQASession to set up environment ONCE for all PDFs
-    # This avoids Python import caching issues where paperqa caches PQA_HOME
-    with PaperQASession(llm=pqa_llm, summary_llm=pqa_summary_llm) as pqa_session:
-        for eid, aid, pdf_path, tctx in summarize_targets:
-            # Build paper-qa question from config (per-item to allow topic-aware placeholder substitution)
-            question = (paperqa_cfg.get('prompt') or '').strip()
-            if not question:
-                question = (
-                    "You are an expert technical reader. Summarize this paper for experts. "
-                    "Return ONLY a JSON object with keys: 'summary', 'methods'. "
-                    "Keep each value concise and information dense."
-                )
-            if tctx:
-                try:
-                    tcfg = cfg_mgr.load_topic_config(tctx)
-                    rq = ((tcfg.get('ranking') or {}).get('query') or '').strip()
-                    if rq and '{ranking_query}' in question:
+    # Group summarize_targets by topic to batch by LLM models
+    from collections import defaultdict
+    targets_by_topic: Dict[Optional[str], List[Tuple]] = defaultdict(list)
+    for eid, aid, pdf_path, tctx in summarize_targets:
+        targets_by_topic[tctx].append((eid, aid, pdf_path, tctx))
+
+    # Process each topic's PDFs with appropriate LLM models
+    for topic_name, targets in targets_by_topic.items():
+        if not topic_name:
+            logger.warning("Skipping %d PDFs with no topic context", len(targets))
+            continue
+
+        # Load topic config to get LLM settings
+        try:
+            topic_cfg = cfg_mgr.load_topic_config(topic_name)
+            paperqa_cfg = _get_topic_paperqa_config(topic_cfg, topic_name)
+        except Exception as e:
+            logger.error("Failed to load paperqa config for '%s': %s. Skipping.", topic_name, e)
+            continue
+
+        pqa_llm = paperqa_cfg.get('llm')
+        pqa_summary_llm = paperqa_cfg.get('summary_llm')
+
+        logger.info("Processing %d PDFs for topic '%s' with llm=%s", len(targets), topic_name, pqa_llm)
+
+        # Create session with topic-specific LLM models
+        with PaperQASession(llm=pqa_llm, summary_llm=pqa_summary_llm) as pqa_session:
+            for eid, aid, pdf_path, tctx in targets:
+                # Get prompt from topic's paperqa config
+                question = (paperqa_cfg.get('prompt') or '').strip()
+                if not question:
+                    question = (
+                        "You are an expert technical reader. Summarize this paper for experts. "
+                        "Return ONLY a JSON object with keys: 'summary', 'methods'. "
+                        "Keep each value concise and information dense."
+                    )
+
+                # Apply {ranking_query} placeholder substitution
+                if '{ranking_query}' in question:
+                    rq = ((topic_cfg.get('ranking') or {}).get('query') or '').strip()
+                    if rq:
                         question = question.replace('{ranking_query}', rq)
-                except Exception:
-                    pass
 
-            # Use session to process this PDF
-            raw_ans = pqa_session.summarize_pdf(pdf_path, question)
+                # Use session to process this PDF
+                raw_ans = pqa_session.summarize_pdf(pdf_path, question)
 
-            if not raw_ans:
-                logger.warning("No answer returned from paper-qa for arXiv:%s (entry_id=%s)", aid, eid or "-")
-                continue
+                if not raw_ans:
+                    logger.warning("No answer returned from paper-qa for arXiv:%s (entry_id=%s)", aid, eid or "-")
+                    continue
 
-            # Output the raw paper-qa response for inspection
-            try:
-                logger.info("=" * 80)
-                logger.info("Paper-QA Summary for arXiv:%s (entry_id=%s)", aid, eid or "-")
-                logger.info("Model: llm=%s, summary_llm=%s", pqa_llm or 'default', pqa_summary_llm or 'default')
-                logger.info("=" * 80)
-                logger.info("RAW ANSWER (first 500 chars):\n%s", raw_ans[:500] if raw_ans else "None")
-                logger.info("=" * 80)
-            except Exception as e:
-                # Best-effort logging; ignore formatting failures
-                logger.debug("Failed to log paper-qa response: %s", e)
+                # Output the raw paper-qa response for inspection
+                try:
+                    logger.info("=" * 80)
+                    logger.info("Paper-QA Summary for arXiv:%s (entry_id=%s)", aid, eid or "-")
+                    logger.info("Model: llm=%s, summary_llm=%s", pqa_llm or 'default', pqa_summary_llm or 'default')
+                    logger.info("=" * 80)
+                    logger.info("RAW ANSWER (first 500 chars):\n%s", raw_ans[:500] if raw_ans else "None")
+                    logger.info("=" * 80)
+                except Exception as e:
+                    # Best-effort logging; ignore formatting failures
+                    logger.debug("Failed to log paper-qa response: %s", e)
 
-            # Normalize and write
-            norm = _normalize_summary_json(raw_ans)
-            if not norm:
-                # As a last resort, write the raw response
-                norm = raw_ans
-            if eid:
-                _write_pqa_summary_to_dbs(db, eid, norm, topic=tctx)
-                summarized += 1
-            else:
-                # No entry id: history-only test not possible; skip write
-                logger.debug("Got summary for %s but no entry_id present; skipping DB write", aid)
+                # Normalize and write
+                norm = _normalize_summary_json(raw_ans)
+                if not norm:
+                    # As a last resort, write the raw response
+                    norm = raw_ans
+                if eid:
+                    _write_pqa_summary_to_dbs(db, eid, norm, topic=tctx)
+                    summarized += 1
+                else:
+                    # No entry id: history-only test not possible; skip write
+                    logger.debug("Got summary for %s but no entry_id present; skipping DB write", aid)
 
     logger.info("paper-qa summarization completed: wrote %d summaries", summarized)
 

@@ -14,27 +14,11 @@ llm:
   max_retries: 3
   # GPT-5 specific parameters
   verbosity: "low" # values: low, medium, high
-  reasoning_effort: "minimal" # low, medium (default), high. GPT‑5 also supports minimal, which minimizes GPT‑5’s reasoning to return an answer quickly.
+  reasoning_effort: "minimal" # low, medium (default), high. GPT‑5 also supports minimal, which minimizes GPT‑5's reasoning to return an answer quickly.
 
-# Paper-QA and arXiv downloader configuration
-paperqa:
-  # Download arXiv PDFs for entries with rank_score >= this threshold
-  download_rank_threshold: 0.35
-  # arXiv API ToU recommends ~1 request per 3 seconds; keep rps <= 0.33
-  rps: 0.3
-  max_retries: 3
-  # LLM model for paper-qa (options: gpt-4o, gpt-4o-mini, gpt-5.2, etc.)
-  llm: "gpt-5.2"
-  # Summary LLM model (can be a cheaper/faster model for summarization)
-  summary_llm: "gpt-5.2"
-  # Prompt used by paper-qa summarization (Phase 2). Keep concise and JSON-only.
-  prompt: >
-    Read the PDF and summarize for an expert reader, according to the following rules.
-    CRITICAL: only reply in JSON format. RETURN EXACTLY THIS STRUCTURE: {"summary":"...", "methods":"..."}
-    Keep the text information-dense. Avoid using superlatives and other over-the-top language.
-    summary: up to 8 sentences.
-    methods: experimental setup, parameters, and analysis methods, calculation details, include names of tools used.
-  
+# Paper-QA configuration has been moved to per-topic YAML files.
+# Each topic must define its own 'paperqa:' section.
+
 feeds:
   cond-mat:
     name: "arXiv cond-mat"

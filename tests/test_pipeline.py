@@ -68,11 +68,6 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
           time_window_days: 365
           abstracts:
             mailto: "testing@example.com"
-        paperqa:
-          download_rank_threshold: 0.0
-          rps: 1.0
-          prompt: |
-            Summarize papers about {{ranking_query}} as concise JSON.
         """
     ).strip() + "\n"
 
@@ -91,6 +86,13 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
         abstract_fetch:
           enabled: true
           rank_threshold: 0.0
+        paperqa:
+          download_rank_threshold: 0.0
+          rps: 1.0
+          llm: "gpt-4o"
+          summary_llm: "gpt-4o-mini"
+          prompt: |
+            Summarize papers about {ranking_query} as concise JSON.
         output:
           filename: "test_topic_filtered.html"
           filename_ranked: "test_topic_ranked.html"
