@@ -28,12 +28,12 @@ def _select_entries(db: DatabaseManager, topic: str, *, only_with_summary: bool,
         try:
             th = float(min_rank_score)
             entries = [e for e in entries if (e.get('rank_score') or 0.0) >= th]
-        except Exception:
+        except (ValueError, TypeError):
             pass
     # Sort by rank desc
     try:
         entries.sort(key=lambda e: (e.get('rank_score') or 0.0), reverse=True)
-    except Exception:
+    except (ValueError, TypeError):
         pass
     if limit is not None:
         entries = entries[:limit]

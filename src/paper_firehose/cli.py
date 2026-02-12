@@ -75,7 +75,7 @@ def generate_html(ctx: click.Context, topic: str | None) -> None:
 
 
 @cli.command("export-recent")
-@click.option("--days", default=60, type=int, help="Number of days to include (default: 60)")
+@click.option("--days", default=60, type=click.IntRange(min=1), help="Number of days to include (default: 60)")
 @click.option("--output", default=None, help="Output filename (default: matched_entries_history.recent.db)")
 @click.pass_context
 def export_recent(ctx: click.Context, days: int, output: str | None) -> None:
@@ -111,8 +111,8 @@ def rank(ctx: click.Context, topic: str | None) -> None:
     default=None,
     help="Contact email for Crossref User-Agent (defaults to $MAILTO env or a safe fallback)",
 )
-@click.option("--limit", type=int, help="Max number of abstracts to fetch per topic")
-@click.option("--rps", type=float, default=1.0, help="Requests per second throttle (default: 1.0)")
+@click.option("--limit", type=click.IntRange(min=1), help="Max number of abstracts to fetch per topic")
+@click.option("--rps", type=click.FloatRange(min=0, min_open=True), default=1.0, help="Requests per second throttle (default: 1.0)")
 @click.pass_context
 def abstracts(
     ctx: click.Context,
@@ -141,8 +141,8 @@ def abstracts(
 
 @cli.command("pqa_summary")
 @click.option("--topic", help="Download arXiv PDFs for a specific topic only")
-@click.option("--rps", type=float, help="Requests per second throttle (polite; overrides config)")
-@click.option("--limit", type=int, help="Limit number of entries per topic (optional)")
+@click.option("--rps", type=click.FloatRange(min=0, min_open=True), help="Requests per second throttle (polite; overrides config)")
+@click.option("--limit", type=click.IntRange(min=1), help="Limit number of entries per topic (optional)")
 @click.option(
     "--arxiv",
     "arxiv_ids",
@@ -221,7 +221,7 @@ def pqa_summary(
     default="auto",
     help="Content mode: auto (from DB) or ranked (embed ranked HTML if available)",
 )
-@click.option("--limit", type=int, help="Limit number of entries per topic")
+@click.option("--limit", type=click.IntRange(min=1), help="Limit number of entries per topic")
 @click.option(
     "--recipients",
     "recipients_file",
@@ -262,7 +262,7 @@ def email(
 
 
 @cli.command("purge")
-@click.option("--days", type=int, help="Remove entries from the most recent DAYS days (including today)")
+@click.option("--days", type=click.IntRange(min=1), help="Remove entries from the most recent DAYS days (including today)")
 @click.option("--all", "all_data", is_flag=True, help="Clear all databases")
 @click.pass_context
 def purge(ctx: click.Context, days: int | None, all_data: bool) -> None:

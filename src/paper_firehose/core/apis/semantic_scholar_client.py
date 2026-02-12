@@ -7,6 +7,7 @@ abstracts without requiring an API key.
 
 from __future__ import annotations
 
+import json
 from urllib.parse import quote
 from typing import Optional
 
@@ -45,7 +46,7 @@ def get_semantic_scholar_abstract(
             data = r.json()
             abs_txt = data.get('abstract')
             return strip_jats(abs_txt) if abs_txt else None
-        except Exception:
+        except (requests.RequestException, json.JSONDecodeError, KeyError):
             return None
 
     # Use new RetryableHTTPClient for better retry logic
@@ -58,5 +59,5 @@ def get_semantic_scholar_abstract(
         data = r.json()
         abs_txt = data.get('abstract')
         return strip_jats(abs_txt) if abs_txt else None
-    except Exception:
+    except (requests.RequestException, json.JSONDecodeError, KeyError):
         return None

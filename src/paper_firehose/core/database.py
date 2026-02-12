@@ -10,6 +10,7 @@ import json
 import os
 import datetime
 import hashlib
+import re
 import urllib.parse
 from typing import Dict, List, Any, Optional, Iterator
 from contextlib import contextmanager
@@ -613,7 +614,7 @@ class DatabaseManager:
                 match = re.search(r'(\d{4}-\d{2}-\d{2})', published_str)
                 if match:
                     return match.group(1)
-            except Exception as e:
+            except (ValueError, TypeError, re.error) as e:
                 logger.debug(f"Failed to parse published date '{published_str}': {e}")
 
         # Fallback to current date

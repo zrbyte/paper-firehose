@@ -253,7 +253,7 @@ def _extract_arxiv_id_from_link(link: str | None) -> Optional[str]:
         m = re.search(r"/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5}(?:v\d+)?)", link)
         if m:
             return m.group(1)
-    except Exception:
+    except (TypeError, AttributeError):
         return None
     return None
 
@@ -272,7 +272,7 @@ def _extract_arxiv_id_from_doi(doi: str | None) -> Optional[str]:
             parts = doi.split("/", 1)
             if len(parts) > 1:
                 return parts[1]
-    except Exception:
+    except (TypeError, AttributeError):
         return None
     return None
 
@@ -291,7 +291,7 @@ def _extract_arxiv_id_from_text(text: str | None) -> Optional[str]:
         m2 = _ARXIV_ID_RE.search(text)
         if m2:
             return m2.group(1) + (m2.group(2) or "")
-    except Exception:
+    except (TypeError, AttributeError):
         return None
     return None
 
@@ -366,7 +366,7 @@ def _query_arxiv_api_for_pdf(arxiv_id: str, *, mailto: str, session: Optional[re
             if ra:
                 try:
                     time.sleep(max(1.0, float(ra)))
-                except Exception:
+                except (ValueError, TypeError):
                     time.sleep(3.0)
             else:
                 time.sleep(3.0)
@@ -404,7 +404,7 @@ def _download_pdf(pdf_url: str, dest_path: str, *, mailto: str, session: Optiona
                     if ra:
                         try:
                             wait = float(ra)
-                        except Exception:
+                        except (ValueError, TypeError):
                             wait = 3.0
                     else:
                         wait = backoff
@@ -443,7 +443,7 @@ def _move_to_archive(paths: List[str], archive_dir: str) -> None:
                     i += 1
                 dest = os.path.join(archive_dir, f"{stem}.{i}{ext}")
             shutil.move(p, dest)
-        except Exception as e:
+        except OSError as e:
             logger.warning(f"Failed to move {p} to archive: {e}")
 
 
@@ -467,7 +467,7 @@ def _cleanup_archive(archive_dir: str, *, max_age_days: int = 30) -> None:
                 removed += 1
         except FileNotFoundError:
             continue
-        except Exception as e:
+        except OSError as e:
             logger.warning("Failed to remove archived PDF %s: %s", path, e)
     if removed:
         logger.info("Removed %d archived PDFs older than %d days", removed, max_age_days)
@@ -887,9 +887,13 @@ class PaperQASession:
                         asyncio.set_event_loop(None)
                         new_loop.close()
 
-                thread = threading.Thread(target=_worker, daemon=True)
+                thread = threading.Thread(target=_worker)
                 thread.start()
-                thread.join()
+                thread.join(timeout=300)
+
+                if thread.is_alive():
+                    logger.error("paper-qa thread timed out after 300s for %s", pdf_path)
+                    return None
 
                 if 'error' in error:
                     raise error['error']
@@ -1021,265 +1025,6 @@ class PaperQASession:
         return None
 
 
-def _call_paperqa_on_pdf(
-    pdf_path: str,
-    *,
-    question: str,
-    llm: Optional[str] = None,
-    summary_llm: Optional[str] = None,
-) -> Optional[str]:
-    """Summarize a PDF using paper-qa if available; return raw string answer.
-
-    Args:
-        pdf_path: Path to the PDF file to summarize.
-        question: The question/prompt to ask paper-qa about the PDF.
-        llm: LLM model for paper-qa (e.g., 'gpt-4o', 'gpt-5.2'). If None, uses paper-qa default.
-        summary_llm: Summary LLM model. If None, uses paper-qa default.
-    """
-    import tempfile
-    # CRITICAL: Create temp directory and set PQA_HOME BEFORE importing paperqa
-    # Paper-qa reads PQA_HOME at import time and caches it, so we must set it first
-    temp_dir = tempfile.mkdtemp(prefix='paperqa_')
-    temp_index_dir = os.path.join(temp_dir, 'index')
-    os.makedirs(temp_index_dir, exist_ok=True)
-
-    # Save original environment to restore later
-    original_cwd = os.getcwd()
-    original_pqa_home = os.environ.get('PQA_HOME')
-
-    # Set PQA_HOME BEFORE importing paperqa
-    os.environ['PQA_HOME'] = temp_dir
-    logger.debug(f"Set PQA_HOME to: {temp_dir} (before paperqa import)")
-
-    # Change to temp directory BEFORE importing paperqa
-    os.chdir(temp_dir)
-    logger.debug(f"Changed working directory to: {temp_dir} (before paperqa import)")
-
-    try:
-        from paperqa import Settings, ask  # type: ignore
-    except Exception as e:
-        logger.error("paperqa not installed or import failed: %s", e)
-        # Restore environment before returning
-        _restore_environment(original_cwd, original_pqa_home, temp_dir)
-        return None
-
-    # Configure litellm for GPT-5 compatibility
-    # GPT-5 models only support temperature=1, so we need to handle unsupported params
-    try:
-        import litellm
-        # Check if using GPT-5 model
-        is_gpt5 = (llm and 'gpt-5' in llm.lower()) or (summary_llm and 'gpt-5' in summary_llm.lower())
-        if is_gpt5:
-            # Enable dropping unsupported params for GPT-5 models
-            litellm.drop_params = True
-            logger.info("Enabled litellm.drop_params for GPT-5 model compatibility")
-    except Exception as e:
-        logger.debug("Could not configure litellm: %s", e)
-
-    def _extract_answer(ans_obj: Any) -> Optional[str]:
-        """Normalize paper-qa answer objects down to a clean string, if present."""
-        # Direct string case
-        if isinstance(ans_obj, str) and ans_obj.strip():
-            return ans_obj.strip()
-
-        # PRIORITY: Try to get raw answer before formatted versions (for GPT-5.2 compatibility)
-        # Paper-qa's get_summary() adds headers, so try raw_answer/answer first
-        for attr in ("raw_answer", "answer"):
-            try:
-                val = getattr(ans_obj, attr, None)
-                if callable(val):
-                    try:
-                        val = val()
-                    except Exception:
-                        continue
-                if isinstance(val, str) and val.strip():
-                    # Check if this looks like raw JSON (without headers)
-                    if val.strip().startswith('{') or re.search(r'\{["\s]*summary["\s]*:', val):
-                        logger.debug(f"Extracted RAW answer from attribute '{attr}' (bypassing formatting)")
-                        return val.strip()
-            except Exception as e:
-                logger.debug(f"Failed to access attribute '{attr}': {e}")
-                continue
-
-        # Handle Pydantic models (AnswerResponse, PQASession, etc.)
-        # Try Pydantic-specific methods first
-        if hasattr(ans_obj, 'model_dump'):
-            try:
-                data = ans_obj.model_dump()
-                logger.debug(f"Pydantic model_dump() returned keys: {list(data.keys())}")
-
-                # AnswerResponse typically has a 'session' field containing the actual session data
-                if 'session' in data and isinstance(data['session'], dict):
-                    session = data['session']
-                    logger.debug(f"Found session dict with keys: {list(session.keys())[:10]}")
-                    # Look for answer in session
-                    for key in ('answer', 'formatted_answer', 'response', 'content', 'text', 'raw_answer'):
-                        if key in session and isinstance(session[key], str) and session[key].strip():
-                            logger.debug(f"Extracted answer from session['{key}']")
-                            return session[key].strip()
-
-                # Try common answer field names in the dumped dict
-                for key in ('answer', 'formatted_answer', 'response', 'content', 'text'):
-                    if key in data and isinstance(data[key], str) and data[key].strip():
-                        logger.debug(f"Extracted answer from Pydantic model via model_dump()['{key}']")
-                        return data[key].strip()
-
-                # If no direct hit, look for any field containing JSON-like content
-                for key, value in data.items():
-                    if isinstance(value, str) and value.strip():
-                        # Check if this looks like our expected JSON format
-                        if re.search(r'\{["\s]*summary["\s]*:', value):
-                            logger.debug(f"Found JSON-like content in model_dump()['{key}']")
-                            return value.strip()
-                    # Also check nested dicts (like session)
-                    elif isinstance(value, dict):
-                        for subkey, subvalue in value.items():
-                            if isinstance(subvalue, str) and subvalue.strip():
-                                if re.search(r'\{["\s]*summary["\s]*:', subvalue):
-                                    logger.debug(f"Found JSON-like content in model_dump()['{key}']['{subkey}']")
-                                    return subvalue.strip()
-            except Exception as e:
-                logger.warning(f"Failed to extract from model_dump(): {e}")
-
-        # Try get_summary() method (common in paper-qa AnswerResponse)
-        # Note: get_summary() may be async (coroutine) in newer paper-qa versions
-        if hasattr(ans_obj, 'get_summary') and callable(getattr(ans_obj, 'get_summary', None)):
-            try:
-                summary = ans_obj.get_summary()
-                # Check if it's a coroutine (async method) - we can't await it in sync context
-                if inspect.iscoroutine(summary):
-                    logger.debug("get_summary() returned coroutine (async method), skipping")
-                elif isinstance(summary, str) and summary.strip():
-                    logger.debug("Extracted answer from get_summary() method")
-                    # Check if it's a formatted string with "Answer: " prefix or similar
-                    # Try to extract just the JSON part if present
-                    json_match = re.search(r'\{["\s]*summary["\s]*:', summary)
-                    if json_match:
-                        # Found JSON starting with "summary" field
-                        # Try to extract the complete JSON object
-                        json_start = json_match.start()
-                        logger.debug("Extracted JSON from formatted summary")
-                        return summary[json_start:].strip()
-                    return summary.strip()
-            except Exception as e:
-                logger.debug(f"Failed to call get_summary(): {e}")
-
-        # Try extracting from common attributes directly
-        for attr in ("answer", "formatted_answer", "content", "text", "response", "raw_answer"):
-            try:
-                val = getattr(ans_obj, attr, None)
-                # Handle callable attributes (properties)
-                if callable(val):
-                    try:
-                        val = val()
-                    except Exception:
-                        continue
-                if isinstance(val, str) and val.strip():
-                    logger.debug(f"Extracted answer from attribute '{attr}'")
-                    return val.strip()
-            except Exception as e:
-                logger.debug(f"Failed to access attribute '{attr}': {e}")
-                continue
-
-        # If we have an object that looks like a session/response, log its type and available attributes
-        obj_type = type(ans_obj).__name__
-        attrs = [a for a in dir(ans_obj) if not a.startswith('_')]
-        logger.warning(
-            f"Could not extract clean answer from {obj_type}. "
-            f"Available attributes: {attrs[:30]}"
-        )
-
-        # Debug: try to show sample content from each string attribute
-        logger.debug("Sample content from string attributes:")
-        for attr in attrs[:15]:
-            try:
-                val = getattr(ans_obj, attr, None)
-                if callable(val):
-                    continue
-                if isinstance(val, str) and val:
-                    logger.debug(f"  {attr}: {val[:100]}...")
-            except Exception:
-                pass
-
-        # Last resort: convert to string but warn about it
-        try:
-            s = str(ans_obj).strip()
-            if s and len(s) < 10000:  # Only if not too large
-                # Check if it looks like a repr() dump (contains object address)
-                if ' at 0x' in s or 'object at ' in s:
-                    logger.error(f"Falling back to str() representation of {obj_type}, this may not be clean")
-                return s if s else None
-        except Exception as e:
-            logger.error(f"Failed to convert answer object to string: {e}")
-            return None
-
-    # Copy PDF to isolated temporary directory (temp_dir was created above, before import)
-    temp_pdf_path = os.path.join(temp_dir, os.path.basename(pdf_path))
-
-    try:
-        shutil.copy2(pdf_path, temp_pdf_path)
-        logger.debug(f"Processing PDF in isolated directory: {temp_dir}")
-
-        # Build Settings with configured LLM models and BOTH isolated directories
-        # paper_directory: where to look for papers
-        # index_directory: where to store the Tantivy search index
-        settings_kwargs = _build_paperqa_settings_kwargs(
-            Settings,
-            paper_dir=temp_dir,
-            index_dir=temp_index_dir,
-            llm=llm,
-            summary_llm=summary_llm,
-        )
-
-        if llm or summary_llm:
-            logger.info("Using paper-qa with llm=%s, summary_llm=%s", llm or 'default', summary_llm or 'default')
-
-        async def _run_async() -> Any:
-            """Run the paper-qa pipeline using the ask() API."""
-            settings = Settings(**settings_kwargs)
-            return await ask(question, settings=settings)
-
-        try:
-            try:
-                ans_obj = asyncio.run(_run_async())
-                logger.debug(f"paper-qa returned type: {type(ans_obj).__name__}")
-                return _extract_answer(ans_obj)
-            except RuntimeError as exc:
-                if "event loop" not in str(exc).lower():
-                    raise
-
-            outcome: Dict[str, Any] = {}
-            error: Dict[str, BaseException] = {}
-
-            def _worker() -> None:
-                """Bridge paper-qa async calls into a background event loop."""
-                new_loop = asyncio.new_event_loop()
-                try:
-                    asyncio.set_event_loop(new_loop)
-                    outcome['value'] = new_loop.run_until_complete(_run_async())
-                except BaseException as exc:  # capture to re-raise outside thread
-                    error['error'] = exc
-                finally:
-                    asyncio.set_event_loop(None)
-                    new_loop.close()
-
-            thread = threading.Thread(target=_worker, daemon=True)
-            thread.start()
-            thread.join()
-
-            if 'error' in error:
-                raise error['error']
-
-            ans_obj = outcome.get('value')
-            logger.debug(f"paper-qa returned type (via thread): {type(ans_obj).__name__}")
-            return _extract_answer(ans_obj)
-        except Exception as e:
-            logger.error("paperqa query failed for %s: %s", pdf_path, e)
-            return None
-    finally:
-        _restore_environment(original_cwd, original_pqa_home, temp_dir)
-
-
 def _normalize_summary_json(raw: str) -> Optional[str]:
     """Strip code fences, parse JSON, and ensure required keys exist.
 
@@ -1324,9 +1069,9 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
                 fixed = re.sub(pattern, escape_newlines_in_strings, txt)
                 obj = json.loads(fixed)
                 return obj if isinstance(obj, dict) else None
-            except Exception:
+            except (json.JSONDecodeError, ValueError, TypeError):
                 return None
-        except Exception:
+        except (json.JSONDecodeError, ValueError, TypeError):
             return None
 
     def _coerce_str(v) -> str:
@@ -1379,7 +1124,7 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
                             summary_val = summary_val.replace('\\n', '\n').replace('\\t', '\t')
                             methods_val = methods_val.replace('\\n', '\n').replace('\\t', '\t')
                             data = {'summary': summary_val, 'methods': methods_val}
-                except Exception:
+                except (AttributeError, IndexError, re.error):
                     pass
 
     if data is None:
@@ -1466,7 +1211,7 @@ def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: 
                     entry_id,
                     updated_current,
                 )
-    except Exception as e:
+    except sqlite3.Error as e:
         logger.debug("Failed to write to papers.db for %s: %s", entry_id, e)
     # History DB
     try:
@@ -1475,7 +1220,7 @@ def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: 
             cur.execute("UPDATE matched_entries SET paper_qa_summary = ? WHERE entry_id = ?", (json_summary, entry_id))
             updated_history = cur.rowcount
             logger.info("paper-qa DB write (history.db): entry_id=%s updated_rows=%d", entry_id, updated_history)
-    except Exception as e:
+    except sqlite3.Error as e:
         logger.debug("Failed to write to matched_entries_history.db for %s: %s", entry_id, e)
 
 
@@ -1588,7 +1333,7 @@ def run(
                 try:
                     if os.path.exists(dest_path):
                         os.remove(dest_path)
-                except Exception:
+                except OSError:
                     pass
                 logger.warning("Failed to download PDF for arXiv:%s", arxiv_id)
             time.sleep(min_interval_default)
@@ -1657,7 +1402,7 @@ def run(
                 try:
                     if os.path.exists(dest_path):
                         os.remove(dest_path)
-                except Exception:
+                except OSError:
                     pass
                 logger.warning("Failed to download PDF for arXiv:%s (entry_id=%s)", arxiv_id, row.get('entry_id'))
             time.sleep(min_interval_default)
@@ -1736,7 +1481,7 @@ def run(
                 try:
                     if os.path.exists(dest_path):
                         os.remove(dest_path)
-                except Exception:
+                except OSError:
                     pass
                 logger.warning("Failed to download PDF for arXiv:%s", arxiv_id)
 

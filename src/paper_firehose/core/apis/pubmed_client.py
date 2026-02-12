@@ -61,7 +61,7 @@ def get_pubmed_abstract_by_doi(
             for at in root.findall('.//AbstractText'):
                 texts.append(''.join(at.itertext()).strip())
             return strip_jats(' '.join(t for t in texts if t)) if texts else None
-        except Exception:
+        except (requests.RequestException, ET.ParseError, KeyError):
             return None
 
     # Use new RetryableHTTPClient for better retry logic
@@ -94,5 +94,5 @@ def get_pubmed_abstract_by_doi(
         for at in root.findall('.//AbstractText'):
             texts.append(''.join(at.itertext()).strip())
         return strip_jats(' '.join(t for t in texts if t)) if texts else None
-    except Exception:
+    except (requests.RequestException, ET.ParseError, KeyError):
         return None

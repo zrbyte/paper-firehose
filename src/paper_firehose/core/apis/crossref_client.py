@@ -7,6 +7,7 @@ including abstracts for academic publications.
 
 from __future__ import annotations
 
+import json
 import time
 from urllib.parse import quote
 from typing import Optional
@@ -57,7 +58,7 @@ def get_crossref_abstract(
                     if ra:
                         try:
                             wait = float(ra)
-                        except Exception:
+                        except (ValueError, TypeError):
                             wait = 1.0
                     else:
                         wait = min(8.0, 2.0 ** attempt)
@@ -70,7 +71,7 @@ def get_crossref_abstract(
                 if abstract:
                     return strip_jats(abstract) or None
                 return None
-            except Exception:
+            except (requests.RequestException, json.JSONDecodeError, KeyError):
                 time.sleep(min(8.0, 2.0 ** attempt))
                 continue
         return None
@@ -93,7 +94,7 @@ def get_crossref_abstract(
         if abstract:
             return strip_jats(abstract) or None
         return None
-    except Exception:
+    except (requests.RequestException, json.JSONDecodeError, KeyError):
         return None
 
 
@@ -139,7 +140,7 @@ def search_crossref_abstract_by_title(
                     if ra:
                         try:
                             wait = float(ra)
-                        except Exception:
+                        except (ValueError, TypeError):
                             wait = 1.0
                     else:
                         wait = min(8.0, 2.0 ** attempt)
@@ -153,7 +154,7 @@ def search_crossref_abstract_by_title(
                     if abstract:
                         return strip_jats(abstract) or None
                 return None
-            except Exception:
+            except (requests.RequestException, json.JSONDecodeError, KeyError):
                 time.sleep(min(8.0, 2.0 ** attempt))
                 continue
         return None
@@ -179,5 +180,5 @@ def search_crossref_abstract_by_title(
             if abstract:
                 return strip_jats(abstract) or None
         return None
-    except Exception:
+    except (requests.RequestException, json.JSONDecodeError, KeyError):
         return None

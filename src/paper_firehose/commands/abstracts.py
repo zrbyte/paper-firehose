@@ -70,7 +70,7 @@ def run(
             rps_cfg = float(abs_defaults.get('rps')) if abs_defaults.get('rps') is not None else None
             if rps_cfg and rps_cfg > 0:
                 rps = rps_cfg
-        except Exception:
+        except (ValueError, TypeError):
             pass
     max_retries = int(abs_defaults.get('max_retries', 3))
 

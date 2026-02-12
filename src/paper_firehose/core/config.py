@@ -362,7 +362,7 @@ class ConfigManager:
             logger.info("Configuration validation passed")
             return True
             
-        except Exception as e:
+        except (yaml.YAMLError, KeyError, TypeError, ValueError, OSError) as e:
             logger.error(f"Configuration validation failed: {e}")
             return False
 

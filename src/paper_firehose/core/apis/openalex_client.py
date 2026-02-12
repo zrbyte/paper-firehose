@@ -7,6 +7,7 @@ abstracts, sometimes in an inverted-index format that needs reconstruction.
 
 from __future__ import annotations
 
+import json
 from urllib.parse import quote
 from typing import Optional, Dict, Any
 
@@ -79,7 +80,7 @@ def get_openalex_abstract(
             if ii:
                 return _reconstruct_openalex(ii)
             return None
-        except Exception:
+        except (requests.RequestException, json.JSONDecodeError, KeyError):
             return None
 
     # Use new RetryableHTTPClient for better retry logic
@@ -97,5 +98,5 @@ def get_openalex_abstract(
         if ii:
             return _reconstruct_openalex(ii)
         return None
-    except Exception:
+    except (requests.RequestException, json.JSONDecodeError, KeyError):
         return None

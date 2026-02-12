@@ -101,7 +101,7 @@ def ensure_local_model(model_spec: str) -> str:
                     return str(target_dir)
         except FileExistsError:
             pass
-        except Exception as e:
+        except OSError as e:
             logger.debug("Model seed copy failed for %s -> %s: %s", system_candidate, target_dir, e)
 
     # Attempt download (best-effort)
