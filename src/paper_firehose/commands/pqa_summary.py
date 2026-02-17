@@ -147,11 +147,25 @@ def _build_paperqa_settings_kwargs(
     if is_gpt5 and "temperature" in field_names:
         settings_kwargs["temperature"] = 1.0
 
-    # Disable vision API / media enrichment to avoid costly per-image LLM calls.
+    # Disable vision API / media enrichment.
+    # PDF figures are often extracted in formats (BMP/TIFF) that OpenAI rejects,
+    # causing floods of BadRequestError retries and chunk failures.
     if "parsing" in field_names:
-        settings_kwargs["parsing"] = {
-            "use_doc_details": False,
-        }
+        parsing_cfg: Dict[str, Any] = {"use_doc_details": False}
+        try:
+            parsing_field_info = fields.get("parsing") if fields else None
+            if parsing_field_info is not None:
+                ann = getattr(parsing_field_info, "annotation", None)
+                # Unwrap Optional[ParsingSettings] -> ParsingSettings
+                args = getattr(ann, "__args__", None)
+                if args:
+                    ann = next((a for a in args if a is not type(None)), ann)
+                sub_fields = getattr(ann, "model_fields", None) or getattr(ann, "__fields__", None)
+                if sub_fields and "parse_pdf_tables_and_figures" in sub_fields:
+                    parsing_cfg["parse_pdf_tables_and_figures"] = False
+        except Exception:
+            pass
+        settings_kwargs["parsing"] = parsing_cfg
 
     return settings_kwargs
 

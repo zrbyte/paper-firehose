@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper_firehose"
-version = "0.3.1"
+version = "0.3.2"
 description = "Filter, rank, and summarize research-paper RSS feeds."
 readme = "README.md"
 license = { file = "LICENSE" }
