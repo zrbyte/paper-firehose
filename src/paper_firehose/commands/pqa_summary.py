@@ -150,6 +150,9 @@ def _build_paperqa_settings_kwargs(
     # Disable vision API / media enrichment.
     # PDF figures are often extracted in formats (BMP/TIFF) that OpenAI rejects,
     # causing floods of BadRequestError retries and chunk failures.
+    # paper-qa has changed this API across versions:
+    #   - New (>=2026.x): ParsingSettings.multimodal (default=ON_WITH_ENRICHMENT=1) — set to False
+    #   - Older (5.x with parse_pdf_tables_and_figures field): set to False
     if "parsing" in field_names:
         parsing_cfg: Dict[str, Any] = {"use_doc_details": False}
         try:
@@ -158,14 +161,22 @@ def _build_paperqa_settings_kwargs(
                 getattr(_ParsingSettings, "model_fields", None)
                 or getattr(_ParsingSettings, "__fields__", None)
             )
-            if ps_fields and "parse_pdf_tables_and_figures" in ps_fields:
-                parsing_cfg["parse_pdf_tables_and_figures"] = False
-                logger.debug("Disabled parse_pdf_tables_and_figures in ParsingSettings")
+            if ps_fields:
+                if "multimodal" in ps_fields:
+                    # paper-qa >=2026.x: multimodal controls image/table extraction
+                    parsing_cfg["multimodal"] = False
+                    logger.debug("Disabled multimodal enrichment in ParsingSettings")
+                elif "parse_pdf_tables_and_figures" in ps_fields:
+                    # Older paper-qa with explicit figure extraction field
+                    parsing_cfg["parse_pdf_tables_and_figures"] = False
+                    logger.debug("Disabled parse_pdf_tables_and_figures in ParsingSettings")
+                else:
+                    logger.warning(
+                        "Neither 'multimodal' nor 'parse_pdf_tables_and_figures' found "
+                        "in ParsingSettings; figure extraction may cause image format errors"
+                    )
             else:
-                logger.warning(
-                    "parse_pdf_tables_and_figures not found in ParsingSettings "
-                    "(paper-qa version may differ); figure extraction may cause image format errors"
-                )
+                logger.warning("Could not read ParsingSettings fields; figure extraction may cause errors")
         except Exception as exc:
             logger.warning("Could not check ParsingSettings for figure extraction field: %s", exc)
         settings_kwargs["parsing"] = parsing_cfg
