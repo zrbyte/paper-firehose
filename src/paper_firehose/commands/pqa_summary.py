@@ -153,18 +153,21 @@ def _build_paperqa_settings_kwargs(
     if "parsing" in field_names:
         parsing_cfg: Dict[str, Any] = {"use_doc_details": False}
         try:
-            parsing_field_info = fields.get("parsing") if fields else None
-            if parsing_field_info is not None:
-                ann = getattr(parsing_field_info, "annotation", None)
-                # Unwrap Optional[ParsingSettings] -> ParsingSettings
-                args = getattr(ann, "__args__", None)
-                if args:
-                    ann = next((a for a in args if a is not type(None)), ann)
-                sub_fields = getattr(ann, "model_fields", None) or getattr(ann, "__fields__", None)
-                if sub_fields and "parse_pdf_tables_and_figures" in sub_fields:
-                    parsing_cfg["parse_pdf_tables_and_figures"] = False
-        except Exception:
-            pass
+            from paperqa.settings import ParsingSettings as _ParsingSettings  # type: ignore[import]
+            ps_fields = (
+                getattr(_ParsingSettings, "model_fields", None)
+                or getattr(_ParsingSettings, "__fields__", None)
+            )
+            if ps_fields and "parse_pdf_tables_and_figures" in ps_fields:
+                parsing_cfg["parse_pdf_tables_and_figures"] = False
+                logger.debug("Disabled parse_pdf_tables_and_figures in ParsingSettings")
+            else:
+                logger.warning(
+                    "parse_pdf_tables_and_figures not found in ParsingSettings "
+                    "(paper-qa version may differ); figure extraction may cause image format errors"
+                )
+        except Exception as exc:
+            logger.warning("Could not check ParsingSettings for figure extraction field: %s", exc)
         settings_kwargs["parsing"] = parsing_cfg
 
     return settings_kwargs
