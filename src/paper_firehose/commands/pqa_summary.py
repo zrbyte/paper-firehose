@@ -75,7 +75,6 @@ import asyncio
 import threading
 import inspect
 import warnings
-import pathlib
 from typing import Dict, Any, List, Optional, Tuple
 
 import requests
@@ -125,46 +124,33 @@ def _get_topic_paperqa_config(topic_cfg: Dict[str, Any], topic_name: str) -> Dic
 def _build_paperqa_settings_kwargs(
     settings_cls: type,
     *,
-    paper_dir: str,
-    index_dir: str,
     llm: Optional[str],
     summary_llm: Optional[str],
 ) -> Dict[str, Any]:
-    """Build Settings kwargs compatible across paper-qa versions."""
+    """Build Settings kwargs for Docs.aquery() — no agent, no file paths needed."""
     fields = getattr(settings_cls, "model_fields", None)
     if fields is None:
         fields = getattr(settings_cls, "__fields__", None)
     field_names = set(fields.keys()) if fields else set()
 
     settings_kwargs: Dict[str, Any] = {}
-    paper_path = pathlib.Path(paper_dir)
-    index_path = pathlib.Path(index_dir)
-
-    if "agent" in field_names:
-        settings_kwargs["agent"] = {
-            "index": {
-                "paper_directory": paper_path,
-                "index_directory": index_path,
-            }
-        }
-
-    if "paper_directory" in field_names:
-        settings_kwargs["paper_directory"] = paper_path
-    if "index_directory" in field_names:
-        settings_kwargs["index_directory"] = index_path
 
     if llm:
         settings_kwargs["llm"] = llm
     if summary_llm:
         settings_kwargs["summary_llm"] = summary_llm
 
-    # DISABLE VISION API / MEDIA ENRICHMENT to reduce costs
-    # This prevents paper-qa from sending images to gpt-4o vision API
-    # Media enrichment adds one LLM call per image/table in the PDF,
-    # which can cost ~$10-15 per paper with vision models.
+    # GPT-5 models only support temperature=1; paperqa defaults to 0.0 which
+    # causes a 400 BadRequestError. Override at Settings level.
+    is_gpt5 = (llm and 'gpt-5' in llm.lower()) or \
+              (summary_llm and 'gpt-5' in summary_llm.lower())
+    if is_gpt5 and "temperature" in field_names:
+        settings_kwargs["temperature"] = 1.0
+
+    # Disable vision API / media enrichment to avoid costly per-image LLM calls.
     if "parsing" in field_names:
         settings_kwargs["parsing"] = {
-            "use_doc_details": False,  # Disable detailed parsing with vision
+            "use_doc_details": False,
         }
 
     return settings_kwargs
@@ -575,7 +561,7 @@ class PaperQASession:
 
         # Paper-qa references (populated after import in __enter__)
         self._settings_class: Optional[type] = None
-        self._ask_func: Optional[Any] = None
+        self._docs_class: Optional[type] = None
         self._initialized = False
 
     def __enter__(self) -> 'PaperQASession':
@@ -647,9 +633,9 @@ class PaperQASession:
         # Since we set them to our temp directory above, paperqa will
         # use our temp directory for everything.
         try:
-            from paperqa import Settings, ask
+            from paperqa import Settings, Docs
             self._settings_class = Settings
-            self._ask_func = ask
+            self._docs_class = Docs
             self._initialized = True
             logger.debug("PaperQASession: Imported paperqa successfully")
         except Exception as e:
@@ -794,89 +780,41 @@ class PaperQASession:
             logger.error("PaperQASession not initialized")
             return None
 
-        # ============================================================
-        # STEP 1: Create per-PDF paper/index directories
-        # ============================================================
-        # Use per-PDF dirs to avoid stale index entries or cross-contamination.
-        import tempfile
-
-        paper_dir = tempfile.mkdtemp(prefix='paper_', dir=self.temp_dir)
-        index_dir = tempfile.mkdtemp(prefix='index_', dir=self.temp_dir)
-        pdf_name = os.path.basename(pdf_path)
-        temp_pdf_path = os.path.join(paper_dir, pdf_name)
-
-        try:
-            shutil.copy2(pdf_path, temp_pdf_path)
-            logger.debug(f"Copied PDF to session: {temp_pdf_path}")
-        except Exception as e:
-            logger.error(f"Failed to copy PDF {pdf_path}: {e}")
-            try:
-                if os.path.exists(paper_dir):
-                    shutil.rmtree(paper_dir)
-                if os.path.exists(index_dir):
-                    shutil.rmtree(index_dir)
-            except Exception:
-                pass
-            return None
+        if self.llm or self.summary_llm:
+            logger.info("Using paper-qa (Docs API) with llm=%s, summary_llm=%s",
+                        self.llm or 'default', self.summary_llm or 'default')
 
         try:
             # ============================================================
-            # STEP 2: Build paper-qa Settings
+            # Build Settings (no agent, no file-path settings needed)
             # ============================================================
-            # We explicitly set paper_directory and index_directory to
-            # ensure paper-qa uses our per-PDF directories, not defaults.
             settings_kwargs = _build_paperqa_settings_kwargs(
                 self._settings_class,
-                paper_dir=paper_dir,
-                index_dir=index_dir,
                 llm=self.llm,
                 summary_llm=self.summary_llm,
             )
-
-            if self.llm or self.summary_llm:
-                logger.info("Using paper-qa with llm=%s, summary_llm=%s",
-                           self.llm or 'default', self.summary_llm or 'default')
+            settings = self._settings_class(**settings_kwargs)
 
             # ============================================================
-            # STEP 3: Run paper-qa ask() asynchronously
+            # Run Docs.aadd + Docs.aquery asynchronously
+            # Docs manages its own in-memory vector store; each call gets
+            # a fresh Docs instance so there is no cross-PDF contamination.
             # ============================================================
-            # Paper-qa's ask() is async, so we need to run it in an
-            # event loop. We handle two cases:
-            # - Normal: use asyncio.run() to create a new loop
-            # - Jupyter/nested: spawn a thread with its own loop
             async def _run_async() -> Any:
-                settings = self._settings_class(**settings_kwargs)
-                agent_index = getattr(getattr(settings, "agent", None), "index", None)
-                paper_dir_dbg = (
-                    agent_index.paper_directory
-                    if agent_index is not None
-                    else getattr(settings, "paper_directory", None)
-                )
-                index_dir_dbg = (
-                    agent_index.index_directory
-                    if agent_index is not None
-                    else getattr(settings, "index_directory", None)
-                )
-                logger.debug(
-                    "PaperQASession settings: paper_dir=%s index_dir=%s",
-                    paper_dir_dbg,
-                    index_dir_dbg,
-                )
-                return await self._ask_func(question, settings=settings)
+                docs = self._docs_class()
+                await docs.aadd(pdf_path, settings=settings)
+                return await docs.aquery(question, settings=settings)
 
             try:
-                # Primary path: run in current thread with new event loop
                 ans_obj = asyncio.run(_run_async())
             except RuntimeError as exc:
                 if "event loop" not in str(exc).lower():
                     raise
-                # Fallback: event loop already running (Jupyter, etc.)
-                # Spawn a thread with its own event loop
+                # Fallback for Jupyter / nested event loops
                 outcome: Dict[str, Any] = {}
                 error: Dict[str, BaseException] = {}
 
                 def _worker() -> None:
-                    """Background thread worker to run async code."""
                     new_loop = asyncio.new_event_loop()
                     try:
                         asyncio.set_event_loop(new_loop)
@@ -900,26 +838,19 @@ class PaperQASession:
                 ans_obj = outcome.get('value')
 
             # ============================================================
-            # STEP 4: Extract answer string from response object
+            # Extract answer — PQASession.answer is the clean answer string
             # ============================================================
-            logger.debug(f"paper-qa returned type: {type(ans_obj).__name__}")
+            if ans_obj is None:
+                return None
+            answer = getattr(ans_obj, 'answer', None) or getattr(ans_obj, 'raw_answer', None)
+            if isinstance(answer, str) and answer.strip():
+                return answer.strip()
+            # Fallback to full extraction for unexpected response types
             return self._extract_answer(ans_obj)
 
         except Exception as e:
             logger.error(f"paperqa query failed for {pdf_path}: {e}")
             return None
-        finally:
-            # ============================================================
-            # STEP 5: Clean up per-PDF directories
-            # ============================================================
-            try:
-                if os.path.exists(paper_dir):
-                    shutil.rmtree(paper_dir)
-                if os.path.exists(index_dir):
-                    shutil.rmtree(index_dir)
-                logger.debug("Cleaned up per-PDF paper/index dirs")
-            except Exception as e:
-                logger.warning(f"Failed to clean up per-PDF dirs: {e}")
 
     @staticmethod
     def _extract_answer(ans_obj: Any) -> Optional[str]:
@@ -1537,9 +1468,11 @@ def run(
                 question = (paperqa_cfg.get('prompt') or '').strip()
                 if not question:
                     question = (
-                        "You are an expert technical reader. Summarize this paper for experts. "
-                        "Return ONLY a JSON object with keys: 'summary', 'methods'. "
-                        "Keep each value concise and information dense."
+                        "What are the main scientific findings, methods, and experimental details "
+                        "of the indexed paper? Return ONLY a JSON object: "
+                        "{\"summary\": \"...\", \"methods\": \"...\"}. "
+                        "summary: up to 8 information-dense sentences on findings and contributions. "
+                        "methods: experimental setup, parameters, analysis methods, calculation details, tool names."
                     )
 
                 # Apply {ranking_query} placeholder substitution
@@ -1553,6 +1486,14 @@ def run(
 
                 if not raw_ans:
                     logger.warning("No answer returned from paper-qa for arXiv:%s (entry_id=%s)", aid, eid or "-")
+                    continue
+
+                _raw_lower = raw_ans.strip().lower()
+                if 'i cannot answer' in _raw_lower or _raw_lower == 'no answer generated.':
+                    logger.warning(
+                        "paper-qa returned unusable answer (%r) for arXiv:%s (entry_id=%s); skipping DB write",
+                        raw_ans[:50], aid, eid or "-",
+                    )
                     continue
 
                 # Output the raw paper-qa response for inspection
