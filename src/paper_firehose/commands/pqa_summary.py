@@ -181,6 +181,16 @@ def _build_paperqa_settings_kwargs(
             logger.warning("Could not check ParsingSettings for figure extraction field: %s", exc)
         settings_kwargs["parsing"] = parsing_cfg
 
+    # Disable JSON-format chunk summaries.
+    # With use_json=True (default), paper-qa asks summary_llm to return JSON with
+    # "summary" and "relevance_score" for each chunk. Models that omit relevance_score
+    # (e.g. gpt-4o-mini) trigger LLMBadContextJSONError on every chunk.
+    # use_json=False switches to plain-text summaries where the score is simply an
+    # integer on its own line — simpler and universally supported.
+    if "prompts" in field_names:
+        settings_kwargs["prompts"] = {"use_json": False}
+        logger.debug("Disabled JSON chunk summaries (use_json=False) to avoid score extraction errors")
+
     return settings_kwargs
 
 
