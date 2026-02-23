@@ -73,7 +73,6 @@ import logging
 import sqlite3
 import asyncio
 import threading
-import inspect
 import warnings
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -894,83 +893,27 @@ class PaperQASession:
     def _extract_answer(ans_obj: Any) -> Optional[str]:
         """Extract a clean answer string from paper-qa's response object.
 
-        Paper-qa returns various object types depending on version and
-        configuration. This method tries multiple extraction strategies
-        to get a usable string answer:
-
-        1. Direct string: return as-is
-        2. Known attributes: raw_answer, answer, formatted_answer, etc.
-        3. Pydantic model: use model_dump() and extract from dict
-        4. get_summary() method: call if available
-        5. str() conversion: last resort fallback
-
-        Parameters
-        ----------
-        ans_obj : Any
-            The response object from paper-qa's ask() function.
-
-        Returns
-        -------
-        str or None
-            Extracted answer string, or None if extraction failed.
-
-        Note
-        ----
-        We prioritize 'raw_answer' over 'answer' because 'answer' may
-        contain formatted text with citations, while 'raw_answer' is
-        more likely to be the clean JSON we requested.
+        Called only when the primary `answer`/`raw_answer` attributes did not
+        yield a usable string. Tries Pydantic model_dump(), a broad attribute
+        scan, then str() as a last resort.
         """
-        # Direct string case
-        if isinstance(ans_obj, str) and ans_obj.strip():
-            return ans_obj.strip()
-
-        # PRIORITY: Try to get raw answer before formatted versions
-        for attr in ("raw_answer", "answer"):
-            try:
-                val = getattr(ans_obj, attr, None)
-                if callable(val):
-                    try:
-                        val = val()
-                    except Exception:
-                        continue
-                if isinstance(val, str) and val.strip():
-                    if val.strip().startswith('{') or re.search(r'\{["\s]*summary["\s]*:', val):
-                        logger.debug(f"Extracted RAW answer from attribute '{attr}'")
-                        return val.strip()
-            except Exception:
-                continue
-
-        # Handle Pydantic models
+        # Pydantic models: inspect nested session dict or top-level keys
         if hasattr(ans_obj, 'model_dump'):
             try:
                 data = ans_obj.model_dump()
                 if 'session' in data and isinstance(data['session'], dict):
                     session = data['session']
-                    for key in ('answer', 'formatted_answer', 'response', 'content', 'text', 'raw_answer'):
+                    for key in ('answer', 'raw_answer', 'formatted_answer', 'response', 'content', 'text'):
                         if key in session and isinstance(session[key], str) and session[key].strip():
                             return session[key].strip()
-                for key in ('answer', 'formatted_answer', 'response', 'content', 'text'):
+                for key in ('answer', 'raw_answer', 'formatted_answer', 'response', 'content', 'text'):
                     if key in data and isinstance(data[key], str) and data[key].strip():
                         return data[key].strip()
             except Exception:
                 pass
 
-        # Try get_summary() method
-        if hasattr(ans_obj, 'get_summary') and callable(getattr(ans_obj, 'get_summary', None)):
-            try:
-                summary = ans_obj.get_summary()
-                if inspect.iscoroutine(summary):
-                    pass  # Can't await in sync context
-                elif isinstance(summary, str) and summary.strip():
-                    json_match = re.search(r'\{["\s]*summary["\s]*:', summary)
-                    if json_match:
-                        return summary[json_match.start():].strip()
-                    return summary.strip()
-            except Exception:
-                pass
-
-        # Try common attributes
-        for attr in ("answer", "formatted_answer", "content", "text", "response"):
+        # Broad attribute scan for other object types
+        for attr in ("raw_answer", "answer", "formatted_answer", "content", "text", "response"):
             try:
                 val = getattr(ans_obj, attr, None)
                 if callable(val):
@@ -1020,26 +963,6 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
         try:
             obj = json.loads(txt)
             return obj if isinstance(obj, dict) else None
-        except json.JSONDecodeError:
-            # GPT-5.2 sometimes returns JSON with unescaped newlines in strings
-            # Try fixing by escaping newlines within quoted strings
-            try:
-                # This is a simple heuristic: escape literal \n characters
-                # but only if they appear to be inside JSON string values
-                import re
-                # Find all string values in JSON and escape their newlines
-                def escape_newlines_in_strings(match):
-                    s = match.group(0)
-                    # Escape newlines and tabs in the string value
-                    return s.replace('\n', '\\n').replace('\t', '\\t').replace('\r', '\\r')
-
-                # Match JSON string values: "..." (handling escaped quotes)
-                pattern = r'"(?:[^"\\]|\\.)*"'
-                fixed = re.sub(pattern, escape_newlines_in_strings, txt)
-                obj = json.loads(fixed)
-                return obj if isinstance(obj, dict) else None
-            except (json.JSONDecodeError, ValueError, TypeError):
-                return None
         except (json.JSONDecodeError, ValueError, TypeError):
             return None
 
@@ -1066,35 +989,7 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
         start = s.find('{')
         end = s.rfind('}')
         if start != -1 and end != -1 and end > start:
-            potential_json = s[start:end+1]
-            data = _parse_obj(potential_json)
-
-            # If parse failed, try unescaping quotes (handles `\"methods\":\"...\"` case)
-            if data is None and '\\\"' in potential_json:
-                try:
-                    # Fix escaped quotes inside the JSON
-                    unescaped = potential_json.replace('\\\"', '"')
-                    # But this might create invalid JSON with nested quotes
-                    # Try a more targeted fix: look for the pattern `"summary":"...\"methods\"..."`
-                    # and split it into proper top-level keys
-                    if '"summary":"' in unescaped and '","methods":"' not in unescaped and '"methods":"' in unescaped:
-                        # Pattern: {"summary":"... "methods":"..."} where methods is inside summary
-                        # Find where "methods" starts within the summary value
-                        import re
-                        # Use non-greedy match but handle the closing brace properly
-                        match = re.search(r'"summary"\s*:\s*"(.*?)\s*"\s*"methods"\s*:\s*"\s*"(.*?)"\s*}', unescaped, re.DOTALL)
-                        if not match:
-                            # Try alternative pattern without extra quotes
-                            match = re.search(r'"summary"\s*:\s*"(.*?)\\n\\n"methods"\s*:\s*"(.*?)"', unescaped, re.DOTALL)
-                        if match:
-                            summary_val = match.group(1).strip()
-                            methods_val = match.group(2).strip()
-                            # Clean up escape sequences
-                            summary_val = summary_val.replace('\\n', '\n').replace('\\t', '\t')
-                            methods_val = methods_val.replace('\\n', '\n').replace('\\t', '\t')
-                            data = {'summary': summary_val, 'methods': methods_val}
-                except (AttributeError, IndexError, re.error):
-                    pass
+            data = _parse_obj(s[start:end+1])
 
     if data is None:
         # Last resort: wrap everything as summary
@@ -1118,26 +1013,6 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
         summary_val = cleaned.strip()
 
     methods_val = _first_nonempty(('methods', 'method', 'approach', 'methodology', 'experimental_setup'))
-
-    # CRITICAL FIX: Check for double-encoded JSON
-    # If summary_val looks like a JSON object (starts with '{'), try parsing it
-    # This handles the case where paper-qa returns: {"summary": "{\"summary\":\"...\",\"methods\":\"...\"}"}
-    if summary_val.strip().startswith('{'):
-        try:
-            nested_data = json.loads(summary_val)
-            if isinstance(nested_data, dict):
-                # Extract the actual summary and methods from the nested structure
-                nested_summary = nested_data.get('summary', '')
-                nested_methods = nested_data.get('methods', '')
-                if nested_summary:
-                    logger.debug("Detected double-encoded JSON; extracting nested values")
-                    summary_val = nested_summary
-                    # Only override methods_val if we found it in nested data and current methods_val is empty
-                    if nested_methods and not methods_val.strip():
-                        methods_val = nested_methods
-        except (json.JSONDecodeError, ValueError):
-            # Not valid JSON, use as-is
-            pass
 
     out = {
         'summary': summary_val,
@@ -1256,6 +1131,7 @@ def run(
 
     downloaded_paths: List[str] = []
     summarize_targets: List[Tuple[Optional[str], str, str, Optional[str]]] = []  # (entry_id, arxiv_id, pdf_path, topic_ctx)
+    topic_cfg_cache: Dict[str, Dict[str, Any]] = {}  # topic name -> loaded topic config
     sess = requests.Session()
 
     total_candidates = 0
@@ -1391,10 +1267,11 @@ def run(
         if topic and t != topic:
             continue
 
-        # Load topic config and extract paperqa settings
+        # Load topic config and extract paperqa settings (cache for reuse in summarization)
         try:
             topic_cfg = cfg_mgr.load_topic_config(t)
             paperqa_cfg_topic = _get_topic_paperqa_config(topic_cfg, t)
+            topic_cfg_cache[t] = topic_cfg
         except ValueError as e:
             logger.error(str(e))
             continue  # Skip topics without paperqa config
@@ -1486,9 +1363,10 @@ def run(
             logger.warning("Skipping %d PDFs with no topic context", len(targets))
             continue
 
-        # Load topic config to get LLM settings
+        # Reuse topic config loaded during download phase; fall back to fresh load if missing
+        # (e.g. when targets come from --arxiv/--entry-ids with an explicit --topic)
         try:
-            topic_cfg = cfg_mgr.load_topic_config(topic_name)
+            topic_cfg = topic_cfg_cache.get(topic_name) or cfg_mgr.load_topic_config(topic_name)
             paperqa_cfg = _get_topic_paperqa_config(topic_cfg, topic_name)
         except Exception as e:
             logger.error("Failed to load paperqa config for '%s': %s. Skipping.", topic_name, e)
