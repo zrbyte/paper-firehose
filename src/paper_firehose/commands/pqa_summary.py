@@ -891,87 +891,65 @@ class PaperQASession:
 
 
 def _normalize_summary_json(raw: str) -> Optional[str]:
-    """Strip code fences, parse JSON, and ensure required keys exist.
+    """Strip code fences, parse JSON, and ensure ``summary`` and ``methods`` keys.
 
-    - Removes leading ```/```json and trailing ``` fences when present
-    - Ensures keys: summary, methods (accepts aliases such as method/approach)
-    - On parse failure, wraps cleaned text under 'summary' and sets 'methods' to ''
+    Processing steps:
+
+    1. Remove Markdown code fences (````` or `````json`).
+    2. Strip standalone paper-qa section headers that may precede the JSON.
+    3. Parse JSON directly, falling back to extracting the outermost ``{…}``.
+    4. If parsing fails, wrap the cleaned text as a plain-text ``summary``.
     """
     import json
 
-    def _strip_fences(s: str) -> str:
-        """Remove Markdown code fences from LLM output, preserving inner text."""
-        s2 = (s or '').strip()
-        if s2.startswith('```'):
-            # Drop first line (``` or ```json)
-            nl = s2.find('\n')
-            s2 = s2[nl + 1:] if nl != -1 else s2.lstrip('`')
-        s2 = s2.rstrip()
-        if s2.endswith('```'):
-            s2 = s2[:-3].rstrip()
-        return s2
+    if not raw or not raw.strip():
+        return None
 
-    def _parse_obj(txt: str) -> Optional[dict]:
-        """Parse a JSON object string, returning None on failure or non-dict values."""
+    # -- Strip Markdown code fences --
+    cleaned = raw.strip()
+    if cleaned.startswith('```'):
+        nl = cleaned.find('\n')
+        cleaned = cleaned[nl + 1:] if nl != -1 else cleaned.lstrip('`')
+    cleaned = cleaned.rstrip()
+    if cleaned.endswith('```'):
+        cleaned = cleaned[:-3].rstrip()
+
+    # -- Remove standalone paper-qa section headers --
+    cleaned = '\n'.join(
+        line for line in cleaned.split('\n')
+        if line.strip() not in ('Fulltext summary', 'Summary', 'Methods', 'Answer')
+    ).strip()
+
+    # -- Try to parse JSON --
+    def _try_parse(txt: str) -> Optional[dict]:
         try:
             obj = json.loads(txt)
             return obj if isinstance(obj, dict) else None
         except (json.JSONDecodeError, ValueError, TypeError):
             return None
 
-    def _coerce_str(v) -> str:
-        """Coerce values into strings while tolerating None."""
+    data = _try_parse(cleaned)
+    if data is None:
+        # Fallback: extract outermost {…} block
+        start, end = cleaned.find('{'), cleaned.rfind('}')
+        if start != -1 and end > start:
+            data = _try_parse(cleaned[start:end + 1])
+
+    if data is None:
+        return json.dumps({'summary': cleaned, 'methods': ''}, ensure_ascii=False)
+
+    def _str(v) -> str:
         if v is None:
             return ''
         return v if isinstance(v, str) else str(v)
 
-    # Strip paper-qa formatting headers (e.g., "Fulltext summary\nSummary\n")
-    cleaned = _strip_fences(raw)
-    # Remove common paper-qa headers
-    for header in ['Fulltext summary', 'Summary', 'Methods', 'Answer']:
-        lines = cleaned.split('\n')
-        cleaned = '\n'.join(line for line in lines if line.strip() != header)
-    cleaned = cleaned.strip()
+    summary_val = _str(data.get('summary')).strip()
+    if not summary_val:
+        summary_val = cleaned
 
-    # First try: parse as-is
-    data = _parse_obj(cleaned)
+    methods_val = _str(data.get('methods')).strip()
 
-    if data is None:
-        # Second try: extract JSON between outermost braces
-        s = cleaned
-        start = s.find('{')
-        end = s.rfind('}')
-        if start != -1 and end != -1 and end > start:
-            data = _parse_obj(s[start:end+1])
-
-    if data is None:
-        # Last resort: wrap everything as summary
-        out = {
-            'summary': cleaned.strip(),
-            'methods': '',
-        }
-        return json.dumps(out, ensure_ascii=False)
-
-    def _first_nonempty(keys: Tuple[str, ...]) -> str:
-        """Return the first non-empty string value from data for the provided keys."""
-        for key in keys:
-            if key in data:
-                val = _coerce_str(data.get(key))
-                if val.strip():
-                    return val
-        return ''
-
-    summary_val = _first_nonempty(('summary', 'overall_summary', 'answer', 'response', 'content'))
-    if not summary_val.strip():
-        summary_val = cleaned.strip()
-
-    methods_val = _first_nonempty(('methods', 'method', 'approach', 'methodology', 'experimental_setup'))
-
-    out = {
-        'summary': summary_val,
-        'methods': methods_val,
-    }
-    return json.dumps(out, ensure_ascii=False)
+    return json.dumps({'summary': summary_val, 'methods': methods_val}, ensure_ascii=False)
 
 
 def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: str, *, topic: Optional[str] = None) -> None:

@@ -97,6 +97,44 @@ def test_normalize_summary_json_wraps_plain_text():
     assert data["methods"] == ""
 
 
+def test_normalize_summary_json_none_and_empty():
+    assert pqa_summary._normalize_summary_json(None) is None
+    assert pqa_summary._normalize_summary_json("") is None
+    assert pqa_summary._normalize_summary_json("   ") is None
+
+
+def test_normalize_summary_json_extracts_braces():
+    """JSON embedded in surrounding text should be extracted."""
+    raw = 'Here is the result: {"summary": "Found X", "methods": "DFT"} end.'
+    data = json.loads(pqa_summary._normalize_summary_json(raw))
+    assert data["summary"] == "Found X"
+    assert data["methods"] == "DFT"
+
+
+def test_normalize_summary_json_strips_paperqa_headers():
+    """Standalone paper-qa section headers should be removed before parsing."""
+    raw = 'Summary\n{"summary": "Result", "methods": "XRD"}'
+    data = json.loads(pqa_summary._normalize_summary_json(raw))
+    assert data["summary"] == "Result"
+    assert data["methods"] == "XRD"
+
+
+def test_normalize_summary_json_missing_methods_key():
+    """If the LLM omits 'methods', it should default to empty string."""
+    raw = '{"summary": "Only summary here"}'
+    data = json.loads(pqa_summary._normalize_summary_json(raw))
+    assert data["summary"] == "Only summary here"
+    assert data["methods"] == ""
+
+
+def test_normalize_summary_json_empty_summary_falls_back():
+    """If 'summary' is empty, the cleaned text should be used instead."""
+    raw = '{"summary": "", "methods": "PBE+U"}'
+    data = json.loads(pqa_summary._normalize_summary_json(raw))
+    assert data["summary"]  # should not be empty
+    assert data["methods"] == "PBE+U"
+
+
 def test_normalize_arxiv_arg_accepts_variants():
     assert pqa_summary._normalize_arxiv_arg("https://arxiv.org/pdf/2401.00001.pdf") == "2401.00001"
     assert pqa_summary._normalize_arxiv_arg("2401.00002v2") == "2401.00002v2"
