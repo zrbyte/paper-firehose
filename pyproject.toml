@@ -51,6 +51,12 @@ docs = [
 [project.scripts]
 paper-firehose = "paper_firehose.cli:cli"
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:importlib._legacy",
+    "ignore:open_text is deprecated:DeprecationWarning",
+]
+
 [tool.setuptools]
 include-package-data = true
 

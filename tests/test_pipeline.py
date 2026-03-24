@@ -14,6 +14,8 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from paper_firehose.commands import abstracts as abstracts_cmd
+from paper_firehose.commands import email_list as email_cmd
+from paper_firehose.commands import export_recent as export_cmd
 from paper_firehose.commands import filter as filter_cmd
 from paper_firehose.commands import generate_html as html_cmd
 from paper_firehose.commands import pqa_summary as pqa_cmd
@@ -68,6 +70,13 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
           time_window_days: 365
           abstracts:
             mailto: "testing@example.com"
+        email:
+          from: "test@example.com"
+          to: "recipient@example.com"
+          smtp:
+            host: "smtp.example.com"
+            port: 465
+            username: "test@example.com"
         """
     ).strip() + "\n"
 
@@ -96,6 +105,8 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
         output:
           filename: "test_topic_filtered.html"
           filename_ranked: "test_topic_ranked.html"
+          filename_summary: "test_topic_summary.html"
+          archive: true
         """
     ).strip() + "\n"
 
@@ -232,5 +243,39 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
     # Ranked output should include the assigned score badge from DummyRanker
     assert "Score 0.90" in ranked_html
 
+    # PQA summary HTML should include the paper-qa summary content
+    summary_path = html_dir / "test_topic_summary.html"
+    assert summary_path.exists(), "PQA summary HTML was not generated"
+    summary_html = summary_path.read_text(encoding="utf-8")
+    assert "Graphene summary for experts" in summary_html
+    assert "Graphene methods" in summary_html
+
     # Ensure the environment override directed outputs into the temporary directory
     assert filtered_path.is_file() and str(filtered_path).startswith(str(data_dir))
+
+    # History DB should contain the matched entry
+    history_path = data_dir / "matched_entries_history.db"
+    assert history_path.exists()
+    with sqlite3.connect(history_path) as conn:
+        history_rows = conn.execute("SELECT title FROM matched_entries").fetchall()
+    history_titles = {r[0] for r in history_rows}
+    assert "Graphene breakthroughs in materials science" in history_titles
+
+    # Email dry-run should produce a preview HTML file
+    email_cmd.run(config_path_str, dry_run=True)
+
+    # Find the email preview file
+    email_previews = list(data_dir.glob("email_preview_*.html"))
+    assert email_previews, "Email dry-run did not produce a preview file"
+    email_html = email_previews[0].read_text(encoding="utf-8")
+    assert "Graphene breakthroughs" in email_html
+    assert "Score 0.90" in email_html
+
+    # Export-recent should create a smaller history DB
+    export_cmd.run(config_path_str, days=365)
+
+    recent_path = data_dir / "matched_entries_history.recent.db"
+    assert recent_path.exists(), "export-recent did not create the recent DB"
+    with sqlite3.connect(recent_path) as conn:
+        recent_rows = conn.execute("SELECT COUNT(*) FROM matched_entries").fetchone()
+    assert recent_rows[0] >= 1

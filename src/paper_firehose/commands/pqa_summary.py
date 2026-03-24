@@ -882,59 +882,12 @@ class PaperQASession:
             answer = getattr(ans_obj, 'answer', None) or getattr(ans_obj, 'raw_answer', None)
             if isinstance(answer, str) and answer.strip():
                 return answer.strip()
-            # Fallback to full extraction for unexpected response types
-            return self._extract_answer(ans_obj)
+            logger.error("paperqa returned %s with no usable .answer for %s", type(ans_obj).__name__, pdf_path)
+            return None
 
         except Exception as e:
             logger.error(f"paperqa query failed for {pdf_path}: {e}")
             return None
-
-    @staticmethod
-    def _extract_answer(ans_obj: Any) -> Optional[str]:
-        """Extract a clean answer string from paper-qa's response object.
-
-        Called only when the primary `answer`/`raw_answer` attributes did not
-        yield a usable string. Tries Pydantic model_dump(), a broad attribute
-        scan, then str() as a last resort.
-        """
-        # Pydantic models: inspect nested session dict or top-level keys
-        if hasattr(ans_obj, 'model_dump'):
-            try:
-                data = ans_obj.model_dump()
-                if 'session' in data and isinstance(data['session'], dict):
-                    session = data['session']
-                    for key in ('answer', 'raw_answer', 'formatted_answer', 'response', 'content', 'text'):
-                        if key in session and isinstance(session[key], str) and session[key].strip():
-                            return session[key].strip()
-                for key in ('answer', 'raw_answer', 'formatted_answer', 'response', 'content', 'text'):
-                    if key in data and isinstance(data[key], str) and data[key].strip():
-                        return data[key].strip()
-            except Exception:
-                pass
-
-        # Broad attribute scan for other object types
-        for attr in ("raw_answer", "answer", "formatted_answer", "content", "text", "response"):
-            try:
-                val = getattr(ans_obj, attr, None)
-                if callable(val):
-                    try:
-                        val = val()
-                    except Exception:
-                        continue
-                if isinstance(val, str) and val.strip():
-                    return val.strip()
-            except Exception:
-                continue
-
-        # Last resort: convert to string
-        try:
-            s = str(ans_obj).strip()
-            if s and len(s) < 10000:
-                return s if s else None
-        except Exception:
-            return None
-
-        return None
 
 
 def _normalize_summary_json(raw: str) -> Optional[str]:
