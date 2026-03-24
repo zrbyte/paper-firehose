@@ -194,3 +194,7 @@ Email
 
 - Python 3.11+ recommended. See `pyproject.toml` for dependencies.
 - Thank you to arXiv for use of its open access interoperability. This project links to arXiv/publisher pages and does not serve PDFs.
+
+## Links
+
+[![Hypercommit](https://img.shields.io/badge/Hypercommit-DB2475)](https://hypercommit.com/paper-firehose)
