@@ -69,7 +69,8 @@ class TestSchemaInit:
         with db.get_connection("all_feeds") as conn:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(feed_entries)")}
         assert {"entry_id", "feed_name", "title", "link", "summary", "authors",
-                "published_date", "first_seen", "last_seen", "raw_data"} <= cols
+                "published_date", "first_seen", "last_seen"} <= cols
+        assert "raw_data" not in cols
 
     def test_history_schema_has_all_columns(self, tmp_path):
         db = DatabaseManager(_make_config(tmp_path))

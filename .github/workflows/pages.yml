@@ -7,7 +7,7 @@ on:
         description: "Purge entries from the last day before running the pipeline"
         required: false
         default: "false"
-  # to enalble scheduled runs, uncomment the following lines
+  # to enable scheduled runs, uncomment the following lines
   # schedule:
   #   # Run every day at 4 AM UTC
   #   - cron: '0 5 * * *'
@@ -58,33 +58,55 @@ jobs:
           restore-keys: |
             runtime-dbs-
 
-      - name: Load databases from data branch
+      - name: Load databases from release or data branch
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p "$PAPER_FIREHOSE_DATA_DIR" assets
+          mkdir -p "$PAPER_FIREHOSE_DATA_DIR"
 
           if ls "$PAPER_FIREHOSE_DATA_DIR"/*.db >/dev/null 2>&1; then
-            echo "✅ Databases restored from cache; skipping data branch fetch"
+            echo "✅ Databases restored from cache; skipping fetch"
             exit 0
           fi
 
-          echo "=== Loading databases from data branch ==="
+          # --- Try latest-data release first ---
+          echo "=== Trying latest-data release ==="
+          RELEASE_OK=false
+          if gh release view latest-data --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            mkdir -p /tmp/release-dbs
+            if gh release download latest-data --repo "$GITHUB_REPOSITORY" \
+                 --pattern "*.db.gz" --dir /tmp/release-dbs 2>/dev/null; then
+              for gz in /tmp/release-dbs/*.db.gz; do
+                [ -f "$gz" ] || continue
+                stem="$(basename "$gz" .db.gz)"
+                gunzip -c "$gz" > "$PAPER_FIREHOSE_DATA_DIR/${stem}.db"
+                echo "✅ Restored ${stem}.db from release"
+              done
+              RELEASE_OK=true
+            fi
+            rm -rf /tmp/release-dbs
+          fi
+
+          if [ "$RELEASE_OK" = true ] && ls "$PAPER_FIREHOSE_DATA_DIR"/*.db >/dev/null 2>&1; then
+            echo "✅ All databases restored from release"
+            exit 0
+          fi
+
+          # --- Fall back to data branch ---
+          echo "=== Falling back to data branch ==="
           if ! git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
             echo "ℹ️  data branch not found; starting with empty databases"
             exit 0
           fi
 
           git fetch origin data
-          git lfs install --local
 
           WT="$(mktemp -d)"
           cleanup() { git worktree remove -f "$WT" >/dev/null 2>&1 || rm -rf "$WT"; }
           trap cleanup EXIT
 
           git worktree add --detach "$WT" origin/data
-          pushd "$WT" >/dev/null
-            git lfs pull origin data || true
-          popd >/dev/null
 
           load_db() {
             local remote_path="$1"
@@ -190,11 +212,20 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      - name: Commit updated databases to data branch
+      - name: Upload databases as artifact
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-databases
+          retention-days: 90
+          path: |
+            ${{ env.PAPER_FIREHOSE_DATA_DIR }}/all_feed_entries.db
+            ${{ env.PAPER_FIREHOSE_DATA_DIR }}/matched_entries_history.db
+            ${{ env.PAPER_FIREHOSE_DATA_DIR }}/papers.db
+            ${{ env.PAPER_FIREHOSE_DATA_DIR }}/matched_entries_history.recent.db
+
+      - name: Commit small databases to data branch
         env:
-          KEEP_SNAPSHOTS: "2"
-          DB_HISTORY: ".paper_firehose/matched_entries_history.db"
-          DB_SEEN: ".paper_firehose/all_feed_entries.db"
           DB_CURRENT: ".paper_firehose/papers.db"
         run: |
           set -euo pipefail
@@ -215,51 +246,42 @@ jobs:
           trap cleanup EXIT
 
           pushd "$WT" >/dev/null
-            git lfs install --local
-
-            if [ -f "$GITHUB_WORKSPACE/.gitattributes" ]; then
-              cp "$GITHUB_WORKSPACE/.gitattributes" .gitattributes
-              git add .gitattributes
-            fi
-
             mkdir -p assets
             TS="$(date -u +%Y%m%dT%H%M%SZ)"
 
-            # Only keep latest + two previous versions
-            update_db() {
-              local src="$1"; local stem="$2"
-              if [ -f "$GITHUB_WORKSPACE/$src" ]; then
-                # Backup current .latest.db to .previous.db if it exists
-                if [ -f "assets/${stem}.previous.db" ]; then
-                  mv "assets/${stem}.previous.db" "assets/${stem}.previous2.db" || true
-                fi
-                if [ -f "assets/${stem}.latest.db" ]; then
-                  mv "assets/${stem}.latest.db" "assets/${stem}.previous.db" || true
-                fi
-                # Copy new version as .latest.db
-                cp "$GITHUB_WORKSPACE/$src" "assets/${stem}.latest.db"
-                git add -f "assets/${stem}.latest.db" "assets/${stem}.previous.db" "assets/${stem}.previous2.db" 2>/dev/null || true
-                echo "✅ Updated ${stem}: latest + two previous versions retained"
-              else
-                echo "ℹ️  Skip: $src not found"
+            # papers.db is small — keep latest + one previous on data branch
+            if [ -f "$GITHUB_WORKSPACE/$DB_CURRENT" ]; then
+              if [ -f "assets/papers.latest.db" ]; then
+                mv "assets/papers.latest.db" "assets/papers.previous.db" || true
               fi
-            }
+              cp "$GITHUB_WORKSPACE/$DB_CURRENT" "assets/papers.latest.db"
+              git add -f "assets/papers.latest.db" "assets/papers.previous.db" 2>/dev/null || true
+            fi
 
-            update_db "$DB_HISTORY" "matched_entries_history"
-            update_db "$DB_SEEN" "all_feed_entries"
-            update_db "$DB_CURRENT" "papers"
-
-            # Add recent database (no versioning needed)
+            # recent database for history viewers
             if [ -f "$GITHUB_WORKSPACE/.paper_firehose/matched_entries_history.recent.db" ]; then
               cp "$GITHUB_WORKSPACE/.paper_firehose/matched_entries_history.recent.db" "assets/matched_entries_history.recent.db"
               git add -f "assets/matched_entries_history.recent.db"
               echo "✅ Updated recent database"
             fi
 
+            # Clean up legacy LFS-tracked large databases from data branch
+            for legacy in all_feed_entries.latest.db all_feed_entries.previous.db all_feed_entries.previous2.db \
+                          matched_entries_history.latest.db matched_entries_history.previous.db matched_entries_history.previous2.db \
+                          papers.previous2.db; do
+              if [ -f "assets/$legacy" ]; then
+                git rm -f "assets/$legacy" 2>/dev/null || rm -f "assets/$legacy"
+              fi
+            done
+
             # Remove old snapshot directory if it exists
             if [ -d "assets/db_history" ]; then
               git rm -rf "assets/db_history" || rm -rf "assets/db_history"
-              echo "🗑️  Removed historical snapshot directory"
+            fi
+
+            # Remove .gitattributes LFS config if present
+            if [ -f ".gitattributes" ]; then
+              git rm -f .gitattributes 2>/dev/null || true
             fi
 
             if ! git diff --cached --quiet; then
@@ -270,6 +292,40 @@ jobs:
               echo "ℹ️  No changes to commit."
             fi
           popd >/dev/null
+
+      - name: Upload databases to weekly release
+        if: ${{ success() && github.event.schedule != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Only run on Sundays (day 0)
+          if [ "$(date -u +%w)" != "0" ]; then
+            echo "ℹ️  Not Sunday — skipping weekly release upload"
+            exit 0
+          fi
+
+          echo "=== Uploading databases to latest-data release ==="
+
+          # Create release if it doesn't exist
+          if ! gh release view latest-data >/dev/null 2>&1; then
+            gh release create latest-data --title "Latest Database Backup" \
+              --notes "Automatically updated weekly with the latest pipeline databases." \
+              --latest=false
+          fi
+
+          # Compress and upload
+          for db in all_feed_entries matched_entries_history papers; do
+            src="$PAPER_FIREHOSE_DATA_DIR/${db}.db"
+            if [ -f "$src" ]; then
+              gzip -c "$src" > "/tmp/${db}.db.gz"
+              gh release upload latest-data "/tmp/${db}.db.gz" --clobber
+              echo "✅ Uploaded ${db}.db.gz"
+            fi
+          done
+
+          echo "✅ Weekly release upload complete"
 
       - name: Save runtime databases cache
         if: ${{ success() }}

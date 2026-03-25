@@ -8,7 +8,6 @@ OpenAlex, PubMed) with intelligent fallback strategies based on journal/domain.
 from __future__ import annotations
 
 import time
-import json
 import logging
 from typing import Optional, Dict, Any, Iterable
 
@@ -22,7 +21,6 @@ from ..core.apis import (
     get_openalex_abstract,
     get_pubmed_abstract_by_doi,
 )
-from ..core.doi_utils import extract_doi_from_json
 from ..core.text_utils import clean_abstract_for_db
 from ..core.abstract_source import AbstractSource, get_default_sources, get_biomedical_sources
 
@@ -224,15 +222,7 @@ def crossref_pass(
 
     fetched = 0
     for row in iter_targets(db, topic, threshold):
-        doi = row.get('doi') or extract_doi_from_json(row.get('raw_data'))
-        if not doi:
-            try:
-                raw = row.get('raw_data')
-                if raw:
-                    obj = json.loads(raw)
-                    doi = obj.get('arxiv_doi') or obj.get('arXiv_doi')
-            except Exception as e:
-                logger.debug(f"Failed to extract arXiv DOI from raw_data for entry {row.get('id')}: {e}")
+        doi = row.get('doi')
         abstract: Optional[str] = None
         if doi:
             abstract = get_crossref_abstract(doi, mailto=mailto, session=session, max_retries=max_retries)
@@ -294,15 +284,7 @@ def fallback_pass(
     for row in iter_targets(db, topic, threshold):
         # Skip rows already filled by previous passes
         # iter_targets already filters abstract IS NULL or empty
-        doi = row.get('doi') or extract_doi_from_json(row.get('raw_data'))
-        if not doi:
-            try:
-                raw = row.get('raw_data')
-                if raw:
-                    obj = json.loads(raw)
-                    doi = obj.get('arxiv_doi') or obj.get('arXiv_doi')
-            except Exception as e:
-                logger.debug(f"Failed to extract arXiv DOI from raw_data for entry {row.get('id')}: {e}")
+        doi = row.get('doi')
         abstract = try_publisher_apis(doi, row.get('feed_name') or '', row.get('link') or '', mailto=mailto, session=session)
         if abstract:
             abstract = clean_abstract_for_db(abstract)

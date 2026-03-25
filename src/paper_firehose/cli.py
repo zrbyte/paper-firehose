@@ -14,6 +14,7 @@ from .commands import email_list as email_cmd
 from .commands import export_recent as export_recent_cmd
 from .commands import filter as filter_cmd
 from .commands import generate_html as html_cmd
+from .commands import migrate_db as migrate_cmd
 from .commands import pqa_summary as pqa_cmd
 from .commands import rank as rank_cmd
 from .core.config import ConfigManager, DEFAULT_CONFIG_PATH
@@ -279,6 +280,23 @@ def purge(ctx: click.Context, days: int | None, all_data: bool) -> None:
             click.echo(f"✅ Entries from the most recent {days} days purged successfully")
     except Exception as exc:  # pragma: no cover - click echoes the message
         click.echo(f"❌ Purge command failed: {exc}", err=True)
+        sys.exit(1)
+
+
+@cli.command("migrate")
+@click.option("--skip-archive", is_flag=True, help="Skip archiving raw_data to raw_archive.db")
+@click.option("--dry-run", is_flag=True, help="Report what would happen without modifying databases")
+@click.pass_context
+def migrate(ctx: click.Context, skip_archive: bool, dry_run: bool) -> None:
+    """Migrate databases: archive raw_data, drop column, optimise."""
+    try:
+        migrate_cmd.run(ctx.obj["config_path"], skip_archive=skip_archive, dry_run=dry_run)
+        if dry_run:
+            click.echo("Dry run complete — no changes made")
+        else:
+            click.echo("Database migration completed successfully")
+    except Exception as exc:  # pragma: no cover
+        click.echo(f"Migration failed: {exc}", err=True)
         sys.exit(1)
 
 

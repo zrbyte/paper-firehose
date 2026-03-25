@@ -6,7 +6,6 @@ Database management for the three-database approach:
 """
 
 import sqlite3
-import json
 import os
 import datetime
 import hashlib
@@ -41,12 +40,24 @@ class DatabaseManager:
         """Initialize all three databases with proper schemas."""
         # Initialize all_feed_entries.db
         self._init_all_feeds_db()
-        
+
         # Initialize matched_entries_history.db
         self._init_history_db()
-        
+
         # Initialize papers.db (current run)
         self._init_current_db()
+
+    @staticmethod
+    def _apply_pragmas(conn: sqlite3.Connection) -> None:
+        """Apply performance pragmas to a database connection.
+
+        ``page_size`` only takes effect on a freshly created (empty) database
+        or after a subsequent VACUUM on an existing one; setting it here is
+        therefore a no-op for databases that already contain data, but it
+        ensures new databases start with the larger page size.
+        """
+        conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
+        conn.execute("PRAGMA page_size = 8192")
 
     def _backup_sqlite(self, src_path: str, dest_path: str) -> None:
         """Create a consistent backup copy of a SQLite database.
@@ -120,8 +131,9 @@ class DatabaseManager:
     def _init_all_feeds_db(self):
         """Initialize the all RSS entries database."""
         conn = sqlite3.connect(self.db_paths['all_feeds'])
+        self._apply_pragmas(conn)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS feed_entries (
                 entry_id TEXT PRIMARY KEY,
@@ -133,7 +145,6 @@ class DatabaseManager:
                 published_date TEXT,
                 first_seen TEXT DEFAULT (datetime('now')),
                 last_seen TEXT DEFAULT (datetime('now')),
-                raw_data TEXT,
                 UNIQUE(feed_name, entry_id)
             )
         ''')
@@ -159,6 +170,7 @@ class DatabaseManager:
         table for testing simplicity.
         """
         conn = sqlite3.connect(self.db_paths['history'])
+        self._apply_pragmas(conn)
         cursor = conn.cursor()
 
         # Inspect existing table
@@ -168,7 +180,7 @@ class DatabaseManager:
 
         required_columns = {
             'entry_id', 'feed_name', 'topics', 'title', 'link', 'summary',
-            'authors', 'abstract', 'doi', 'published_date', 'matched_date', 'raw_data',
+            'authors', 'abstract', 'doi', 'published_date', 'matched_date',
             'llm_summary', 'paper_qa_summary', 'rank_score'
         }
 
@@ -197,7 +209,6 @@ class DatabaseManager:
         need_recreate = (len(columns) == 0) or (not required_columns.issubset(columns))
 
         if need_recreate:
-            cursor.execute('DROP TABLE IF EXISTS matched_entries')
             cursor.execute('''
                 CREATE TABLE matched_entries (
                     entry_id TEXT PRIMARY KEY,
@@ -211,7 +222,6 @@ class DatabaseManager:
                     doi TEXT,
                     published_date TEXT,
                     matched_date TEXT DEFAULT (datetime('now')),
-                    raw_data TEXT,
                     llm_summary TEXT,
                     paper_qa_summary TEXT,
                     rank_score REAL
@@ -246,8 +256,9 @@ class DatabaseManager:
         testing simplicity.
         """
         conn = sqlite3.connect(self.db_paths['current'])
+        self._apply_pragmas(conn)
         cursor = conn.cursor()
-        
+
         # Inspect existing table
         cursor.execute("PRAGMA table_info(entries)")
         info = cursor.fetchall()
@@ -256,7 +267,7 @@ class DatabaseManager:
         required_columns = {
             'id', 'topic', 'feed_name', 'title', 'link', 'summary', 'authors',
             'abstract', 'doi', 'published_date', 'discovered_date', 'status',
-            'rank_score', 'rank_reasoning', 'llm_summary', 'raw_data'
+            'rank_score', 'rank_reasoning', 'llm_summary'
         }
         need_recreate = (len(columns) == 0) or (not required_columns.issubset(columns))
 
@@ -280,7 +291,6 @@ class DatabaseManager:
                     rank_reasoning TEXT,
                     llm_summary TEXT,
                     paper_qa_summary TEXT,
-                    raw_data TEXT,
                     PRIMARY KEY (id, topic),
                     UNIQUE(feed_name, topic, id)
                 )
@@ -335,7 +345,6 @@ class DatabaseManager:
             cursor = conn.cursor()
 
             authors = self._extract_authors(entry)
-            raw_data = json.dumps(entry, default=str)
 
             # Ensure published_date is in YYYY-MM-DD format
             published_date = self._format_published_date(entry)
@@ -344,10 +353,10 @@ class DatabaseManager:
             cursor.execute('''
                 INSERT OR REPLACE INTO feed_entries
                 (entry_id, feed_name, title, link, summary, authors, published_date,
-                 first_seen, last_seen, raw_data)
+                 first_seen, last_seen)
                 VALUES (?, ?, ?, ?, ?, ?, ?,
                         COALESCE((SELECT first_seen FROM feed_entries WHERE title = ?), datetime('now')),
-                        datetime('now'), ?)
+                        datetime('now'))
             ''', (
                 entry_id, feed_name,
                 title,
@@ -356,7 +365,6 @@ class DatabaseManager:
                 authors,
                 published_date,
                 title,  # for COALESCE subquery
-                raw_data
             ))
     
     # Note: helper methods `is_entry_in_history` and `get_entry_topics_from_history`
@@ -393,7 +401,6 @@ class DatabaseManager:
             else:
                 # New entry, insert it
                 authors = self._extract_authors(entry)
-                raw_data = json.dumps(entry, default=str)
                 published_date = self._format_published_date(entry)
                 doi = self._extract_doi(entry)
                 rank_value = entry.get('rank_score')
@@ -406,8 +413,8 @@ class DatabaseManager:
                 cursor.execute('''
                     INSERT INTO matched_entries
                     (entry_id, feed_name, topics, title, link, summary, authors, abstract, doi,
-                     published_date, matched_date, raw_data, rank_score)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)
+                     published_date, matched_date, rank_score)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
                 ''', (
                     entry_id, feed_name, topic,
                     entry.get('title', ''),
@@ -417,7 +424,6 @@ class DatabaseManager:
                     None,  # abstract to be populated later (Crossref)
                     doi,
                     published_date,
-                    raw_data,
                     rank_value
                 ))
 
@@ -429,15 +435,14 @@ class DatabaseManager:
             cursor = conn.cursor()
 
             authors = self._extract_authors(entry)
-            raw_data = json.dumps(entry, default=str)
             published_date = self._format_published_date(entry)
             doi = self._extract_doi(entry)
 
             cursor.execute('''
                 INSERT OR REPLACE INTO entries
                 (id, topic, feed_name, title, link, summary, authors, abstract, doi,
-                 published_date, discovered_date, status, raw_data)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'filtered', ?)
+                 published_date, discovered_date, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'filtered')
             ''', (
                 entry_id, topic, feed_name,
                 entry.get('title', ''),
@@ -447,7 +452,6 @@ class DatabaseManager:
                 None,  # abstract to be populated later (Crossref)
                 doi,
                 published_date,
-                raw_data
             ))
     
     def get_current_entries(self, topic: str = None, status: str = None) -> List[Dict[str, Any]]:
@@ -672,7 +676,7 @@ class DatabaseManager:
             cursor = conn.cursor()
 
             query = """
-                SELECT id, topic, doi, abstract, rank_score, raw_data, title,
+                SELECT id, topic, doi, abstract, rank_score, title,
                        feed_name, summary, link, authors, published_date
                 FROM entries
                 WHERE 1=1
