@@ -28,20 +28,6 @@ database:
   all_feeds_path: "all_feed_entries.db"
   history_path: "matched_entries_history.db"
 
-llm:
-  model: "gpt-5-mini"
-  api_key_env: "OPENAI_API_KEY"
-  model_fallback: "gpt-5-nano"
-  rps: 0.5
-  max_retries: 3
-
-paperqa:
-  download_rank_threshold: 0.35
-  rps: 0.3
-  max_retries: 3
-  prompt: >
-    Provide a concise summary of the paper in JSON with keys "summary" and "methods".
-
 feeds:
   cond-mat:
     name: "arXiv cond-mat"
@@ -98,6 +84,79 @@ def _copy_tree(src: Path, dest: Path) -> bool:
                 shutil.copyfile(item, target)
                 created = True
     return created
+
+
+# Known configuration keys — anything not listed here triggers a warning.
+# Top-level keys map to sets of allowed sub-keys (None = no sub-key check).
+_KNOWN_MAIN_KEYS: Dict[str, Optional[Dict[str, Any]]] = {
+    "database": {"path", "all_feeds_path", "history_path"},
+    "feeds": None,  # dynamic feed names, each checked separately
+    "priority_journals": None,
+    "priority_journal_boost": None,
+    "defaults": {
+        "time_window_days": None,
+        "top_n_per_topic": None,
+        "rank_threshold": None,
+        "ranking_negative_penalty": None,
+        "abstracts": {"mailto", "rps", "max_retries"},
+    },
+    "email": {
+        "recipients_file": None,
+        "subject_prefix": None,
+        "from": None,
+        "smtp": {"host", "port", "username", "password_file"},
+    },
+}
+
+_KNOWN_FEED_KEYS = {"name", "url", "enabled"}
+
+_KNOWN_TOPIC_KEYS: Dict[str, Optional[Dict[str, Any]]] = {
+    "name": None,
+    "description": None,
+    "feeds": None,
+    "filter": {"pattern", "fields"},
+    "ranking": {
+        "query", "model", "negative_queries", "preferred_authors",
+        "priority_author_boost", "negative_penalty",
+    },
+    "abstract_fetch": {"enabled", "rank_threshold"},
+    "paperqa": {
+        "download_rank_threshold", "rps", "max_retries",
+        "llm", "summary_llm", "prompt",
+    },
+    "output": {"filename", "filename_ranked", "filename_summary", "archive"},
+}
+
+
+def _check_keys(data: Dict[str, Any], known: Dict[str, Any],
+                prefix: str) -> List[str]:
+    """Return warnings for keys in *data* that are not in *known*.
+
+    *known* maps key names to either ``None`` (leaf — no sub-key check),
+    a ``set`` of allowed sub-key names (flat section), or a ``dict``
+    mapping sub-key names to their own allowed sub-keys (nested section).
+    """
+    warnings: List[str] = []
+    if not isinstance(data, dict):
+        return warnings
+    for key in data:
+        full = f"{prefix}.{key}" if prefix else key
+        if key not in known:
+            warnings.append(f"Unknown key '{full}'")
+            continue
+        spec = known[key]
+        if spec is None:
+            continue
+        child = data[key]
+        if not isinstance(child, dict):
+            continue
+        if isinstance(spec, set):
+            for sub in child:
+                if sub not in spec:
+                    warnings.append(f"Unknown key '{full}.{sub}'")
+        elif isinstance(spec, dict):
+            warnings.extend(_check_keys(child, spec, full))
+    return warnings
 
 
 class ConfigManager:
@@ -272,6 +331,43 @@ class ConfigManager:
         config = self.load_config()
         return config.get('priority_journals', [])
     
+    def check_unknown_keys(self) -> List[str]:
+        """Return warnings for unrecognised keys in main and topic configs."""
+        warnings: List[str] = []
+        try:
+            config = self.load_config()
+        except Exception:
+            return warnings
+
+        # Main config top-level and nested keys
+        warnings.extend(
+            _check_keys(config, _KNOWN_MAIN_KEYS, "config")
+        )
+
+        # Per-feed sub-keys
+        feeds = config.get("feeds")
+        if isinstance(feeds, dict):
+            for feed_name, feed_cfg in feeds.items():
+                if isinstance(feed_cfg, dict):
+                    for sub in feed_cfg:
+                        if sub not in _KNOWN_FEED_KEYS:
+                            warnings.append(
+                                f"Unknown key 'config.feeds.{feed_name}.{sub}'"
+                            )
+
+        # Topic configs
+        for topic_name in self.get_available_topics():
+            try:
+                topic_cfg = self.load_topic_config(topic_name)
+            except Exception:
+                continue
+            warnings.extend(
+                _check_keys(topic_cfg, _KNOWN_TOPIC_KEYS,
+                            f"topic[{topic_name}]")
+            )
+
+        return warnings
+
     def validate_config(self) -> bool:
         """Validate the configuration files."""
         try:

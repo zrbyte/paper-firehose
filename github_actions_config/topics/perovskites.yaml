@@ -79,8 +79,8 @@ paperqa:
   download_rank_threshold: 0.3
   rps: 0.3
   max_retries: 3
-  llm: "gpt-5.2"
-  summary_llm: "gpt-5.2"
+  llm: "gpt-4o-mini"
+  summary_llm: "gpt-4o-mini"
 
   prompt: |
     You are a domain expert on perovskite solar cells and photoelectrochemistry.

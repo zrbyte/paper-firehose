@@ -315,6 +315,13 @@ def status(ctx: click.Context) -> None:
             click.echo("❌ Configuration validation failed")
             return
 
+        # Warn about unrecognised config keys
+        unknown = config_manager.check_unknown_keys()
+        if unknown:
+            click.echo(f"⚠️  {len(unknown)} unknown config key(s):")
+            for w in unknown:
+                click.echo(f"   {w}")
+
         topics = config_manager.get_available_topics()
         click.echo(f"📚 Available topics: {', '.join(topics)}")
 
