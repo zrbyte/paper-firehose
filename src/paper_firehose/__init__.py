@@ -18,6 +18,7 @@ from .commands import abstracts as abstracts_cmd
 from .commands import pqa_summary as pqa_summary_cmd
 from .commands import email_list as email_cmd
 from .commands import export_recent as export_recent_cmd
+from .commands import query as query_cmd
 from .core.config import ConfigManager, DEFAULT_CONFIG_PATH
 from .core.database import DatabaseManager
 from .core.paths import resolve_data_path
@@ -40,6 +41,7 @@ __all__ = [
     'html',
     'generate_html',
     'export_recent',
+    'query',
 ]
 
 
@@ -168,6 +170,71 @@ def export_recent(
     """
     cfg_path = config_path or _DEFAULT_CONFIG
     export_recent_cmd.run(cfg_path, days, output_name)
+
+
+def query(
+    *,
+    history: bool = False,
+    all_feeds: bool = False,
+    topic: Optional[str] = None,
+    min_rank: Optional[float] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+    has_doi: bool = False,
+    has_abstract: bool = False,
+    sort: str = 'rank',
+    limit: int = 20,
+    offset: int = 0,
+    json: bool = False,
+    count: bool = False,
+    fields: Optional[str] = None,
+    config_path: Optional[str] = None,
+) -> None:
+    """Query paper databases and print results.
+
+    Args:
+        history: Query matched_entries_history.db instead of papers.db.
+        all_feeds: Query all_feed_entries.db instead of papers.db.
+        topic: Filter by topic name.
+        min_rank: Minimum rank_score threshold.
+        since: Published on or after this date (YYYY-MM-DD).
+        until: Published on or before this date (YYYY-MM-DD).
+        search: Case-insensitive text search on title and abstract.
+        status: Filter by entry status (current DB only).
+        has_doi: Only entries with a DOI.
+        has_abstract: Only entries with an abstract.
+        sort: Sort key: 'rank', 'date', or 'title'.
+        limit: Max results (0 = unlimited).
+        offset: Skip first N results.
+        json: Output as JSON.
+        count: Print count only.
+        fields: Comma-separated column names to include.
+        config_path: Path to main YAML config; defaults to repo config.
+    """
+    if history and all_feeds:
+        raise ValueError("Cannot use both history and all_feeds")
+    db_key = 'history' if history else ('all_feeds' if all_feeds else 'current')
+    cfg_path = config_path or _DEFAULT_CONFIG
+    query_cmd.run(
+        cfg_path,
+        db_key=db_key,
+        topic=topic,
+        min_rank=min_rank,
+        status=status,
+        has_doi=has_doi,
+        has_abstract=has_abstract,
+        since=since,
+        until=until,
+        search=search,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+        output_json=json,
+        count_only=count,
+        fields=fields,
+    )
 
 
 def purge(days: Optional[int] = None, all_data: bool = False, config_path: Optional[str] = None) -> None:

@@ -16,6 +16,7 @@ from .commands import filter as filter_cmd
 from .commands import generate_html as html_cmd
 from .commands import migrate_db as migrate_cmd
 from .commands import pqa_summary as pqa_cmd
+from .commands import query as query_cmd
 from .commands import rank as rank_cmd
 from .core.config import ConfigManager, DEFAULT_CONFIG_PATH
 from .core.paths import get_data_dir
@@ -297,6 +298,57 @@ def migrate(ctx: click.Context, skip_archive: bool, dry_run: bool) -> None:
             click.echo("Database migration completed successfully")
     except Exception as exc:  # pragma: no cover
         click.echo(f"Migration failed: {exc}", err=True)
+        sys.exit(1)
+
+
+@cli.command("query")
+@click.option("--history", "db_key", flag_value="history", help="Query history database")
+@click.option("--all-feeds", "db_key", flag_value="all_feeds", help="Query all-feeds database")
+@click.option("--topic", help="Filter by topic")
+@click.option("--min-rank", type=float, help="Minimum rank score")
+@click.option("--since", help="Published on or after date (YYYY-MM-DD)")
+@click.option("--until", help="Published on or before date (YYYY-MM-DD)")
+@click.option("--search", help="Text search in title and abstract")
+@click.option("--status", "status_filter", help="Filter by status (current DB only)")
+@click.option("--has-doi", is_flag=True, help="Only entries with a DOI")
+@click.option("--has-abstract", is_flag=True, help="Only entries with an abstract")
+@click.option("--sort", default="rank", type=click.Choice(["rank", "date", "title"]),
+              help="Sort order (default: rank)")
+@click.option("--limit", default=20, type=int, help="Max results (0=unlimited)")
+@click.option("--offset", default=0, type=int, help="Skip first N results")
+@click.option("--json", "output_json", is_flag=True, help="Output as JSON")
+@click.option("--count", "count_only", is_flag=True, help="Print count only")
+@click.option("--fields", help="Comma-separated field names to include")
+@click.pass_context
+def query(ctx: click.Context, db_key: str, topic: str, min_rank: float,
+          since: str, until: str, search: str, status_filter: str,
+          has_doi: bool, has_abstract: bool, sort: str, limit: int,
+          offset: int, output_json: bool, count_only: bool, fields: str) -> None:
+    """Query paper databases for entries."""
+    try:
+        query_cmd.run(
+            ctx.obj["config_path"],
+            db_key=db_key or "current",
+            topic=topic,
+            min_rank=min_rank,
+            status=status_filter,
+            has_doi=has_doi,
+            has_abstract=has_abstract,
+            since=since,
+            until=until,
+            search=search,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+            output_json=output_json,
+            count_only=count_only,
+            fields=fields,
+        )
+    except ValueError as exc:
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(1)
+    except Exception as exc:  # pragma: no cover
+        click.echo(f"❌ Error: {exc}", err=True)
         sys.exit(1)
 
 

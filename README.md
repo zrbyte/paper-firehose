@@ -98,8 +98,28 @@ Commands
 - `purge (--days N | --all)`
   - Remove entries by date from databases, or clear all and reinitialize schemas (`--all`).
 
+- `query [--history | --all-feeds] [--topic TOPIC] [--min-rank FLOAT] [--since DATE] [--until DATE] [--search TEXT] [--status STATUS] [--has-doi] [--has-abstract] [--sort rank|date|title] [--limit N] [--offset N] [--json] [--count] [--fields FIELDS]`
+  - Query any of the three databases for entries. Defaults to `papers.db` (current run); `--history` queries the historical archive, `--all-feeds` queries all RSS entries ever seen.
+  - Examples:
+    ```bash
+    # Top 10 highest-ranked entries from the current run
+    paper-firehose query --limit 10
+
+    # Search history for papers about graphene with rank >= 0.7
+    paper-firehose query --history --search graphene --min-rank 0.7
+
+    # Count entries matched in March 2026
+    paper-firehose query --history --since 2026-03-01 --until 2026-03-31 --count
+
+    # JSON output for a specific topic (useful for scripts and LLM agents)
+    paper-firehose query --history --topic perovskites --json --limit 5
+
+    # Browse all feeds by date, paginated
+    paper-firehose query --all-feeds --sort date --limit 20 --offset 40
+    ```
+
 - `status`
-  - Validate configuration and list available topics, enabled feeds, and database paths.
+  - Validate configuration, warn about unrecognised config keys, and list available topics, enabled feeds, and database paths.
 
 ## Python API
 
@@ -107,7 +127,7 @@ Import functions directly from the package for programmatic workflows:
 
 ```python
 from paper_firehose import (
-    filter, rank, abstracts, pqa_summary, email, purge, status, html, export_recent,
+    filter, rank, abstracts, pqa_summary, email, purge, status, html, export_recent, query,
 )
 
 # Run steps
@@ -129,6 +149,10 @@ pqa_summary(arxiv=["2501.12345", "https://arxiv.org/abs/2501.12345v2"], summariz
 
 # Email digest
 email(limit=10, dry_run=True)
+
+# Query databases
+query(history=True, topic="perovskites", min_rank=0.5, json=True, limit=10)
+query(history=True, search="graphene", count=True)
 
 # Maintenance
 purge(days=7)

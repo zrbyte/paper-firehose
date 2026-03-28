@@ -808,6 +808,131 @@ class DatabaseManager:
             for row in cursor:
                 yield row
 
+    # ------------------------------------------------------------------
+    # General-purpose query (used by the ``query`` CLI command)
+    # ------------------------------------------------------------------
+
+    _TABLE_MAP = {
+        'current': 'entries',
+        'history': 'matched_entries',
+        'all_feeds': 'feed_entries',
+    }
+
+    _DATE_COL_MAP = {
+        'current': 'published_date',
+        'history': 'published_date',
+        'all_feeds': 'published_date',
+    }
+
+    def query_entries(
+        self,
+        db_key: str = 'current',
+        topic: Optional[str] = None,
+        min_rank: Optional[float] = None,
+        status: Optional[str] = None,
+        has_doi: Optional[bool] = None,
+        has_abstract: Optional[bool] = None,
+        since: Optional[str] = None,
+        until: Optional[str] = None,
+        search: Optional[str] = None,
+        order_by: str = 'rank_score DESC',
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple:
+        """General-purpose query across any of the three databases.
+
+        Args:
+            db_key: ``'current'``, ``'history'``, or ``'all_feeds'``
+            topic: Topic filter (exact match for current, LIKE for history)
+            min_rank: Minimum rank_score threshold
+            status: Status filter (current DB only)
+            has_doi: If True only entries with DOI, if False only without
+            has_abstract: If True only entries with abstract
+            since: Published on or after this date (YYYY-MM-DD)
+            until: Published on or before this date (YYYY-MM-DD)
+            search: Case-insensitive text search on title + abstract/summary
+            order_by: SQL ORDER BY clause
+            limit: Max rows (0 = unlimited)
+            offset: Skip first N rows
+
+        Returns:
+            ``(rows, total_count)`` where *rows* is a list of dicts and
+            *total_count* is the count before LIMIT/OFFSET.
+        """
+        table = self._TABLE_MAP[db_key]
+        date_col = self._DATE_COL_MAP[db_key]
+
+        conditions: list[str] = []
+        params: list = []
+
+        # Topic
+        if topic:
+            if db_key == 'history':
+                conditions.append("topics LIKE ?")
+                params.append(f"%{topic}%")
+            elif db_key == 'current':
+                conditions.append("topic = ?")
+                params.append(topic)
+            # all_feeds has no topic column — silently ignored
+
+        # Rank
+        if min_rank is not None:
+            conditions.append("rank_score >= ?")
+            params.append(min_rank)
+
+        # Status
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+
+        # DOI
+        if has_doi is True:
+            conditions.append("doi IS NOT NULL AND doi != ''")
+        elif has_doi is False:
+            conditions.append("(doi IS NULL OR doi = '')")
+
+        # Abstract
+        if has_abstract is True:
+            conditions.append("abstract IS NOT NULL AND abstract != ''")
+
+        # Date range
+        if since:
+            conditions.append(f"{date_col} >= ?")
+            params.append(since)
+        if until:
+            conditions.append(f"{date_col} <= ?")
+            params.append(until)
+
+        # Text search
+        if search:
+            search_col = 'summary' if db_key == 'all_feeds' else 'abstract'
+            conditions.append(
+                f"(title LIKE ? COLLATE NOCASE OR {search_col} LIKE ? COLLATE NOCASE)"
+            )
+            term = f"%{search}%"
+            params.extend([term, term])
+
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+        with self.get_connection(db_key) as conn:
+            cursor = conn.cursor()
+
+            # Total count (before limit/offset)
+            cursor.execute(f"SELECT COUNT(*) FROM {table}{where}", params)
+            total = cursor.fetchone()[0]
+
+            # Fetch rows
+            query = f"SELECT * FROM {table}{where} ORDER BY {order_by}"
+            if limit:
+                query += f" LIMIT {int(limit)}"
+            if offset:
+                query += f" OFFSET {int(offset)}"
+            cursor.execute(query, params)
+            columns = [desc[0] for desc in cursor.description]
+            rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        return rows, total
+
     def close_all_connections(self):
         """Close any open database connections (placeholder for connection pooling)."""
         pass
