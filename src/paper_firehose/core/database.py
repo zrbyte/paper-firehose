@@ -59,6 +59,57 @@ class DatabaseManager:
         conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
         conn.execute("PRAGMA page_size = 8192")
 
+    @staticmethod
+    def _create_fts5_trigram(conn: sqlite3.Connection, table: str, columns: list[str]) -> None:
+        """Create an FTS5 external-content virtual table with trigram tokenizer.
+
+        The virtual table references *table* via ``content=`` so no data is
+        duplicated — only the trigram inverted index is stored.  INSERT /
+        DELETE / UPDATE triggers keep the index in sync automatically.
+
+        If the main table already has rows but the FTS index is empty (e.g.
+        after a migration), the index is rebuilt.
+        """
+        fts_table = f"{table}_fts"
+        col_list = ", ".join(columns)
+
+        conn.execute(
+            f"CREATE VIRTUAL TABLE IF NOT EXISTS {fts_table} "
+            f"USING fts5({col_list}, content='{table}', content_rowid='rowid', tokenize='trigram')"
+        )
+
+        # Sync triggers — idempotent thanks to IF NOT EXISTS-style naming.
+        conn.execute(
+            f"""CREATE TRIGGER IF NOT EXISTS {fts_table}_ai AFTER INSERT ON {table} BEGIN
+                INSERT INTO {fts_table}(rowid, {col_list})
+                VALUES (new.rowid, {', '.join('new.' + c for c in columns)});
+            END"""
+        )
+        conn.execute(
+            f"""CREATE TRIGGER IF NOT EXISTS {fts_table}_ad AFTER DELETE ON {table} BEGIN
+                INSERT INTO {fts_table}({fts_table}, rowid, {col_list})
+                VALUES ('delete', old.rowid, {', '.join('old.' + c for c in columns)});
+            END"""
+        )
+        conn.execute(
+            f"""CREATE TRIGGER IF NOT EXISTS {fts_table}_au AFTER UPDATE ON {table} BEGIN
+                INSERT INTO {fts_table}({fts_table}, rowid, {col_list})
+                VALUES ('delete', old.rowid, {', '.join('old.' + c for c in columns)});
+                INSERT INTO {fts_table}(rowid, {col_list})
+                VALUES (new.rowid, {', '.join('new.' + c for c in columns)});
+            END"""
+        )
+
+        # Rebuild if main table has rows but FTS is empty (post-migration).
+        cursor = conn.execute(f"SELECT COUNT(*) FROM {table}")
+        main_count = cursor.fetchone()[0]
+        if main_count > 0:
+            cursor = conn.execute(f"SELECT COUNT(*) FROM {fts_table}")
+            fts_count = cursor.fetchone()[0]
+            if fts_count == 0:
+                logger.info("Rebuilding FTS index for %s (%d rows)", table, main_count)
+                conn.execute(f"INSERT INTO {fts_table}({fts_table}) VALUES('rebuild')")
+
     def _backup_sqlite(self, src_path: str, dest_path: str) -> None:
         """Create a consistent backup copy of a SQLite database.
 
@@ -159,9 +210,10 @@ class DatabaseManager:
             ON feed_entries(first_seen)
         ''')
         
+        self._create_fts5_trigram(conn, 'feed_entries', ['title', 'summary', 'authors'])
         conn.commit()
         conn.close()
-    
+
     def _init_history_db(self):
         """Initialize the historical matches database.
 
@@ -239,13 +291,14 @@ class DatabaseManager:
         ''')
         
         cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_matched_entries_entry_id 
+            CREATE INDEX IF NOT EXISTS idx_matched_entries_entry_id
             ON matched_entries(entry_id)
         ''')
-        
+
+        self._create_fts5_trigram(conn, 'matched_entries', ['title', 'summary', 'abstract', 'authors'])
         conn.commit()
         conn.close()
-    
+
     def _init_current_db(self):
         """Initialize the current run processing database.
 
@@ -272,6 +325,7 @@ class DatabaseManager:
         need_recreate = (len(columns) == 0) or (not required_columns.issubset(columns))
 
         if need_recreate:
+            cursor.execute('DROP TABLE IF EXISTS entries_fts')
             cursor.execute('DROP TABLE IF EXISTS entries')
             cursor.execute('''
                 CREATE TABLE entries (
@@ -304,10 +358,11 @@ class DatabaseManager:
                     logger.debug(f"Column paper_qa_summary may already exist in entries table: {e}")
 
         cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_entries_topic_status 
+            CREATE INDEX IF NOT EXISTS idx_entries_topic_status
             ON entries(topic, status)
         ''')
 
+        self._create_fts5_trigram(conn, 'entries', ['title', 'summary', 'abstract', 'authors'])
         conn.commit()
         conn.close()
     
@@ -835,6 +890,7 @@ class DatabaseManager:
         since: Optional[str] = None,
         until: Optional[str] = None,
         search: Optional[str] = None,
+        fuzzy: Optional[str] = None,
         order_by: str = 'rank_score DESC',
         limit: int = 20,
         offset: int = 0,
@@ -851,6 +907,8 @@ class DatabaseManager:
             since: Published on or after this date (YYYY-MM-DD)
             until: Published on or before this date (YYYY-MM-DD)
             search: Case-insensitive text search on title + abstract/summary
+            fuzzy: Fuzzy text search via FTS5 trigram (min 3 chars, mutually
+                exclusive with *search*)
             order_by: SQL ORDER BY clause
             limit: Max rows (0 = unlimited)
             offset: Skip first N rows
@@ -859,6 +917,10 @@ class DatabaseManager:
             ``(rows, total_count)`` where *rows* is a list of dicts and
             *total_count* is the count before LIMIT/OFFSET.
         """
+        if search and fuzzy:
+            raise ValueError("--search and --fuzzy are mutually exclusive")
+        if fuzzy and len(fuzzy) < 3:
+            raise ValueError("--fuzzy requires at least 3 characters (trigram tokenizer minimum)")
         table = self._TABLE_MAP[db_key]
         date_col = self._DATE_COL_MAP[db_key]
 
@@ -911,6 +973,16 @@ class DatabaseManager:
             )
             term = f"%{search}%"
             params.extend([term, term])
+
+        # Fuzzy search via FTS5 trigram
+        fts_table = f"{table}_fts"
+        if fuzzy:
+            # Escape double quotes in the search term for FTS5 phrase matching
+            escaped = fuzzy.replace('"', '""')
+            conditions.append(
+                f"rowid IN (SELECT rowid FROM {fts_table} WHERE {fts_table} MATCH ?)"
+            )
+            params.append(f'"{escaped}"')
 
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 

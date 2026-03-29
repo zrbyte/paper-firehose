@@ -5,6 +5,8 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from ..core.command_context import CommandContext
+from ..core.model_manager import ensure_local_model
+from ..processors.st_ranker import STRanker
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +103,23 @@ def _format_json(rows: List[Dict[str, Any]], total: int,
     return json.dumps(obj, indent=2, default=str)
 
 
+# Map db_key -> (id column, topic/group column, abstract/text column)
+_DB_FIELD_MAP = {
+    'current': ('id', 'topic', 'abstract'),
+    'history': ('entry_id', 'topics', 'abstract'),
+    'all_feeds': ('entry_id', 'feed_name', 'summary'),
+}
+
+
+def _build_rerank_text(row: Dict[str, Any], text_col: str) -> str:
+    """Build the text to embed for reranking: title + abstract/summary."""
+    title = (row.get('title') or '').strip()
+    body = (row.get(text_col) or '').strip()
+    if body:
+        return f"{title} {body}"
+    return title
+
+
 def run(
     config_path: Optional[str],
     *,
@@ -113,6 +132,8 @@ def run(
     since: Optional[str] = None,
     until: Optional[str] = None,
     search: Optional[str] = None,
+    fuzzy: Optional[str] = None,
+    rerank: Optional[str] = None,
     sort: str = 'rank',
     limit: int = 20,
     offset: int = 0,
@@ -135,6 +156,11 @@ def run(
     ctx = CommandContext(config_path)
     order_by = _resolve_sort(sort, db_key)
 
+    # When reranking, fetch all candidates (no SQL-level pagination) so we can
+    # score and re-sort the full result set before applying limit/offset.
+    fetch_limit = 0 if rerank else limit
+    fetch_offset = 0 if rerank else offset
+
     rows, total = ctx.db.query_entries(
         db_key=db_key,
         topic=topic,
@@ -145,10 +171,45 @@ def run(
         since=since,
         until=until,
         search=search,
+        fuzzy=fuzzy,
         order_by=order_by,
-        limit=limit,
-        offset=offset,
+        limit=fetch_limit,
+        offset=fetch_offset,
     )
+
+    # Semantic reranking
+    if rerank and rows:
+        model_name = ensure_local_model("all-MiniLM-L6-v2")
+        ranker = STRanker(model_name=model_name)
+        if not ranker.available():
+            raise RuntimeError(
+                "Sentence-transformer model unavailable. "
+                "Install sentence-transformers or check model path."
+            )
+
+        id_col, group_col, text_col = _DB_FIELD_MAP[db_key]
+
+        batch = [
+            (row[id_col], row.get(group_col, ''), _build_rerank_text(row, text_col))
+            for row in rows
+        ]
+        scores = ranker.score_entries(rerank, batch)
+
+        # Build score lookup: (id, group) -> score
+        score_map = {(eid, grp): score for eid, grp, score in scores}
+
+        for row in rows:
+            key = (row[id_col], row.get(group_col, ''))
+            row['rerank_score'] = round(score_map.get(key, 0.0), 4)
+
+        rows.sort(key=lambda r: r['rerank_score'], reverse=True)
+
+        # Apply limit/offset to reranked results
+        total = len(rows)
+        if limit:
+            rows = rows[offset:offset + limit]
+        elif offset:
+            rows = rows[offset:]
 
     if count_only:
         print(total)
@@ -162,4 +223,6 @@ def run(
         print(_format_json(rows, total, field_list, offset, limit))
     else:
         table_fields = field_list or _DEFAULT_TABLE_FIELDS.get(db_key, ['title'])
+        if rerank and not fields:
+            table_fields = ['rerank_score'] + table_fields
         print(_format_table(rows, total, table_fields, offset, limit))

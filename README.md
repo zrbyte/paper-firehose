@@ -98,8 +98,10 @@ Commands
 - `purge (--days N | --all)`
   - Remove entries by date from databases, or clear all and reinitialize schemas (`--all`).
 
-- `query [--history | --all-feeds] [--topic TOPIC] [--min-rank FLOAT] [--since DATE] [--until DATE] [--search TEXT] [--status STATUS] [--has-doi] [--has-abstract] [--sort rank|date|title] [--limit N] [--offset N] [--json] [--count] [--fields FIELDS]`
+- `query [--history | --all-feeds] [--topic TOPIC] [--min-rank FLOAT] [--since DATE] [--until DATE] [--search TEXT] [--fuzzy TEXT] [--rerank QUERY] [--status STATUS] [--has-doi] [--has-abstract] [--sort rank|date|title] [--limit N] [--offset N] [--json] [--count] [--fields FIELDS]`
   - Query any of the three databases for entries. Defaults to `papers.db` (current run); `--history` queries the historical archive, `--all-feeds` queries all RSS entries ever seen.
+  - `--fuzzy`: Typo-tolerant text search using FTS5 trigram matching (min 3 chars). Searches across title, summary, abstract, and authors. Mutually exclusive with `--search`.
+  - `--rerank`: Re-score and re-sort results by semantic similarity to the given query using sentence-transformer embeddings (title + abstract). Adds a `rerank_score` column to output. Can be combined with any filter including `--fuzzy`.
   - Examples:
     ```bash
     # Top 10 highest-ranked entries from the current run
@@ -107,6 +109,15 @@ Commands
 
     # Search history for papers about graphene with rank >= 0.7
     paper-firehose query --history --search graphene --min-rank 0.7
+
+    # Fuzzy search (tolerates typos/partial words)
+    paper-firehose query --history --fuzzy "graphen"
+
+    # Semantic reranking — find the most relevant papers to a research question
+    paper-firehose query --history --rerank "perovskite solar cell efficiency"
+
+    # Combine fuzzy + rerank: fuzzy narrows candidates, rerank scores by meaning
+    paper-firehose query --history --fuzzy "perovsk" --rerank "halide perovskite photovoltaics"
 
     # Count entries matched in March 2026
     paper-firehose query --history --since 2026-03-01 --until 2026-03-31 --count
@@ -153,6 +164,8 @@ email(limit=10, dry_run=True)
 # Query databases
 query(history=True, topic="perovskites", min_rank=0.5, json=True, limit=10)
 query(history=True, search="graphene", count=True)
+query(history=True, fuzzy="graphen")  # typo-tolerant search
+query(history=True, rerank="perovskite solar cells", limit=10)  # semantic reranking
 
 # Maintenance
 purge(days=7)

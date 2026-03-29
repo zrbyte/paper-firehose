@@ -238,6 +238,186 @@ class TestQueryEntries:
         assert 'title' in rows[0]
 
 
+class TestFuzzySearch:
+    """Tests for FTS5 trigram fuzzy search."""
+
+    def test_fuzzy_search_current(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        # "graphen" (missing 'e') should match "Graphene superlattices" via trigram
+        rows, total = ctx.db.query_entries(db_key='current', fuzzy='graphen')
+        assert total >= 1
+        assert any('Graphene' in r['title'] for r in rows)
+
+    def test_fuzzy_search_history(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_history_db(ctx.db)
+
+        rows, total = ctx.db.query_entries(db_key='history', fuzzy='nanoribbon')
+        assert total >= 1
+        assert any('nanoribbons' in r['title'] for r in rows)
+
+    def test_fuzzy_and_search_mutually_exclusive(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            ctx.db.query_entries(db_key='current', search='test', fuzzy='test')
+
+    def test_fuzzy_min_length(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+
+        with pytest.raises(ValueError, match="at least 3"):
+            ctx.db.query_entries(db_key='current', fuzzy='ab')
+
+    def test_fuzzy_no_match(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        rows, total = ctx.db.query_entries(db_key='current', fuzzy='zzzzzzz')
+        assert total == 0
+
+
+class TestRerank:
+    """Tests for semantic reranking via STRanker."""
+
+    def test_rerank_basic(self, tmp_path, monkeypatch, capsys):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        monkeypatch.setattr(query_cmd, "CommandContext", lambda path: ctx)
+
+        # Mock STRanker to avoid model dependency in tests
+        class FakeRanker:
+            def __init__(self, **kw): pass
+            def available(self): return True
+            def score_entries(self, query, entries):
+                # Give highest score to the entry whose text matches "perovskite"
+                result = []
+                for eid, group, text in entries:
+                    score = 0.9 if 'perovskite' in text.lower() else 0.3
+                    result.append((eid, group, score))
+                return result
+
+        monkeypatch.setattr(query_cmd, "STRanker", FakeRanker)
+        monkeypatch.setattr(query_cmd, "ensure_local_model", lambda spec: spec)
+
+        query_cmd.run(config_path, rerank='perovskite solar cells', output_json=True)
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+
+        # Perovskite entry should be first after reranking
+        assert data['entries'][0]['title'] == 'Perovskite solar cells'
+        assert 'rerank_score' in data['entries'][0]
+        # Scores should be descending
+        scores = [e['rerank_score'] for e in data['entries']]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_rerank_with_filters(self, tmp_path, monkeypatch, capsys):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        monkeypatch.setattr(query_cmd, "CommandContext", lambda path: ctx)
+
+        class FakeRanker:
+            def __init__(self, **kw): pass
+            def available(self): return True
+            def score_entries(self, query, entries):
+                return [(eid, g, 0.5) for eid, g, _ in entries]
+
+        monkeypatch.setattr(query_cmd, "STRanker", FakeRanker)
+        monkeypatch.setattr(query_cmd, "ensure_local_model", lambda spec: spec)
+
+        # Filter to only ranked entries (2 of 3), then rerank
+        query_cmd.run(config_path, rerank='test', status='ranked', output_json=True)
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data['total'] == 2
+
+    def test_rerank_model_unavailable(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        monkeypatch.setattr(query_cmd, "CommandContext", lambda path: ctx)
+
+        class BrokenRanker:
+            def __init__(self, **kw): pass
+            def available(self): return False
+
+        monkeypatch.setattr(query_cmd, "STRanker", BrokenRanker)
+        monkeypatch.setattr(query_cmd, "ensure_local_model", lambda spec: spec)
+
+        with pytest.raises(RuntimeError, match="unavailable"):
+            query_cmd.run(config_path, rerank='test query')
+
+    def test_rerank_table_output_has_score_column(self, tmp_path, monkeypatch, capsys):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        monkeypatch.setattr(query_cmd, "CommandContext", lambda path: ctx)
+
+        class FakeRanker:
+            def __init__(self, **kw): pass
+            def available(self): return True
+            def score_entries(self, query, entries):
+                return [(eid, g, 0.5) for eid, g, _ in entries]
+
+        monkeypatch.setattr(query_cmd, "STRanker", FakeRanker)
+        monkeypatch.setattr(query_cmd, "ensure_local_model", lambda spec: spec)
+
+        query_cmd.run(config_path, rerank='test')
+        captured = capsys.readouterr()
+        assert 'rerank_score' in captured.out
+
+
+class TestFuzzyPlusRerank:
+    """Test combining fuzzy search with reranking."""
+
+    def test_fuzzy_plus_rerank(self, tmp_path, monkeypatch, capsys):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        monkeypatch.setattr(query_cmd, "CommandContext", lambda path: ctx)
+
+        class FakeRanker:
+            def __init__(self, **kw): pass
+            def available(self): return True
+            def score_entries(self, query, entries):
+                return [(eid, g, 0.7) for eid, g, _ in entries]
+
+        monkeypatch.setattr(query_cmd, "STRanker", FakeRanker)
+        monkeypatch.setattr(query_cmd, "ensure_local_model", lambda spec: spec)
+
+        # Fuzzy narrows to graphene entry, then rerank scores it
+        query_cmd.run(config_path, fuzzy='graphen', rerank='carbon materials',
+                      output_json=True)
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        # Fuzzy should have narrowed to graphene entry(ies)
+        assert data['total'] >= 1
+        assert all('rerank_score' in e for e in data['entries'])
+
+
 class TestQueryCommand:
     """Tests for the query command run() function."""
 

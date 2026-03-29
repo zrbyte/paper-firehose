@@ -309,6 +309,8 @@ def migrate(ctx: click.Context, skip_archive: bool, dry_run: bool) -> None:
 @click.option("--since", help="Published on or after date (YYYY-MM-DD)")
 @click.option("--until", help="Published on or before date (YYYY-MM-DD)")
 @click.option("--search", help="Text search in title and abstract")
+@click.option("--fuzzy", help="Fuzzy text search (trigram matching, min 3 chars)")
+@click.option("--rerank", help="Rerank results by semantic similarity to this query")
 @click.option("--status", "status_filter", help="Filter by status (current DB only)")
 @click.option("--has-doi", is_flag=True, help="Only entries with a DOI")
 @click.option("--has-abstract", is_flag=True, help="Only entries with an abstract")
@@ -321,7 +323,8 @@ def migrate(ctx: click.Context, skip_archive: bool, dry_run: bool) -> None:
 @click.option("--fields", help="Comma-separated field names to include")
 @click.pass_context
 def query(ctx: click.Context, db_key: str, topic: str, min_rank: float,
-          since: str, until: str, search: str, status_filter: str,
+          since: str, until: str, search: str, fuzzy: str, rerank: str,
+          status_filter: str,
           has_doi: bool, has_abstract: bool, sort: str, limit: int,
           offset: int, output_json: bool, count_only: bool, fields: str) -> None:
     """Query paper databases for entries."""
@@ -337,6 +340,8 @@ def query(ctx: click.Context, db_key: str, topic: str, min_rank: float,
             since=since,
             until=until,
             search=search,
+            fuzzy=fuzzy,
+            rerank=rerank,
             sort=sort,
             limit=limit,
             offset=offset,
