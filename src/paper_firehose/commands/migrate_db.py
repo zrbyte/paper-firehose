@@ -178,7 +178,8 @@ def run(
     1. Back up all three DBs
     2. Archive raw_data to raw_archive.db (unless --skip-archive)
     3. Rebuild tables without raw_data column
-    4. Apply pragmas and VACUUM
+    4. Drop stale FTS indexes (rebuilt on next DB open)
+    5. Apply pragmas and VACUUM
     """
     logger.info("Starting database migration")
 
@@ -293,8 +294,25 @@ def run(
             logger.info(f"  {key}: raw_data already absent")
         conn.close()
 
-    # Step 4: Apply pragmas and VACUUM
-    logger.info("Step 4: Applying pragmas and VACUUM")
+    # Step 4: Drop stale FTS indexes so they are rebuilt on next DB open
+    logger.info("Step 4: Dropping stale FTS indexes (will be rebuilt on next use)")
+    for key, spec in db_specs.items():
+        path = db_paths[key]
+        if not os.path.exists(path):
+            continue
+        table = spec["table"]
+        fts_table = f"{table}_fts"
+        conn = sqlite3.connect(path)
+        # Drop triggers and FTS virtual table so DatabaseManager recreates them
+        for suffix in ("_ai", "_ad", "_au"):
+            conn.execute(f"DROP TRIGGER IF EXISTS {fts_table}{suffix}")
+        conn.execute(f"DROP TABLE IF EXISTS {fts_table}")
+        conn.commit()
+        conn.close()
+        logger.info(f"  {key}: dropped {fts_table} and its triggers")
+
+    # Step 5: Apply pragmas and VACUUM
+    logger.info("Step 5: Applying pragmas and VACUUM")
     for key, path in db_paths.items():
         if not os.path.exists(path):
             continue
