@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -10,6 +11,7 @@ import click
 
 from . import __version__
 from .commands import abstracts as abstracts_cmd
+from .commands import config_cmd
 from .commands import email_list as email_cmd
 from .commands import export_recent as export_recent_cmd
 from .commands import filter as filter_cmd
@@ -19,7 +21,9 @@ from .commands import pqa_summary as pqa_cmd
 from .commands import query as query_cmd
 from .commands import rank as rank_cmd
 from .commands import status as status_cmd
+from .commands import topic_cmd
 from .core.config import ConfigManager, DEFAULT_CONFIG_PATH
+from .core.exit_codes import ERR_CONFIG, ERR_RUNTIME, ERR_USAGE
 from .core.paths import get_data_dir
 
 # Setup logging early so submodules inherit sane defaults
@@ -50,15 +54,22 @@ def cli(ctx: click.Context, config: str, verbose: bool) -> None:
 
 @cli.command("filter")
 @click.option("--topic", help="Filter specific topic only")
+@click.option("--json", "output_json", is_flag=True, help="Output results as JSON")
 @click.pass_context
-def filter_feeds(ctx: click.Context, topic: str | None) -> None:
+def filter_feeds(ctx: click.Context, topic: str | None, output_json: bool) -> None:
     """Fetch RSS feeds and filter entries by regex patterns."""
     try:
-        filter_cmd.run(ctx.obj["config_path"], topic)
-        click.echo("✅ Filter command completed successfully")
-    except Exception as exc:  # pragma: no cover - click echoes the message
+        result = filter_cmd.run(ctx.obj["config_path"], topic, output_json=output_json)
+        if output_json and result:
+            click.echo(json.dumps(result, indent=2, default=str))
+        else:
+            click.echo("✅ Filter command completed successfully")
+    except ValueError as exc:
         click.echo(f"❌ Filter command failed: {exc}", err=True)
-        sys.exit(1)
+        sys.exit(ERR_CONFIG)
+    except Exception as exc:  # pragma: no cover
+        click.echo(f"❌ Filter command failed: {exc}", err=True)
+        sys.exit(ERR_RUNTIME)
 
 
 @cli.command("html")
@@ -72,9 +83,9 @@ def generate_html(ctx: click.Context, topic: str | None) -> None:
             click.echo(f"✅ HTML generated for topic '{topic}'")
         else:
             click.echo("✅ HTML generated for all topics")
-    except Exception as exc:  # pragma: no cover - click echoes the message
+    except Exception as exc:  # pragma: no cover
         click.echo(f"❌ HTML generation failed: {exc}", err=True)
-        sys.exit(1)
+        sys.exit(ERR_RUNTIME)
 
 
 @cli.command("export-recent")
@@ -86,25 +97,32 @@ def export_recent(ctx: click.Context, days: int, output: str | None) -> None:
     try:
         export_recent_cmd.run(ctx.obj["config_path"], days, output)
         click.echo(f"✅ Exported entries from last {days} days successfully")
-    except Exception as exc:  # pragma: no cover - click echoes the message
+    except Exception as exc:  # pragma: no cover
         click.echo(f"❌ Export-recent command failed: {exc}", err=True)
-        sys.exit(1)
+        sys.exit(ERR_RUNTIME)
 
 
 @cli.command("rank")
 @click.option("--topic", help="Rank a specific topic only")
+@click.option("--json", "output_json", is_flag=True, help="Output results as JSON")
 @click.pass_context
-def rank(ctx: click.Context, topic: str | None) -> None:
+def rank(ctx: click.Context, topic: str | None, output_json: bool) -> None:
     """Compute and write rank scores into papers.db (rank_score only)."""
     try:
-        rank_cmd.run(ctx.obj["config_path"], topic)
-        if topic:
-            click.echo(f"✅ Ranking completed for topic '{topic}'")
+        result = rank_cmd.run(ctx.obj["config_path"], topic, output_json=output_json)
+        if output_json and result:
+            click.echo(json.dumps(result, indent=2, default=str))
         else:
-            click.echo("✅ Ranking completed for all topics")
-    except Exception as exc:  # pragma: no cover - click echoes the message
+            if topic:
+                click.echo(f"✅ Ranking completed for topic '{topic}'")
+            else:
+                click.echo("✅ Ranking completed for all topics")
+    except ValueError as exc:
         click.echo(f"❌ Rank command failed: {exc}", err=True)
-        sys.exit(1)
+        sys.exit(ERR_CONFIG)
+    except Exception as exc:  # pragma: no cover
+        click.echo(f"❌ Rank command failed: {exc}", err=True)
+        sys.exit(ERR_RUNTIME)
 
 
 @cli.command("abstracts")
@@ -116,6 +134,7 @@ def rank(ctx: click.Context, topic: str | None) -> None:
 )
 @click.option("--limit", type=click.IntRange(min=1), help="Max number of abstracts to fetch per topic")
 @click.option("--rps", type=click.FloatRange(min=0, min_open=True), default=1.0, help="Requests per second throttle (default: 1.0)")
+@click.option("--json", "output_json", is_flag=True, help="Output results as JSON")
 @click.pass_context
 def abstracts(
     ctx: click.Context,
@@ -123,23 +142,28 @@ def abstracts(
     mailto: str | None,
     limit: int | None,
     rps: float,
+    output_json: bool,
 ) -> None:
     """Fetch abstracts from Crossref for high-ranked entries (writes to papers.db)."""
     try:
-        abstracts_cmd.run(
+        result = abstracts_cmd.run(
             ctx.obj["config_path"],
             topic,
             mailto=mailto,
             max_per_topic=limit,
             rps=rps,
+            output_json=output_json,
         )
-        if topic:
-            click.echo(f"✅ Abstracts fetched for topic '{topic}'")
+        if output_json and result:
+            click.echo(json.dumps(result, indent=2, default=str))
         else:
-            click.echo("✅ Abstract fetching completed for eligible topics")
-    except Exception as exc:  # pragma: no cover - click echoes the message
+            if topic:
+                click.echo(f"✅ Abstracts fetched for topic '{topic}'")
+            else:
+                click.echo("✅ Abstract fetching completed for eligible topics")
+    except Exception as exc:  # pragma: no cover
         click.echo(f"❌ Abstract fetching failed: {exc}", err=True)
-        sys.exit(1)
+        sys.exit(ERR_RUNTIME)
 
 
 @cli.command("pqa_summary")
@@ -211,9 +235,9 @@ def pqa_summary(
             click.echo(f"✅ pqa_summary completed for topic '{topic}'")
         else:
             click.echo("✅ pqa_summary completed for all topics")
-    except Exception as exc:  # pragma: no cover - click echoes the message
+    except Exception as exc:  # pragma: no cover
         click.echo(f"❌ pqa_summary failed: {exc}", err=True)
-        sys.exit(1)
+        sys.exit(ERR_RUNTIME)
 
 
 @cli.command("email")
@@ -259,9 +283,9 @@ def email(
             click.echo(f"📝 Email dry-run completed (preview written under {get_data_dir()})")
         else:
             click.echo("✅ Email sent successfully")
-    except Exception as exc:  # pragma: no cover - click echoes the message
+    except Exception as exc:  # pragma: no cover
         click.echo(f"❌ Email send failed: {exc}", err=True)
-        sys.exit(1)
+        sys.exit(ERR_RUNTIME)
 
 
 @cli.command("purge")
@@ -272,7 +296,7 @@ def purge(ctx: click.Context, days: int | None, all_data: bool) -> None:
     """Remove entries from databases based on publication date."""
     if not days and not all_data:
         click.echo("Error: Must specify either --days X or --all", err=True)
-        sys.exit(1)
+        sys.exit(ERR_USAGE)
 
     try:
         filter_cmd.purge(ctx.obj["config_path"], days, all_data)
@@ -280,9 +304,9 @@ def purge(ctx: click.Context, days: int | None, all_data: bool) -> None:
             click.echo("✅ All data purged successfully")
         else:
             click.echo(f"✅ Entries from the most recent {days} days purged successfully")
-    except Exception as exc:  # pragma: no cover - click echoes the message
+    except Exception as exc:  # pragma: no cover
         click.echo(f"❌ Purge command failed: {exc}", err=True)
-        sys.exit(1)
+        sys.exit(ERR_RUNTIME)
 
 
 @cli.command("migrate")
@@ -299,7 +323,7 @@ def migrate(ctx: click.Context, skip_archive: bool, dry_run: bool) -> None:
             click.echo("Database migration completed successfully")
     except Exception as exc:  # pragma: no cover
         click.echo(f"Migration failed: {exc}", err=True)
-        sys.exit(1)
+        sys.exit(ERR_RUNTIME)
 
 
 @cli.command("query")
@@ -309,7 +333,7 @@ def migrate(ctx: click.Context, skip_archive: bool, dry_run: bool) -> None:
 @click.option("--min-rank", type=float, help="Minimum rank score")
 @click.option("--since", help="Published on or after date (YYYY-MM-DD)")
 @click.option("--until", help="Published on or before date (YYYY-MM-DD)")
-@click.option("--search", help="Text search in title and abstract")
+@click.option("--search", help="Keyword search (supports phrases \"...\", prefix*, AND/OR/NOT)")
 @click.option("--fuzzy", help="Fuzzy text search (trigram matching, min 3 chars)")
 @click.option("--rerank", help="Rerank results by semantic similarity to this query")
 @click.option("--status", "status_filter", help="Filter by status (current DB only)")
@@ -371,10 +395,10 @@ def query(ctx: click.Context, db_key: str, topic: str, min_rank: float,
         )
     except ValueError as exc:
         click.echo(f"❌ {exc}", err=True)
-        sys.exit(1)
+        sys.exit(ERR_USAGE)
     except Exception as exc:  # pragma: no cover
         click.echo(f"❌ Error: {exc}", err=True)
-        sys.exit(1)
+        sys.exit(ERR_RUNTIME)
 
 
 @cli.command("status")
@@ -384,8 +408,134 @@ def status(ctx: click.Context, output_json: bool) -> None:
     """Show system status, configuration, and database freshness."""
     try:
         status_cmd.run(ctx.obj["config_path"], output_json=output_json)
-    except Exception as exc:  # pragma: no cover - click echoes the message
+    except Exception as exc:  # pragma: no cover
         click.echo(f"❌ Error checking status: {exc}", err=True)
+        sys.exit(ERR_RUNTIME)
+
+
+# --- Config management ---
+
+@cli.group("config")
+def config_group() -> None:
+    """View and modify Paper Firehose configuration."""
+
+
+@config_group.command("show")
+@click.pass_context
+def config_show(ctx: click.Context) -> None:
+    """Pretty-print the main configuration."""
+    try:
+        click.echo(config_cmd.show(ctx.obj["config_path"]))
+    except Exception as exc:
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(ERR_RUNTIME)
+
+
+@config_group.command("get")
+@click.argument("key")
+@click.pass_context
+def config_get(ctx: click.Context, key: str) -> None:
+    """Get a config value by dot-notation key (e.g. defaults.rank_threshold)."""
+    try:
+        value = config_cmd.get_value(ctx.obj["config_path"], key)
+        click.echo(value)
+    except KeyError as exc:
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(ERR_USAGE)
+    except Exception as exc:
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(ERR_RUNTIME)
+
+
+@config_group.command("set")
+@click.argument("key")
+@click.argument("value")
+@click.pass_context
+def config_set(ctx: click.Context, key: str, value: str) -> None:
+    """Set a config value by dot-notation key (e.g. defaults.rank_threshold 0.25)."""
+    try:
+        config_cmd.set_value(ctx.obj["config_path"], key, value)
+        click.echo(f"Set {key} = {config_cmd.get_value(ctx.obj['config_path'], key)}")
+    except Exception as exc:
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(ERR_RUNTIME)
+
+
+@config_group.command("validate")
+@click.pass_context
+def config_validate(ctx: click.Context) -> None:
+    """Run full configuration validation."""
+    try:
+        valid, unknown = config_cmd.validate(ctx.obj["config_path"])
+        if valid:
+            click.echo("✅ Configuration is valid")
+        else:
+            click.echo("❌ Configuration validation failed")
+        if unknown:
+            click.echo(f"Unknown keys: {', '.join(unknown)}")
+        if not valid:
+            sys.exit(ERR_CONFIG)
+    except Exception as exc:
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(ERR_RUNTIME)
+
+
+# --- Topic management ---
+
+@cli.group("topic")
+def topic_group() -> None:
+    """View and manage topic configurations."""
+
+
+@topic_group.command("list")
+@click.pass_context
+def topic_list(ctx: click.Context) -> None:
+    """List available topics."""
+    try:
+        topics = topic_cmd.list_topics(ctx.obj["config_path"])
+        if not topics:
+            click.echo("No topics configured.")
+            return
+        for t in topics:
+            desc = f" — {t['description']}" if t.get("description") else ""
+            click.echo(f"  {t['key']}: {t['name']}{desc}")
+    except Exception as exc:
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(ERR_RUNTIME)
+
+
+@topic_group.command("show")
+@click.argument("name")
+@click.pass_context
+def topic_show(ctx: click.Context, name: str) -> None:
+    """Pretty-print a topic configuration."""
+    try:
+        click.echo(topic_cmd.show_topic(ctx.obj["config_path"], name))
+    except FileNotFoundError as exc:
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(ERR_USAGE)
+    except Exception as exc:
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(ERR_RUNTIME)
+
+
+@topic_group.command("add")
+@click.argument("name")
+@click.option("--from", "from_topic", default=None, help="Clone an existing topic")
+@click.pass_context
+def topic_add(ctx: click.Context, name: str, from_topic: str | None) -> None:
+    """Create a new topic configuration."""
+    try:
+        path = topic_cmd.add_topic(
+            ctx.obj["config_path"], name, from_topic=from_topic
+        )
+        click.echo(f"✅ Created topic '{name}' at {path}")
+    except ValueError as exc:
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(ERR_USAGE)
+    except Exception as exc:
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(ERR_RUNTIME)
 
 
 if __name__ == "__main__":  # pragma: no cover - script entry

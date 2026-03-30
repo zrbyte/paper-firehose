@@ -59,25 +59,36 @@ def _entry_has_preferred_author(entry: Dict[str, Any], preferred_authors: List[s
     return False
 
 
-def run(config_path: str, topic: Optional[str] = None) -> None:
+def run(
+    config_path: str,
+    topic: Optional[str] = None,
+    *,
+    output_json: bool = False,
+) -> Optional[Dict[str, Any]]:
     """
     Compute rank scores and write them into papers.db (rank_score).
 
     Args:
         config_path: Path to main config
         topic: Optional topic name; if None, process all topics
+        output_json: When True, suppress log noise and return a result dict.
+
+    Returns:
+        Result dict when *output_json* is True, otherwise None.
     """
+    if output_json:
+        logging.getLogger("paper_firehose").setLevel(logging.WARNING)
     logger.info("Starting rank command (write scores only)")
 
     cfg_mgr = ConfigManager(config_path)
     if not cfg_mgr.validate_config():
-        logger.error("Configuration validation failed")
-        return
+        raise ValueError("Configuration validation failed")
 
     config = cfg_mgr.load_config()
     db = DatabaseManager(config)
 
     topics = resolve_topics(cfg_mgr, topic)
+    topic_results: Dict[str, Dict[str, int]] = {}
 
     for topic_name in topics:
         try:
@@ -210,8 +221,21 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
                 journal_boost,
             )
         logger.info("Topic '%s': wrote rank_score for %d entries", topic_name, updated)
+        topic_results[topic_name] = {
+            "ranked": updated,
+            "boosted_author": boosted_auth,
+            "boosted_journal": boosted_jour,
+        }
 
         # HTML generation moved to the standalone `html` command.
 
     db.close_all_connections()
     logger.info("Rank command completed")
+
+    if output_json:
+        return {
+            "command": "rank",
+            "topics": topic_results,
+            "total_ranked": sum(t["ranked"] for t in topic_results.values()),
+        }
+    return None

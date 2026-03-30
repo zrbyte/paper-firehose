@@ -156,10 +156,11 @@ def run(
     ctx = CommandContext(config_path)
     order_by = _resolve_sort(sort, db_key)
 
-    # When reranking, fetch all candidates (no SQL-level pagination) so we can
-    # score and re-sort the full result set before applying limit/offset.
-    fetch_limit = 0 if rerank else limit
-    fetch_offset = 0 if rerank else offset
+    # When reranking or BM25-sorting search results, fetch all candidates
+    # (no SQL-level pagination) so we can re-sort before applying limit/offset.
+    needs_client_sort = bool(rerank) or bool(search)
+    fetch_limit = 0 if needs_client_sort else limit
+    fetch_offset = 0 if needs_client_sort else offset
 
     rows, total = ctx.db.query_entries(
         db_key=db_key,
@@ -176,6 +177,15 @@ def run(
         limit=fetch_limit,
         offset=fetch_offset,
     )
+
+    # BM25 relevance sort for keyword search (when not reranking)
+    if search and not rerank and rows:
+        rows.sort(key=lambda r: r.get('bm25_score') or 0.0)  # FTS5 rank is negative; lower = more relevant
+        total = len(rows)
+        if limit:
+            rows = rows[offset:offset + limit]
+        elif offset:
+            rows = rows[offset:]
 
     # Semantic reranking
     if rerank and rows:

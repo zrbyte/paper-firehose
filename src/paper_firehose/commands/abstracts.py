@@ -18,7 +18,7 @@ Rules
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Any, Dict, Optional
 import logging
 
 import requests
@@ -39,18 +39,25 @@ def run(
     *,
     mailto: Optional[str] = None,
     max_per_topic: Optional[int] = None,
-    rps: float = 1.0
-) -> None:
+    rps: float = 1.0,
+    output_json: bool = False,
+) -> Optional[Dict[str, Any]]:
     """Fetch and write abstracts into papers.db for ranked entries.
 
     Args:
-        config_path: Path to the main configuration file (defaults to ~/.paper_firehose/config.yaml)
+        config_path: Path to the main configuration file
         topic: Optional single topic; otherwise process all topics
         mailto: Contact email for Crossref User-Agent
         max_per_topic: Optional cap on number of fetches per topic
         rps: Requests per second throttle (default ~1 req/s)
+        output_json: When True, suppress log noise and return a result dict.
+
+    Returns:
+        Result dict when *output_json* is True, otherwise None.
     """
     logger = logging.getLogger(__name__)
+    if output_json:
+        logging.getLogger("paper_firehose").setLevel(logging.WARNING)
     cfg = ConfigManager(config_path)
     config = cfg.load_config()
     db = DatabaseManager(config)
@@ -80,6 +87,8 @@ def run(
     # Step 1: First pass — fill arXiv/cond-mat abstracts from summaries (no threshold)
     filled = fill_arxiv_summaries(db, topics)
     logger.info(f"Abstracts: arXiv/cond-mat summary fill updated={filled}")
+
+    topic_results: Dict[str, Dict[str, int]] = {}
 
     for t in topics:
         tcfg = cfg.load_topic_config(t)
@@ -115,7 +124,12 @@ def run(
             logger.error(f"Fallback providers pass failed for topic '{t}': {e}")
             fetched_fallback = 0
         logger.info(f"Abstracts: topic='{t}' threshold={thr} updated_crossref={fetched_crossref} updated_fallback={fetched_fallback}")
+        topic_results[t] = {"crossref": fetched_crossref, "fallback": fetched_fallback}
 
-        # HTML generation is handled by the `html` command.
-
-    # no return
+    if output_json:
+        return {
+            "command": "abstracts",
+            "arxiv_filled": filled,
+            "topics": topic_results,
+        }
+    return None

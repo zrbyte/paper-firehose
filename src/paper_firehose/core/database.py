@@ -110,6 +110,53 @@ class DatabaseManager:
                 logger.info("Rebuilding FTS index for %s (%d rows)", table, main_count)
                 conn.execute(f"INSERT INTO {fts_table}({fts_table}) VALUES('rebuild')")
 
+    @staticmethod
+    def _create_fts5_keyword(conn: sqlite3.Connection, table: str, columns: list[str]) -> None:
+        """Create an FTS5 external-content virtual table with porter stemming.
+
+        Same pattern as :meth:`_create_fts5_trigram` but uses the ``porter
+        unicode61`` tokenizer for keyword search with stemming, BM25 ranking,
+        phrase queries, prefix matching, and boolean operators.
+        """
+        kw_table = f"{table}_kw"
+        col_list = ", ".join(columns)
+
+        conn.execute(
+            f"CREATE VIRTUAL TABLE IF NOT EXISTS {kw_table} "
+            f"USING fts5({col_list}, content='{table}', content_rowid='rowid', "
+            f"tokenize='porter unicode61')"
+        )
+
+        conn.execute(
+            f"""CREATE TRIGGER IF NOT EXISTS {kw_table}_ai AFTER INSERT ON {table} BEGIN
+                INSERT INTO {kw_table}(rowid, {col_list})
+                VALUES (new.rowid, {', '.join('new.' + c for c in columns)});
+            END"""
+        )
+        conn.execute(
+            f"""CREATE TRIGGER IF NOT EXISTS {kw_table}_ad AFTER DELETE ON {table} BEGIN
+                INSERT INTO {kw_table}({kw_table}, rowid, {col_list})
+                VALUES ('delete', old.rowid, {', '.join('old.' + c for c in columns)});
+            END"""
+        )
+        conn.execute(
+            f"""CREATE TRIGGER IF NOT EXISTS {kw_table}_au AFTER UPDATE ON {table} BEGIN
+                INSERT INTO {kw_table}({kw_table}, rowid, {col_list})
+                VALUES ('delete', old.rowid, {', '.join('old.' + c for c in columns)});
+                INSERT INTO {kw_table}(rowid, {col_list})
+                VALUES (new.rowid, {', '.join('new.' + c for c in columns)});
+            END"""
+        )
+
+        cursor = conn.execute(f"SELECT COUNT(*) FROM {table}")
+        main_count = cursor.fetchone()[0]
+        if main_count > 0:
+            cursor = conn.execute(f"SELECT COUNT(*) FROM {kw_table}")
+            kw_count = cursor.fetchone()[0]
+            if kw_count == 0:
+                logger.info("Rebuilding keyword FTS index for %s (%d rows)", table, main_count)
+                conn.execute(f"INSERT INTO {kw_table}({kw_table}) VALUES('rebuild')")
+
     def _backup_sqlite(self, src_path: str, dest_path: str) -> None:
         """Create a consistent backup copy of a SQLite database.
 
@@ -211,6 +258,7 @@ class DatabaseManager:
         ''')
         
         self._create_fts5_trigram(conn, 'feed_entries', ['title', 'summary', 'authors'])
+        self._create_fts5_keyword(conn, 'feed_entries', ['title', 'summary', 'authors'])
         conn.commit()
         conn.close()
 
@@ -296,6 +344,7 @@ class DatabaseManager:
         ''')
 
         self._create_fts5_trigram(conn, 'matched_entries', ['title', 'summary', 'abstract', 'authors'])
+        self._create_fts5_keyword(conn, 'matched_entries', ['title', 'summary', 'abstract', 'authors'])
         conn.commit()
         conn.close()
 
@@ -363,9 +412,10 @@ class DatabaseManager:
         ''')
 
         self._create_fts5_trigram(conn, 'entries', ['title', 'summary', 'abstract', 'authors'])
+        self._create_fts5_keyword(conn, 'entries', ['title', 'summary', 'abstract', 'authors'])
         conn.commit()
         conn.close()
-    
+
     def compute_entry_id(self, entry: Dict[str, Any]) -> str:
         """Generate a stable SHA-1 based ID for a feed entry."""
         candidate = entry.get("id") or entry.get("link")
@@ -545,8 +595,11 @@ class DatabaseManager:
         """
         with self.get_connection('current', row_factory=False) as conn:
             cursor = conn.cursor()
-            # Ensure FTS table and triggers exist before DELETE fires them.
+            # Ensure FTS tables and triggers exist before DELETE fires them.
             self._create_fts5_trigram(
+                conn, 'entries', ['title', 'summary', 'abstract', 'authors']
+            )
+            self._create_fts5_keyword(
                 conn, 'entries', ['title', 'summary', 'abstract', 'authors']
             )
             cursor.execute("DELETE FROM entries")
@@ -915,7 +968,8 @@ class DatabaseManager:
             has_abstract: If True only entries with abstract
             since: Published on or after this date (YYYY-MM-DD)
             until: Published on or before this date (YYYY-MM-DD)
-            search: Case-insensitive text search on title + abstract/summary
+            search: FTS5 keyword search on title + abstract/summary (supports
+                phrases ``"..."``, prefix ``term*``, boolean ``AND/OR/NOT``)
             fuzzy: Fuzzy text search via FTS5 trigram (min 3 chars, mutually
                 exclusive with *search*)
             order_by: SQL ORDER BY clause
@@ -974,14 +1028,13 @@ class DatabaseManager:
             conditions.append(f"{date_col} <= ?")
             params.append(until)
 
-        # Text search
+        # Keyword search via FTS5 (porter stemming, BM25 ranking)
+        kw_table = f"{table}_kw"
         if search:
-            search_col = 'summary' if db_key == 'all_feeds' else 'abstract'
             conditions.append(
-                f"(title LIKE ? COLLATE NOCASE OR {search_col} LIKE ? COLLATE NOCASE)"
+                f"rowid IN (SELECT rowid FROM {kw_table} WHERE {kw_table} MATCH ?)"
             )
-            term = f"%{search}%"
-            params.extend([term, term])
+            params.append(search)
 
         # Fuzzy search via FTS5 trigram
         fts_table = f"{table}_fts"
@@ -1011,6 +1064,35 @@ class DatabaseManager:
             cursor.execute(query, params)
             columns = [desc[0] for desc in cursor.description]
             rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+            # Attach BM25 scores when keyword search is active
+            if search and rows:
+                rowids = [r.get("rowid") for r in rows]
+                # rows from SELECT * may not include rowid; fetch separately
+                id_col = "id" if "id" in rows[0] else None
+                if id_col and not any(r.get("rowid") for r in rows):
+                    # Retrieve rowids for returned rows via their id
+                    placeholders = ",".join("?" * len(rows))
+                    id_vals = [r[id_col] for r in rows]
+                    cursor.execute(
+                        f"SELECT rowid, {id_col} FROM {table} WHERE {id_col} IN ({placeholders})",
+                        id_vals,
+                    )
+                    id_to_rowid = {row[1]: row[0] for row in cursor.fetchall()}
+                    rowids = [id_to_rowid.get(r[id_col]) for r in rows]
+
+                if rowids and rowids[0] is not None:
+                    bm25_map: dict[int, float] = {}
+                    for rid in rowids:
+                        cursor.execute(
+                            f"SELECT rank FROM {kw_table} WHERE {kw_table} MATCH ? AND rowid = ?",
+                            (search, rid),
+                        )
+                        bm25_row = cursor.fetchone()
+                        if bm25_row:
+                            bm25_map[rid] = bm25_row[0]
+                    for r, rid in zip(rows, rowids):
+                        r["bm25_score"] = bm25_map.get(rid)
 
         return rows, total
 

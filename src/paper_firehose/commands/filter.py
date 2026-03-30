@@ -6,7 +6,7 @@ HTML rendering is handled exclusively by the `html` command.
 
 import os
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from ..core.config import ConfigManager
 from ..core.database import DatabaseManager
@@ -16,19 +16,24 @@ from ..processors.feed_processor import FeedProcessor
 logger = logging.getLogger(__name__)
 
 
-def run(config_path: str, topic: Optional[str] = None) -> None:
+def run(
+    config_path: str,
+    topic: Optional[str] = None,
+    *,
+    output_json: bool = False,
+) -> Optional[Dict[str, Any]]:
     """Run the filtering pipeline for one or all topics.
-
-    Workflow:
-    1. Load and validate configuration, then prepare database state (backup + clear current run DB).
-    2. Fetch the configured feeds for each topic, yielding only new entries within the time window.
-    3. Apply the topic regex filters, writing matches to ``papers.db`` and to the history DB when enabled.
-    4. Record every processed entry in the deduplication database for future runs.
 
     Args:
         config_path: Path to the main configuration file
         topic: Optional specific topic to process (if ``None``, process every topic)
+        output_json: When True, suppress log noise and return a result dict.
+
+    Returns:
+        Result dict when *output_json* is True, otherwise None.
     """
+    if output_json:
+        logging.getLogger("paper_firehose").setLevel(logging.WARNING)
     logger.info("Starting filter command")
     
     try:
@@ -37,8 +42,7 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         
         # Validate configuration
         if not config_manager.validate_config():
-            logger.error("Configuration validation failed")
-            return
+            raise ValueError("Configuration validation failed")
         
         # Load main config
         config = config_manager.load_config()
@@ -64,7 +68,8 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         
         # Process each topic
         all_processed_entries = {}  # Track all entries for saving to dedup DB later
-        
+        topic_counts: Dict[str, int] = {}
+
         for topic_name in topics_to_process:
             try:
                 logger.info(f"Processing topic: {topic_name}")
@@ -92,6 +97,7 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
                 # Apply filters and save to papers.db/history.db as appropriate
                 matched_entries = feed_processor.apply_filters(entries_per_feed, topic_name)
                 
+                topic_counts[topic_name] = len(matched_entries)
                 logger.info(f"Completed processing topic '{topic_name}': {len(matched_entries)} entries")
                 
             except Exception as e:
@@ -106,10 +112,19 @@ def run(config_path: str, topic: Optional[str] = None) -> None:
         db_manager.close_all_connections()
         
         logger.info("Filter command completed successfully")
-        
+
+        if output_json:
+            return {
+                "command": "filter",
+                "topics": topic_counts,
+                "total_matched": sum(topic_counts.values()),
+            }
+
     except Exception as e:
         logger.error(f"Filter command failed: {e}")
         raise
+
+    return None
 
 
 def purge(config_path: str, days: Optional[int] = None, all_data: bool = False) -> None:

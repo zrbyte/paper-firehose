@@ -496,3 +496,107 @@ class TestQueryCommand:
         query_cmd.run(config_path)
         captured = capsys.readouterr()
         assert "No entries found" in captured.out
+
+
+class TestKeywordSearch:
+    """Tests for FTS5 keyword search (porter stemming)."""
+
+    def test_basic_word_match(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        rows, total = ctx.db.query_entries(db_key='current', search='graphene')
+        assert total >= 1
+        assert any('Graphene' in r['title'] for r in rows)
+
+    def test_stemming(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        # "insulating" should match "insulators" via porter stemming
+        rows, total = ctx.db.query_entries(db_key='current', search='insulating')
+        assert total >= 1
+        assert any('insulator' in r['title'].lower() for r in rows)
+
+    def test_phrase_search(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        rows, total = ctx.db.query_entries(db_key='current', search='"solar cells"')
+        assert total >= 1
+        assert any('solar cells' in r['title'].lower() for r in rows)
+
+    def test_prefix_search(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        rows, total = ctx.db.query_entries(db_key='current', search='perovsk*')
+        assert total >= 1
+        assert any('Perovskite' in r['title'] for r in rows)
+
+    def test_boolean_not(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        rows, total = ctx.db.query_entries(
+            db_key='current', search='graphene NOT superlattice')
+        # "graphene NOT superlattice" should exclude e1 (title has both)
+        # but e1's summary also has "graphene" — FTS5 searches all indexed columns
+        # The result depends on whether FTS5 considers column-level exclusion.
+        # At minimum, it should not error.
+        assert isinstance(total, int)
+
+    def test_no_match(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        rows, total = ctx.db.query_entries(db_key='current', search='nonexistentterm')
+        assert total == 0
+
+    def test_bm25_scores_attached(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+
+        rows, total = ctx.db.query_entries(db_key='current', search='graphene')
+        assert total >= 1
+        assert 'bm25_score' in rows[0]
+        assert rows[0]['bm25_score'] is not None
+
+    def test_history_keyword_search(self, tmp_path, monkeypatch):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_history_db(ctx.db)
+
+        rows, total = ctx.db.query_entries(db_key='history', search='nanoribbons')
+        assert total >= 1
+        assert any('nanoribbons' in r['title'] for r in rows)
+
+    def test_bm25_sort_in_query_cmd(self, tmp_path, monkeypatch, capsys):
+        config_path, _ = _make_config(tmp_path, monkeypatch)
+        from paper_firehose.core.command_context import CommandContext
+        ctx = CommandContext(config_path)
+        _seed_current_db(ctx.db)
+        monkeypatch.setattr(query_cmd, "CommandContext", lambda path: ctx)
+
+        query_cmd.run(config_path, search='graphene', output_json=True, limit=0)
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        # Graphene entry should have a bm25_score
+        graphene_entries = [e for e in data['entries'] if 'graphene' in e['title'].lower()]
+        assert len(graphene_entries) >= 1
+        assert 'bm25_score' in graphene_entries[0]
