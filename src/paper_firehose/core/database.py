@@ -374,7 +374,19 @@ class DatabaseManager:
         need_recreate = (len(columns) == 0) or (not required_columns.issubset(columns))
 
         if need_recreate:
-            cursor.execute('DROP TABLE IF EXISTS entries_fts')
+            # Drop ALL FTS virtual tables and sync triggers that reference 'entries'
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND (name LIKE 'entries_fts%' OR name LIKE 'entries_kw%')"
+            )
+            for (fts_name,) in cursor.fetchall():
+                cursor.execute(f'DROP TABLE IF EXISTS {fts_name}')
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger' "
+                "AND name LIKE 'entries_%'"
+            )
+            for (trig_name,) in cursor.fetchall():
+                cursor.execute(f'DROP TRIGGER IF EXISTS {trig_name}')
             cursor.execute('DROP TABLE IF EXISTS entries')
             cursor.execute('''
                 CREATE TABLE entries (
@@ -589,20 +601,30 @@ class DatabaseManager:
     def clear_current_db(self):
         """Clear the current run database.
 
-        Re-initialises the FTS index and triggers before deleting rows
-        so that DELETE triggers can fire cleanly even if a previous
-        migration or crash left the FTS table missing.
+        Drops and recreates the entries table (and its FTS indexes)
+        rather than issuing DELETE, which avoids FTS corruption if
+        the index is out of sync with the content table.
         """
         with self.get_connection('current', row_factory=False) as conn:
             cursor = conn.cursor()
-            # Ensure FTS tables and triggers exist before DELETE fires them.
-            self._create_fts5_trigram(
-                conn, 'entries', ['title', 'summary', 'abstract', 'authors']
+            # Drop FTS virtual tables
+            for suffix in ('_fts', '_kw'):
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    f"AND name LIKE 'entries{suffix}%'"
+                )
+                for (name,) in cursor.fetchall():
+                    cursor.execute(f"DROP TABLE IF EXISTS {name}")
+            # Drop sync triggers
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger' "
+                "AND name LIKE 'entries_%'"
             )
-            self._create_fts5_keyword(
-                conn, 'entries', ['title', 'summary', 'abstract', 'authors']
-            )
-            cursor.execute("DELETE FROM entries")
+            for (name,) in cursor.fetchall():
+                cursor.execute(f"DROP TRIGGER IF EXISTS {name}")
+            cursor.execute("DROP TABLE IF EXISTS entries")
+        # Reinitialize clean table + FTS indexes
+        self._init_current_db()
 
     def update_entry_rank(self, entry_id: str, topic: str, score: float | None, reasoning: str | None = None) -> None:
         """Update rank_score (and optionally rank_reasoning) for a single entry.
