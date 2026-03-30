@@ -18,6 +18,7 @@ from .commands import migrate_db as migrate_cmd
 from .commands import pqa_summary as pqa_cmd
 from .commands import query as query_cmd
 from .commands import rank as rank_cmd
+from .commands import status as status_cmd
 from .core.config import ConfigManager, DEFAULT_CONFIG_PATH
 from .core.paths import get_data_dir
 
@@ -358,40 +359,12 @@ def query(ctx: click.Context, db_key: str, topic: str, min_rank: float,
 
 
 @cli.command("status")
+@click.option("--json", "output_json", is_flag=True, help="Output as JSON.")
 @click.pass_context
-def status(ctx: click.Context) -> None:
-    """Show system status and configuration."""
+def status(ctx: click.Context, output_json: bool) -> None:
+    """Show system status, configuration, and database freshness."""
     try:
-        config_manager = ConfigManager(ctx.obj["config_path"])
-        config_path = config_manager.config_path
-        click.echo(f"📄 Config file: {config_path}")
-
-        if config_manager.validate_config():
-            click.echo("✅ Configuration is valid")
-        else:
-            click.echo("❌ Configuration validation failed")
-            return
-
-        # Warn about unrecognised config keys
-        unknown = config_manager.check_unknown_keys()
-        if unknown:
-            click.echo(f"⚠️  {len(unknown)} unknown config key(s):")
-            for w in unknown:
-                click.echo(f"   {w}")
-
-        topics = config_manager.get_available_topics()
-        click.echo(f"📚 Available topics: {', '.join(topics)}")
-
-        feeds = config_manager.get_enabled_feeds()
-        click.echo(f"📡 Enabled feeds: {len(feeds)}")
-
-        config = config_manager.load_config()
-        db_config = config["database"]
-        click.echo("🗄️  Database paths:")
-        click.echo(f"   Current run: {db_config['path']}")
-        click.echo(f"   All feeds: {db_config['all_feeds_path']}")
-        click.echo(f"   History: {db_config['history_path']}")
-
+        status_cmd.run(ctx.obj["config_path"], output_json=output_json)
     except Exception as exc:  # pragma: no cover - click echoes the message
         click.echo(f"❌ Error checking status: {exc}", err=True)
 

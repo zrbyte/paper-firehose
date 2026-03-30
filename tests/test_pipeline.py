@@ -126,10 +126,8 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
     monkeypatch.setattr(rank_cmd, "STRanker", DummyRanker)
 
     def fake_fill_arxiv_summaries(db_manager, topics=None):
-        conn = sqlite3.connect(db_manager.db_paths["current"])
-        conn.execute("UPDATE entries SET abstract = 'Filled abstract'")
-        conn.commit()
-        conn.close()
+        with db_manager.get_connection("current") as conn:
+            conn.execute("UPDATE entries SET abstract = 'Filled abstract'")
         return 1
 
     def fake_crossref_pass(

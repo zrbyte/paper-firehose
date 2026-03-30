@@ -129,8 +129,10 @@ Commands
     paper-firehose query --all-feeds --sort date --limit 20 --offset 40
     ```
 
-- `status`
+- `status [--json]`
   - Validate configuration, warn about unrecognised config keys, and list available topics, enabled feeds, and database paths.
+  - Shows database freshness: entry counts, pipeline stage breakdown (`new`/`filtered`/`ranked`/`summarized`), file sizes, and latest timestamps.
+  - `--json` outputs structured JSON for programmatic use (e.g., by LLM agents checking whether today's pipeline has run).
 
 ## Python API
 
@@ -223,6 +225,23 @@ HTML
 
 Email
 - Requires `email.smtp` config: `host`, `port`, `username`, and either `password` or `password_file`. Uses SSL.
+
+## Claude Code skill
+
+The `claude-skills/` directory contains a [Claude Code](https://claude.ai/claude-code) slash command (`/paper-firehose`) that turns the CLI into an interactive research assistant. To install it, copy (or symlink) the skill file into your Claude Code project commands directory:
+
+```bash
+# One-time setup (from the repo root)
+mkdir -p ~/.claude/projects/<project-key>/commands
+cp claude-skills/paper-firehose.md ~/.claude/projects/<project-key>/commands/
+```
+
+Replace `<project-key>` with your Claude Code project identifier (the mangled path shown under `~/.claude/projects/`).
+
+Once installed, type `/paper-firehose` in a Claude Code session to:
+- Check if today's pipeline has run (via `status --json`)
+- Offer to run `filter -> rank -> abstracts` if data is stale
+- Query and summarise today's papers or search the historical database
 
 ## Future dev
 - Run ranking on the historic database, with a unique query. To search for specific papers.

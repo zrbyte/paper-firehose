@@ -205,6 +205,7 @@ class TestRankUpdates:
 
         rows = db.get_current_entries(topic="topic")
         assert abs(rows[0]["rank_score"] - 0.87) < 1e-6
+        assert rows[0]["status"] == "ranked"
 
     def test_update_entry_rank_with_reasoning(self, tmp_path):
         db = DatabaseManager(_make_config(tmp_path))

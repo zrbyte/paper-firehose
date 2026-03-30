@@ -537,9 +537,18 @@ class DatabaseManager:
     # reads via `get_current_entries` directly.
     
     def clear_current_db(self):
-        """Clear the current run database."""
+        """Clear the current run database.
+
+        Re-initialises the FTS index and triggers before deleting rows
+        so that DELETE triggers can fire cleanly even if a previous
+        migration or crash left the FTS table missing.
+        """
         with self.get_connection('current', row_factory=False) as conn:
             cursor = conn.cursor()
+            # Ensure FTS table and triggers exist before DELETE fires them.
+            self._create_fts5_trigram(
+                conn, 'entries', ['title', 'summary', 'abstract', 'authors']
+            )
             cursor.execute("DELETE FROM entries")
 
     def update_entry_rank(self, entry_id: str, topic: str, score: float | None, reasoning: str | None = None) -> None:
@@ -555,12 +564,12 @@ class DatabaseManager:
             cursor = conn.cursor()
             if reasoning is None:
                 cursor.execute(
-                    "UPDATE entries SET rank_score = ? WHERE id = ? AND topic = ?",
+                    "UPDATE entries SET rank_score = ?, status = 'ranked' WHERE id = ? AND topic = ?",
                     (score, entry_id, topic),
                 )
             else:
                 cursor.execute(
-                    "UPDATE entries SET rank_score = ?, rank_reasoning = ? WHERE id = ? AND topic = ?",
+                    "UPDATE entries SET rank_score = ?, rank_reasoning = ?, status = 'ranked' WHERE id = ? AND topic = ?",
                     (score, reasoning, entry_id, topic),
                 )
 

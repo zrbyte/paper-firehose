@@ -58,7 +58,7 @@ class HTMLGenerator:
         self._create_new_html_file(output_path, heading or topic_name, description)
         
         # Get entries from papers.db for this topic
-        entries = db_manager.get_current_entries(topic=topic_name, status='filtered')
+        entries = db_manager.get_current_entries(topic=topic_name)
         
         # Organize entries by feed
         entries_per_feed = {}
