@@ -228,23 +228,46 @@ Email
 
 ## Claude Code skill
 
-The `claude-skills/` directory contains a [Claude Code](https://claude.ai/claude-code) slash command (`/paper-firehose`) that turns the CLI into an interactive research assistant. To install it, copy (or symlink) the skill file into your Claude Code project commands directory:
+The `claude-skills/` directory contains a [Claude Code](https://claude.ai/claude-code) slash command (`/paper-firehose`) that turns the CLI into an interactive research assistant.
+
+### Install
+
+Copy the skill file into a Claude Code commands directory. You can install it at project level, or globally so it works from any working directory:
 
 ```bash
-# One-time setup (from the repo root)
-mkdir -p ~/.claude/projects/<project-key>/commands
-cp claude-skills/paper-firehose.md ~/.claude/projects/<project-key>/commands/
+# Option A: project-level (works when Claude Code is started from the repo)
+mkdir -p .claude/commands
+cp claude-skills/paper-firehose.md .claude/commands/
+
+# Option B: global (works from any directory)
+# Find your home-directory project key under ~/.claude/projects/
+# It is typically: -Users-<username>
+mkdir -p ~/.claude/projects/-Users-$(whoami)/commands
+cp claude-skills/paper-firehose.md ~/.claude/projects/-Users-$(whoami)/commands/
 ```
 
-Replace `<project-key>` with your Claude Code project identifier (the mangled path shown under `~/.claude/projects/`).
+You can install in both locations — Claude Code will pick up whichever matches the current session.
 
-Once installed, type `/paper-firehose` in a Claude Code session to:
-- Check if today's pipeline has run (via `status --json`)
-- Offer to run `filter -> rank -> abstracts` if data is stale
-- Query and summarise today's papers or search the historical database
+### Usage
 
-## Future dev
-- Run ranking on the historic database, with a unique query. To search for specific papers.
+Type `/paper-firehose` in a Claude Code session. With no arguments it shows a status summary and offers next actions. You can also pass a request directly:
+
+```
+/paper-firehose                              # status + offer next actions
+/paper-firehose what papers came in today?   # show today's pipeline results
+/paper-firehose papers about graphene STM    # search history DB with semantic ranking
+/paper-firehose run the pipeline             # run filter -> rank -> abstracts
+/paper-firehose summarize paper #3           # Paper-QA summary (arXiv only, needs OPENAI_API_KEY)
+```
+
+### What it does
+
+- Checks pipeline freshness via `status --json`
+- Offers to run `filter -> rank -> abstracts` if data is stale
+- Searches the history database (25k+ matched entries) using keyword + semantic reranking
+- Presents results with titles, scores, dates, journals, and links
+- Supports drill-down ("tell me about #3"), pagination ("show more"), and Paper-QA summaries
+- Falls back to the all-feeds database if history returns too few results
 
 ## Final notes
 

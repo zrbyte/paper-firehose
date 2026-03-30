@@ -952,6 +952,26 @@ def _normalize_summary_json(raw: str) -> Optional[str]:
     return json.dumps({'summary': summary_val, 'methods': methods_val}, ensure_ascii=False)
 
 
+def _lookup_entry_id_by_arxiv(db: DatabaseManager, arxiv_id: str) -> Optional[str]:
+    """Look up an entry_id in the history DB by arXiv ID (matching the link column)."""
+    # Strip version suffix for matching (e.g. 2510.13641v2 -> 2510.13641)
+    base_id = re.sub(r'v\d+$', '', arxiv_id)
+    patterns = [f"%arxiv.org/abs/{base_id}%", f"%arxiv.org/pdf/{base_id}%"]
+    try:
+        with db.get_connection('history', row_factory=True) as conn:
+            for pat in patterns:
+                row = conn.execute(
+                    "SELECT entry_id FROM matched_entries WHERE link LIKE ? LIMIT 1",
+                    (pat,),
+                ).fetchone()
+                if row:
+                    logger.debug("Resolved arXiv:%s -> entry_id=%s via history DB", arxiv_id, row['entry_id'])
+                    return row['entry_id']
+    except sqlite3.Error as e:
+        logger.debug("Failed to look up arXiv:%s in history: %s", arxiv_id, e)
+    return None
+
+
 def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: str, *, topic: Optional[str] = None) -> None:
     """Write paper_qa_summary JSON into both current and history DBs.
 
@@ -1075,6 +1095,9 @@ def run(
         DEFAULT_RPS = 0.3
         min_interval_default = max(3.0, 1.0 / max(DEFAULT_RPS, 0.01))
 
+        # Resolve topic context for summarization: explicit --topic, or first available topic
+        manual_topic_ctx: Optional[str] = topic or (topics[0] if topics else None)
+
         ids: List[str] = []
         for a in arxiv:
             nid = _normalize_arxiv_arg(a)
@@ -1091,18 +1114,18 @@ def run(
             archived_path = _find_archived_pdf(archive_dir, arxiv_id)
             if archived_path:
                 logger.debug("Using archived PDF for %s: %s", arxiv_id, archived_path)
-                summarize_targets.append((None, arxiv_id, archived_path, None))
+                summarize_targets.append((None, arxiv_id, archived_path, manual_topic_ctx))
                 continue
             if os.path.exists(dest_path):
                 logger.debug("Skipping %s (already downloaded)", arxiv_id)
                 downloaded_paths.append(dest_path)
-                summarize_targets.append((None, arxiv_id, dest_path, None))
+                summarize_targets.append((None, arxiv_id, dest_path, manual_topic_ctx))
                 continue
             pdf_url = _query_arxiv_api_for_pdf(arxiv_id, mailto=mailto, session=sess) or f"https://arxiv.org/pdf/{arxiv_id}.pdf"
             ok = _download_pdf(pdf_url, dest_path, mailto=mailto, session=sess, max_retries=DEFAULT_MAX_RETRIES)
             if ok:
                 downloaded_paths.append(dest_path)
-                summarize_targets.append((None, arxiv_id, dest_path, None))
+                summarize_targets.append((None, arxiv_id, dest_path, manual_topic_ctx))
                 total_downloaded += 1
                 logger.info("Downloaded arXiv PDF: %s -> %s", arxiv_id, dest_path)
             else:
@@ -1193,77 +1216,80 @@ def run(
         logger.info("Completed pqa_summary (history ids): requested=%d, downloaded=%d, archived=%d", len(entry_ids), total_downloaded, len(downloaded_paths))
         # Fall through to optional summarization below
 
-    for t in topics:
-        # If a specific topic is requested, only process that
-        if topic and t != topic:
-            continue
-
-        # Load topic config and extract paperqa settings (cache for reuse in summarization)
-        try:
-            topic_cfg = cfg_mgr.load_topic_config(t)
-            paperqa_cfg_topic = _get_topic_paperqa_config(topic_cfg, t)
-            topic_cfg_cache[t] = topic_cfg
-        except ValueError as e:
-            logger.error(str(e))
-            continue  # Skip topics without paperqa config
-        except Exception as e:
-            logger.error("Failed to load topic config for '%s': %s. Skipping.", t, e)
-            continue
-
-        # Extract topic-specific settings
-        min_rank_topic = float(paperqa_cfg_topic.get('download_rank_threshold', 0.35))
-        max_retries_topic = int(paperqa_cfg_topic.get('max_retries', 3))
-        rps_topic = float(paperqa_cfg_topic.get('rps', 0.3))
-        min_interval_topic = max(3.0, 1.0 / max(rps_topic, 0.01))
-
-        rows = _iter_ranked_entries(db, t, min_rank_topic)
-        if limit is not None:
-            rows = rows[: int(limit)]
-        logger.info("Topic '%s': %d candidates with rank >= %.2f", t, len(rows), min_rank_topic)
-        total_candidates += len(rows)
-
-        for row in rows:
-            arxiv_id = _resolve_arxiv_id(row)
-            if not arxiv_id:
+    # Skip topic-based DB scan when explicit --arxiv or --entry-id targets were provided;
+    # in that mode the user wants only the specified papers, not the full ranked set.
+    if not arxiv and not entry_ids:
+        for t in topics:
+            # If a specific topic is requested, only process that
+            if topic and t != topic:
                 continue
 
-            # Prefer versioned ID in file name if present
-            fname_id = arxiv_id
-            # Ensure filename-safe
-            fname = f"{fname_id.replace('/', '_')}.pdf"
-            dest_path = os.path.join(download_dir, fname)
-
-            # Skip if already archived
-            archived_path = _find_archived_pdf(archive_dir, arxiv_id)
-            if archived_path:
-                logger.debug("Using archived PDF for %s: %s", arxiv_id, archived_path)
-                summarize_targets.append((row['id'], arxiv_id, archived_path, t))
-                continue
-            # Skip if already downloaded in this folder
-            if os.path.exists(dest_path):
-                logger.debug("Skipping %s (already downloaded)", arxiv_id)
-                downloaded_paths.append(dest_path)
-                summarize_targets.append((row['id'], arxiv_id, dest_path, t))
+            # Load topic config and extract paperqa settings (cache for reuse in summarization)
+            try:
+                topic_cfg = cfg_mgr.load_topic_config(t)
+                paperqa_cfg_topic = _get_topic_paperqa_config(topic_cfg, t)
+                topic_cfg_cache[t] = topic_cfg
+            except ValueError as e:
+                logger.error(str(e))
+                continue  # Skip topics without paperqa config
+            except Exception as e:
+                logger.error("Failed to load topic config for '%s': %s. Skipping.", t, e)
                 continue
 
-            pdf_url = _query_arxiv_api_for_pdf(arxiv_id, mailto=mailto, session=sess) or f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-            ok = _download_pdf(pdf_url, dest_path, mailto=mailto, session=sess, max_retries=max_retries_topic)
-            if ok:
-                downloaded_paths.append(dest_path)
-                summarize_targets.append((row['id'], arxiv_id, dest_path, t))
-                total_downloaded += 1
-                logger.info("Downloaded arXiv PDF: %s -> %s", arxiv_id, dest_path)
-            else:
-                # Remove partial file if any
-                try:
-                    if os.path.exists(dest_path):
-                        os.remove(dest_path)
-                except OSError:
-                    pass
-                logger.warning("Failed to download PDF for arXiv:%s", arxiv_id)
+            # Extract topic-specific settings
+            min_rank_topic = float(paperqa_cfg_topic.get('download_rank_threshold', 0.35))
+            max_retries_topic = int(paperqa_cfg_topic.get('max_retries', 3))
+            rps_topic = float(paperqa_cfg_topic.get('rps', 0.3))
+            min_interval_topic = max(3.0, 1.0 / max(rps_topic, 0.01))
 
-            # Polite delay (minimum 3 seconds per ToU; also covers PDF request)
-            time.sleep(min_interval_topic)
+            rows = _iter_ranked_entries(db, t, min_rank_topic)
+            if limit is not None:
+                rows = rows[: int(limit)]
+            logger.info("Topic '%s': %d candidates with rank >= %.2f", t, len(rows), min_rank_topic)
+            total_candidates += len(rows)
+
+            for row in rows:
+                arxiv_id = _resolve_arxiv_id(row)
+                if not arxiv_id:
+                    continue
+
+                # Prefer versioned ID in file name if present
+                fname_id = arxiv_id
+                # Ensure filename-safe
+                fname = f"{fname_id.replace('/', '_')}.pdf"
+                dest_path = os.path.join(download_dir, fname)
+
+                # Skip if already archived
+                archived_path = _find_archived_pdf(archive_dir, arxiv_id)
+                if archived_path:
+                    logger.debug("Using archived PDF for %s: %s", arxiv_id, archived_path)
+                    summarize_targets.append((row['id'], arxiv_id, archived_path, t))
+                    continue
+                # Skip if already downloaded in this folder
+                if os.path.exists(dest_path):
+                    logger.debug("Skipping %s (already downloaded)", arxiv_id)
+                    downloaded_paths.append(dest_path)
+                    summarize_targets.append((row['id'], arxiv_id, dest_path, t))
+                    continue
+
+                pdf_url = _query_arxiv_api_for_pdf(arxiv_id, mailto=mailto, session=sess) or f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+                ok = _download_pdf(pdf_url, dest_path, mailto=mailto, session=sess, max_retries=max_retries_topic)
+                if ok:
+                    downloaded_paths.append(dest_path)
+                    summarize_targets.append((row['id'], arxiv_id, dest_path, t))
+                    total_downloaded += 1
+                    logger.info("Downloaded arXiv PDF: %s -> %s", arxiv_id, dest_path)
+                else:
+                    # Remove partial file if any
+                    try:
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                    except OSError:
+                        pass
+                    logger.warning("Failed to download PDF for arXiv:%s", arxiv_id)
+
+                # Polite delay (minimum 3 seconds per ToU; also covers PDF request)
+                time.sleep(min_interval_topic)
 
     # Move all successfully downloaded PDFs to archive dir
     _move_to_archive(downloaded_paths, archive_dir)
@@ -1360,12 +1386,14 @@ def run(
                 if not norm:
                     # As a last resort, write the raw response
                     norm = raw_ans
+                if not eid and aid:
+                    # Manual --arxiv mode: look up entry in history DB by arXiv link
+                    eid = _lookup_entry_id_by_arxiv(db, aid)
                 if eid:
                     _write_pqa_summary_to_dbs(db, eid, norm, topic=tctx)
                     summarized += 1
                 else:
-                    # No entry id: history-only test not possible; skip write
-                    logger.debug("Got summary for %s but no entry_id present; skipping DB write", aid)
+                    logger.warning("Got summary for arXiv:%s but no matching entry in DB; printing to stdout only", aid)
 
     logger.info("paper-qa summarization completed: wrote %d summaries", summarized)
 
