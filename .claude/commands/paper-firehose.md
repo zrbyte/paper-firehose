@@ -6,9 +6,7 @@ You are a research paper assistant for the paper-firehose project. Your job is t
 
 ## Environment
 
-- Conda environment: `paper-firehose-p311`
-- CLI: `conda run -n paper-firehose-p311 bash -c 'PYTHONPATH=src python -m paper_firehose.cli <command>'`
-- Working directory: the paper-firehose repo root
+- CLI: `paper-firehose <command>`
 - Suppress log noise: append `2>/dev/null` to CLI calls. On failure, re-run without it to see the error.
 
 ## Default behavior (bare invocation)
@@ -24,7 +22,7 @@ When the user invokes `/paper-firehose` with no specific request:
 Run `status --json` to determine pipeline state:
 
 ```
-conda run -n paper-firehose-p311 bash -c 'PYTHONPATH=src python -m paper_firehose.cli status --json' 2>/dev/null
+paper-firehose status --json 2>/dev/null
 ```
 
 Parse the JSON output and check:
@@ -42,10 +40,10 @@ If `latest_discovered_date` is not today (or the database is empty), tell the us
 If the user agrees, run the pipeline steps sequentially. Each step must succeed before the next:
 
 ```
-conda run -n paper-firehose-p311 bash -c 'PYTHONPATH=src python -m paper_firehose.cli purge --days 1' 2>/dev/null
-conda run -n paper-firehose-p311 bash -c 'PYTHONPATH=src python -m paper_firehose.cli filter' 2>/dev/null
-conda run -n paper-firehose-p311 bash -c 'PYTHONPATH=src python -m paper_firehose.cli rank' 2>/dev/null
-conda run -n paper-firehose-p311 bash -c 'PYTHONPATH=src python -m paper_firehose.cli abstracts' 2>/dev/null
+paper-firehose purge --days 1 2>/dev/null
+paper-firehose filter 2>/dev/null
+paper-firehose rank 2>/dev/null
+paper-firehose abstracts 2>/dev/null
 ```
 
 If the user passes arguments like a topic name, pass `--topic <name>` to filter, rank, and abstracts.
@@ -66,15 +64,15 @@ There are three databases. **Default to the history DB** for all queries unless 
 
 For today's ranked papers (current DB):
 ```
-conda run -n paper-firehose-p311 bash -c 'PYTHONPATH=src python -m paper_firehose.cli query --json --limit 20 --fields title,rank_score,published_date,topic,authors,abstract,doi,link' 2>/dev/null
+paper-firehose query --json --limit 20 --fields title,rank_score,published_date,topic,authors,abstract,doi,link 2>/dev/null
 ```
 
 For all other queries (history DB — the default):
 ```
-conda run -n paper-firehose-p311 bash -c 'PYTHONPATH=src python -m paper_firehose.cli query --history --search "KEYWORD" --rerank "FULL QUERY" --since YYYY-MM-DD --limit 20 --json --fields title,link,published_date,feed_name,rank_score,rerank_score,authors,abstract,paper_qa_summary,id' 2>/dev/null
+paper-firehose query --history --search "KEYWORD" --rerank "FULL QUERY" --since YYYY-MM-DD --limit 20 --json --fields title,link,published_date,feed_name,rank_score,rerank_score,authors,abstract,paper_qa_summary,id 2>/dev/null
 ```
 
-Where `KEYWORD` is 1-2 broad terms extracted from the query, and `FULL QUERY` is the user's complete search intent.
+Where `KEYWORD` is 1-5 broad terms extracted from the query, and `FULL QUERY` is the user's complete search intent.
 
 Additional flags:
 - `--topic <name>`: filter by topic
@@ -129,7 +127,7 @@ The `paper_qa_summary` field in query results may already contain a summary. Alw
 
 To check a specific paper, re-query with the paper's identifying info:
 ```
-conda run -n paper-firehose-p311 bash -c 'PYTHONPATH=src python -m paper_firehose.cli query --history --search "TITLE_KEYWORD" --limit 5 --json --fields title,paper_qa_summary,link,id' 2>/dev/null
+paper-firehose query --history --search "TITLE_KEYWORD" --limit 5 --json --fields title,paper_qa_summary,link,id 2>/dev/null
 ```
 
 If `paper_qa_summary` is non-null, present it to the user. Done.
@@ -142,12 +140,12 @@ If no summary exists, **confirm before running** — this uses the OpenAI API an
 
 **For arXiv papers** (link contains `arxiv.org`): Extract the arXiv ID from the link (e.g., `2603.22111` from `https://arxiv.org/abs/2603.22111`) and run:
 ```
-conda run -n paper-firehose-p311 bash -c 'PYTHONPATH=src python -m paper_firehose.cli pqa_summary --arxiv <ID> --summarize' 2>/dev/null
+paper-firehose pqa_summary --arxiv <ID> --summarize 2>/dev/null
 ```
 
 **For papers in the history DB**: Use the entry ID from the query results:
 ```
-conda run -n paper-firehose-p311 bash -c 'PYTHONPATH=src python -m paper_firehose.cli pqa_summary --entry-id <ID> --use-history --summarize' 2>/dev/null
+paper-firehose pqa_summary --entry-id <ID> --use-history --summarize 2>/dev/null
 ```
 
 Generated summaries are automatically stored back into the history DB by the CLI, so subsequent queries will return them without re-running Paper-QA.
