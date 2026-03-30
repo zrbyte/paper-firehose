@@ -328,7 +328,26 @@ def query(ctx: click.Context, db_key: str, topic: str, min_rank: float,
           status_filter: str,
           has_doi: bool, has_abstract: bool, sort: str, limit: int,
           offset: int, output_json: bool, count_only: bool, fields: str) -> None:
-    """Query paper databases for entries."""
+    """Query paper databases for entries.
+
+    Examples:
+
+    \b
+      # Search history for "graphene" and rank by semantic similarity
+      paper-firehose query --history --search graphene --rerank "graphene transport measurements"
+
+    \b
+      # Top 10 from today's run
+      paper-firehose query --limit 10
+
+    \b
+      # Fuzzy search (typo-tolerant, single word)
+      paper-firehose query --history --fuzzy "pervskite"
+
+    \b
+      # JSON output for scripting / LLM agents
+      paper-firehose query --history --search perovskite --json --fields title,link,rank_score
+    """
     try:
         query_cmd.run(
             ctx.obj["config_path"],
