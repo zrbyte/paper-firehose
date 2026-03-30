@@ -69,7 +69,7 @@ paper-firehose query --json --limit 20 --fields title,rank_score,published_date,
 
 For all other queries (history DB — the default):
 ```
-paper-firehose query --history --search "KEYWORD" --rerank "FULL QUERY" --since YYYY-MM-DD --limit 20 --json --fields title,link,published_date,feed_name,rank_score,rerank_score,authors,abstract,paper_qa_summary,id 2>/dev/null
+paper-firehose query --history --search "KEYWORD" --rerank "FULL QUERY" --since YYYY-MM-DD --limit 20 --json --fields title,link,matched_date,feed_name,rank_score,rerank_score,authors,abstract,paper_qa_summary,id 2>/dev/null
 ```
 
 Where `KEYWORD` is 1-5 broad terms extracted from the query, and `FULL QUERY` is the user's complete search intent.
@@ -92,7 +92,7 @@ When the user says relative dates, compute the absolute date from today's date:
 Present results as a numbered list, sorted by score (highest first):
 - Format each entry on two lines:
   ```
-  N. **score** | date | **Title** | journal
+  N. **score** | matched_date | **Title** | journal
      link
   ```
 - The title must be shown as text (bold), with the URL on the next line (indented) so the terminal renders it as a clickable link
