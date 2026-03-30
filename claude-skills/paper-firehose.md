@@ -54,11 +54,13 @@ If the user specified a topic: add `--topic <name>`.
 If the user wants to search: add `--search "term"` or `--fuzzy "term"`.
 If the user wants history: add `--history`.
 
-Present results as a concise summary:
-- Total count and date range
-- List papers sorted by rank score (highest first)
-- For each paper: title, authors, rank score, and a 1-line abstract excerpt
-- Include the DOI or link for papers the user might want to read
+Present results as a numbered list, sorted by score (highest first):
+- Each paper title MUST be a clickable markdown link: `[Title](link)`
+- Format: `N. **score** | date | [Title](link) | journal`
+- After the list, offer to show abstracts or more details for specific papers if the user wants
+- Include total count and note if there are more results beyond the limit
+
+When the user asks to search by keyword, use `--fuzzy "term"` to find candidates and `--rerank "term"` to score them by semantic similarity. Always include `--fields title,link,published_date,feed_name,rank_score,rerank_score,authors,abstract` so links are available for formatting. Use `--since` for date-bounded searches (e.g. `--since YYYY-MM-DD` for "last week").
 
 ## Handling user requests
 
