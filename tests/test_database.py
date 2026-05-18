@@ -446,13 +446,13 @@ class TestBackups:
         assert "history" in backups
         assert Path(backups["all_feeds"]).exists()
 
-    def test_rotate_keeps_three(self, tmp_path):
+    def test_rotate_keeps_one(self, tmp_path):
         db = DatabaseManager(_make_config(tmp_path))
         for _ in range(5):
             db.backup_important_databases()
         import glob as globmod
         pattern = str(tmp_path / "all_feed_entries.*.backup.db")
-        assert len(globmod.glob(pattern)) <= 3
+        assert len(globmod.glob(pattern)) <= 1
 
 
 # ---------------------------------------------------------------------------

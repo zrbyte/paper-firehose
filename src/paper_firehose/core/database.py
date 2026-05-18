@@ -178,7 +178,7 @@ class DatabaseManager:
         finally:
             src_conn.close()
 
-    def _rotate_backups(self, directory: str, stem: str, keep: int = 3) -> None:
+    def _rotate_backups(self, directory: str, stem: str, keep: int = 1) -> None:
         """Keep only the newest `keep` backups matching the given stem.
 
         Backup files are expected to match pattern: f"{stem}.YYYYMMDD-HHMMSS.backup.db".
@@ -200,7 +200,7 @@ class DatabaseManager:
         """Backup history and all_feeds databases with timestamped rotation.
 
         - Writes timestamped backups alongside the source DBs in the runtime data directory.
-        - Keeps up to 3 most recent backups per database, pruning older ones.
+        - Keeps only the most recent backup per database, pruning older ones.
 
         Returns a dict mapping logical db keys to the created backup file paths.
         """
@@ -220,8 +220,8 @@ class DatabaseManager:
                 self._backup_sqlite(path, dest)
                 backups[key] = dest
                 logger.info(f"Backed up database '{key}' to {dest}")
-                # Rotate: keep only newest 3
-                self._rotate_backups(directory, stem, keep=3)
+                # Rotate: keep only the newest backup
+                self._rotate_backups(directory, stem, keep=1)
             except Exception as e:
                 logger.error(f"Failed to backup database '{key}' from {path} to {dest}: {e}")
         return backups
