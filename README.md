@@ -2,7 +2,7 @@
 
 Being well read is a pillar of good science, but the volume of new papers makes it impossible to truly keep up to date. Paper-firehose is a way to filter the flood of new papers, so that it becomes a trickle, that one can go through in less than 5 minutes a day. It can check daily the RSS feeds of journals you are interested in and throw out results that are not relevant to your interests. The papers that remain get ranked by how relevant they are to keywords you specify. Our research group uses this to keep up to date with new papers that appear in our field.
 
-Matched papers get stored in an SQLite database. Based on this one can generate HTML pages or an email digest. Optionally full‑text (paper-qa) summaries of preprints from arXiv can also be generated. Have a look at a [demo](https://zrbyte.github.io/paper-firehose/results_perovskites_summary.html) of how the resulting list looks like, when we gather the daily new papers appearing in the field of 2D, van der Waals materials.
+Matched papers get stored in an SQLite database. Based on this one can generate HTML pages or an email digest. Optionally LLM summaries of the full text of arXiv preprints can also be generated. Have a look at a [demo](https://zrbyte.github.io/paper-firehose/results_perovskites_summary.html) of how the resulting list looks like, when we gather the daily new papers appearing in the field of 2D, van der Waals materials.
 
 Documentation: [zrbyte.github.io/paper-firehose](https://zrbyte.github.io/paper-firehose/index.html)
 
@@ -16,14 +16,14 @@ Documentation: [zrbyte.github.io/paper-firehose](https://zrbyte.github.io/paper-
 
 Configuration is done using only YAML text files. On first run the default YAML configs are copied into your runtime data directory (defaults to `~/.paper_firehose`, override with `PAPER_FIREHOSE_DATA_DIR`) from `src/paper_firehose/system/config`. Edit those files to customize feeds and topics. To reuse the GitHub Actions config locally, run `python scripts/bootstrap_config.py` – it copies `github_actions_config/` into your data directory so you work with the same files as the scheduled GitHub Actions workflow.
 
-Set up an OpenAI API key environment variable for paper-qa summarization to work.
+Set up an `OPENAI_API_KEY` environment variable for full-text summarization to work.
 
 ### Automated run using GitHub Actions
 - Fork the repo.
 - Copy `github_actions_config/topics/topic-template.yaml` to create topic files, or tweak the existing ones. See `github_actions_config/README.md` for a guided walkthrough.
 - Edit the `pages.yml` file in the `schedule.cron` part to set when the automated job runs.
 - Set up GitHub Secrets under Secrets and Variables / Actions. You don't need this step if you're only running the `filter` and `rank` commands. If you want the summarization to work setup an `OPENAI_API_KEY` environment variable. For email alert functionality, you will need `MAILING_LISTS_YAML` and `SMTP_PASSWORD` env variables.
-  - `OPENAI_API_KEY`. This is optional if you want to run the paper-qa full text summarization. Set up as a GitHub actions environment secret.
+  - `OPENAI_API_KEY`. Only needed for the full-text summarization (`pqa_summary --summarize`). Set up as a GitHub actions environment secret.
   - `MAILING_LISTS_YAML`. This contains the emails and other config that the email alert functionality needs. Just copy the contents of your `mailing_lists.yaml` file. This is a GitHub actions secret so you don't expose user info to the outside world in the repo.
   - `SMTP_PASSWORD`. The password for your email server. Set up as a GitHub actions secret.
 
@@ -46,12 +46,14 @@ paper-firehose export-recent  # optional: create smaller DB for fast web loading
 ```
 You can specify to run a specific topic, with the `--topic YOUR_TOPIC` option.
 
-3) Optional: full‑text summaries via [paper‑qa](https://futurehouse.gitbook.io/futurehouse-cookbook/paperqa)
+3) Optional: full‑text summaries of arXiv preprints
 ```
-# Download arXiv PDFs for high‑ranked entries and summarize with paper‑qa
+# Download arXiv PDFs for high‑ranked entries
 paper-firehose pqa_summary
+# ...and summarize each PDF with one OpenAI call (model set by the topic's paperqa.llm)
+paper-firehose pqa_summary --summarize
 ```
-Costs are dependent on which model you use, but generally are less than 0.1 USD per run for one topic.
+The PDF text is extracted locally and sent to the model in a single request; the answer is stored as JSON with `summary` and `methods` fields. A typical arXiv paper is 7k–40k tokens, so a summary costs roughly 0.03 USD with `gpt-6.2-sol` and well under a cent with `gpt-6-luna`.
 
 4) Email newsletter
 ```
@@ -156,7 +158,7 @@ html(topic="perovskites", output_path="results_perovskites.html")
 export_recent(days=60)  # default
 export_recent(days=30, output_name="matched_entries_history.recent.db")
 
-# Paper‑QA download + summarize
+# Download arXiv PDFs (+ summarize with summarize=True)
 pqa_summary(topic="perovskites", rps=0.33, limit=10)
 pqa_summary(arxiv=["2501.12345", "https://arxiv.org/abs/2501.12345v2"], summarize=True)
 
@@ -204,11 +206,11 @@ Key config fields
 - `priority_journals` and `priority_journal_boost`: optional global score boost by feed key.
 - Topic `ranking`: `query`, `model`, optional `negative_queries`, `preferred_authors`, `priority_author_boost`.
 - Topic `output`: `filename`, `filename_ranked`, `archive: true|false`.
-- `paperqa`: `download_rank_threshold`, `rps` (≤ 0.33 recommended), `max_retries`, and `prompt` for JSON‑only answers.
+- `paperqa` (full-text summaries; name kept for compatibility): `download_rank_threshold`, `rps` (≤ 0.33 recommended), `max_retries`, `llm` (OpenAI model), optional `reasoning_effort`, and `prompt` (`{ranking_query}` is substituted; output is always JSON with `summary` and `methods`).
 
 Environment variables
 - `PAPER_FIREHOSE_DATA_DIR` select/override the runtime data location
-- `OPENAI_API_KEY` for `pqa_summary`
+- `OPENAI_API_KEY` for `pqa_summary --summarize`
 - `MAILTO` used for polite arXiv/Crossref User‑Agent when not specified on CLI
 
 ## Data & Outputs
@@ -257,7 +259,7 @@ Type `/paper-firehose` in a Claude Code session. With no arguments it shows a st
 /paper-firehose what papers came in today?   # show today's pipeline results
 /paper-firehose papers about graphene STM    # search history DB with semantic ranking
 /paper-firehose run the pipeline             # run filter -> rank -> abstracts
-/paper-firehose summarize paper #3           # Paper-QA summary (arXiv only, needs OPENAI_API_KEY)
+/paper-firehose summarize paper #3           # Full-text summary (arXiv only, needs OPENAI_API_KEY)
 ```
 
 ### What it does

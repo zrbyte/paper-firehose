@@ -1,6 +1,6 @@
 """
-Paper-QA Summarizer
-===================
+PDF full-text summaries
+=======================
 
 This command selects entries from papers.db for a given topic with
 ``rank_score >=`` the configured threshold and downloads arXiv PDFs for them,
@@ -12,68 +12,25 @@ Workflow
 
 1. Load configuration and identify ranked entries above threshold
 2. Download arXiv PDFs (respecting rate limits, reusing archived copies)
-3. Run ``paper-qa`` over each PDF to produce grounded JSON summaries
-4. Write summaries into papers.db and matched_entries_history.db
+3. With ``summarize=True`` (CLI ``--summarize``): extract each PDF's text and
+   summarize it with one OpenAI call (``processors/pdf_summarizer.py``)
+4. Write ``{"summary", "methods"}`` JSON into the ``paper_qa_summary`` column of
+   papers.db and matched_entries_history.db
 
-Architecture: PaperQASession
-----------------------------
-
-The paper-qa library uses a persistent index stored in ``~/.pqa/`` (or wherever
-``PQA_HOME`` points). This creates a critical issue when processing multiple PDFs:
-
-**The Problem:**
-
-Paper-qa reads and caches ``PQA_HOME`` at *import time*. Python's import system
-caches modules, so subsequent ``import paperqa`` statements return the cached
-module without re-reading environment variables. This means:
-
-1. First PDF: Set PQA_HOME=/tmp/A, import paperqa → paperqa caches /tmp/A
-2. Process PDF successfully, clean up /tmp/A
-3. Second PDF: Set PQA_HOME=/tmp/B, import paperqa → NO-OP, module cached!
-4. Paperqa still uses /tmp/A (now deleted) → "no papers found" error
-
-**The Solution: PaperQASession**
-
-We use a context manager that:
-
-1. Creates ONE temp directory for the entire summarization session
-2. Sets ``PQA_HOME`` and changes working directory BEFORE importing paperqa
-3. Imports paperqa ONCE (it correctly caches the session directory)
-4. Processes each PDF in isolated paper/index directories
-5. Cleans up the session directory on exit
-
-This ensures paperqa always sees a valid, consistent environment throughout
-the entire run, regardless of how many PDFs are processed.
-
-**Why it works locally but fails on VPS:**
-
-- Local: Fresh Python process per test → import cache empty → works
-- VPS (pipx): Long-running process or module caching → import cache populated
-  from first PDF → subsequent PDFs fail
-
-Usage Example
--------------
-
-.. code-block:: python
-
-    with PaperQASession(llm='gpt-4o', summary_llm='gpt-4o-mini') as session:
-        for pdf_path in pdf_paths:
-            answer = session.summarize_pdf(pdf_path, "Summarize this paper")
-            if answer:
-                print(answer)
+The command and the ``paperqa:`` topic section keep their historical names;
+paper-qa itself is no longer used.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import json
 import time
 import shutil
 import logging
 import sqlite3
-import asyncio
-import threading
-import warnings
+from collections import defaultdict
 from typing import Dict, Any, List, Optional, Tuple
 
 import requests
@@ -83,14 +40,12 @@ from ..core.config import ConfigManager
 from ..core.database import DatabaseManager
 from ..core.command_utils import resolve_topics
 from ..core.paths import resolve_data_path
+from ..processors.pdf_summarizer import PdfSummarizer, build_instructions
 
 logger = logging.getLogger(__name__)
 
-# Suppress noisy async/litellm warnings that clutter output
-logging.getLogger("litellm").setLevel(logging.ERROR)
-logging.getLogger("asyncio").setLevel(logging.ERROR)
-warnings.filterwarnings("ignore", message=".*bound to a different event loop.*")
-warnings.filterwarnings("ignore", message=".*coroutine.*was never awaited.*")
+DEFAULT_RPS = 0.3
+DEFAULT_MAX_RETRIES = 3
 
 
 ARXIV_API = "https://export.arxiv.org/api/query"
@@ -113,84 +68,11 @@ def _get_topic_paperqa_config(topic_cfg: Dict[str, Any], topic_name: str) -> Dic
     if not topic_pqa:
         raise ValueError(
             f"Topic '{topic_name}' missing required 'paperqa' section. "
-            "All topics must define paper-qa settings."
+            "All topics must define PDF summary settings under 'paperqa'."
         )
 
     logger.info("Loaded paperqa config for topic '%s'", topic_name)
     return topic_pqa
-
-
-def _build_paperqa_settings_kwargs(
-    settings_cls: type,
-    *,
-    llm: Optional[str],
-    summary_llm: Optional[str],
-) -> Dict[str, Any]:
-    """Build Settings kwargs for Docs.aquery() — no agent, no file paths needed."""
-    fields = getattr(settings_cls, "model_fields", None)
-    if fields is None:
-        fields = getattr(settings_cls, "__fields__", None)
-    field_names = set(fields.keys()) if fields else set()
-
-    settings_kwargs: Dict[str, Any] = {}
-
-    if llm:
-        settings_kwargs["llm"] = llm
-    if summary_llm:
-        settings_kwargs["summary_llm"] = summary_llm
-
-    # GPT-5 models only support temperature=1; paperqa defaults to 0.0 which
-    # causes a 400 BadRequestError. Override at Settings level.
-    is_gpt5 = (llm and 'gpt-5' in llm.lower()) or \
-              (summary_llm and 'gpt-5' in summary_llm.lower())
-    if is_gpt5 and "temperature" in field_names:
-        settings_kwargs["temperature"] = 1.0
-
-    # Disable vision API / media enrichment.
-    # PDF figures are often extracted in formats (BMP/TIFF) that OpenAI rejects,
-    # causing floods of BadRequestError retries and chunk failures.
-    # paper-qa has changed this API across versions:
-    #   - New (>=2026.x): ParsingSettings.multimodal (default=ON_WITH_ENRICHMENT=1) — set to False
-    #   - Older (5.x with parse_pdf_tables_and_figures field): set to False
-    if "parsing" in field_names:
-        parsing_cfg: Dict[str, Any] = {"use_doc_details": False}
-        try:
-            from paperqa.settings import ParsingSettings as _ParsingSettings  # type: ignore[import]
-            ps_fields = (
-                getattr(_ParsingSettings, "model_fields", None)
-                or getattr(_ParsingSettings, "__fields__", None)
-            )
-            if ps_fields:
-                if "multimodal" in ps_fields:
-                    # paper-qa >=2026.x: multimodal controls image/table extraction
-                    parsing_cfg["multimodal"] = False
-                    logger.debug("Disabled multimodal enrichment in ParsingSettings")
-                elif "parse_pdf_tables_and_figures" in ps_fields:
-                    # Older paper-qa with explicit figure extraction field
-                    parsing_cfg["parse_pdf_tables_and_figures"] = False
-                    logger.debug("Disabled parse_pdf_tables_and_figures in ParsingSettings")
-                else:
-                    logger.warning(
-                        "Neither 'multimodal' nor 'parse_pdf_tables_and_figures' found "
-                        "in ParsingSettings; figure extraction may cause image format errors"
-                    )
-            else:
-                logger.warning("Could not read ParsingSettings fields; figure extraction may cause errors")
-        except Exception as exc:
-            logger.warning("Could not check ParsingSettings for figure extraction field: %s", exc)
-        settings_kwargs["parsing"] = parsing_cfg
-
-    # Disable JSON-format chunk summaries.
-    # With use_json=True (default), paper-qa asks summary_llm to return JSON with
-    # "summary" and "relevance_score" for each chunk. Models that omit relevance_score
-    # (e.g. gpt-4o-mini) trigger LLMBadContextJSONError on every chunk.
-    # use_json=False switches to plain-text summaries where the score is simply an
-    # integer on its own line — simpler and universally supported.
-    if "prompts" in field_names:
-        settings_kwargs["prompts"] = {"use_json": False}
-        logger.debug("Disabled JSON chunk summaries (use_json=False) to avoid score extraction errors")
-
-    return settings_kwargs
 
 
 def _ensure_dirs(download_dir: str, archive_dir: str) -> None:
@@ -496,462 +378,6 @@ def _cleanup_archive(archive_dir: str, *, max_age_days: int = 30) -> None:
         logger.info("Removed %d archived PDFs older than %d days", removed, max_age_days)
 
 
-class PaperQASession:
-    """Context manager for processing multiple PDFs with paper-qa.
-
-    This class solves a critical issue with paper-qa's environment handling:
-    paper-qa reads ``PQA_HOME`` at import time and caches it internally.
-    Python's import system caches modules, so setting ``PQA_HOME`` before
-    subsequent imports has no effect - the module is already loaded with
-    the old value.
-
-    Solution Architecture
-    ---------------------
-
-    Instead of creating a new temp directory for each PDF (which fails after
-    the first PDF because paperqa is already imported with the old path),
-    we create ONE session directory and process all PDFs within it:
-
-    .. code-block:: text
-
-        Session Start
-        ├── Create /tmp/paperqa_session_xxx/
-        ├── Set PQA_HOME=/tmp/paperqa_session_xxx
-        ├── Change CWD to /tmp/paperqa_session_xxx
-        └── Import paperqa (caches /tmp/paperqa_session_xxx) ✓
-
-        For each PDF:
-        ├── Create /tmp/paperqa_session_xxx/paper_*/ and index_*/ dirs
-        ├── Copy PDF into paper_*/ and run ask() with those dirs
-        └── Remove per-PDF dirs to keep runs isolated
-
-        Session End
-        ├── Restore original CWD
-        ├── Restore original PQA_HOME
-        └── Delete /tmp/paperqa_session_xxx/
-
-    Key Design Decisions
-    --------------------
-
-    1. **Single import**: paperqa is imported exactly once per session, so
-       it correctly caches the session's temp directory.
-
-    2. **Per-PDF isolation**: Each PDF gets its own paper/index directories,
-       so there is no cross-contamination or stale index state between runs.
-
-    3. **PDF removal**: We remove each PDF after processing to ensure
-       paper-qa only sees one PDF at a time during indexing.
-
-    4. **Environment restoration**: We carefully restore ``PQA_HOME`` and
-       CWD on exit, even if an exception occurs.
-
-    Attributes
-    ----------
-    llm : str or None
-        The LLM model to use for paper-qa (e.g., 'gpt-4o', 'gpt-5.2').
-    summary_llm : str or None
-        The summary LLM model (e.g., 'gpt-4o-mini').
-    temp_dir : str or None
-        Path to the session's temporary directory (set on __enter__).
-    original_cwd : str or None
-        The working directory before session start (for restoration).
-    original_pqa_home : str or None
-        The PQA_HOME value before session start (for restoration).
-
-    Example
-    -------
-    .. code-block:: python
-
-        pdf_paths = ['/path/to/paper1.pdf', '/path/to/paper2.pdf']
-
-        with PaperQASession(llm='gpt-4o', summary_llm='gpt-4o-mini') as session:
-            for pdf in pdf_paths:
-                answer = session.summarize_pdf(pdf, "Summarize this paper")
-                if answer:
-                    process_answer(answer)
-        # Environment automatically restored, temp files cleaned up
-    """
-
-    def __init__(self, llm: Optional[str] = None, summary_llm: Optional[str] = None):
-        """Initialize session configuration (does not set up environment yet).
-
-        The actual environment setup happens in __enter__ to support the
-        context manager pattern. This allows proper cleanup even if
-        setup fails partway through.
-
-        Parameters
-        ----------
-        llm : str, optional
-            LLM model for paper-qa's main reasoning (e.g., 'gpt-4o').
-            If None, uses paper-qa's default.
-        summary_llm : str, optional
-            LLM model for paper-qa's summarization steps (e.g., 'gpt-4o-mini').
-            If None, uses paper-qa's default.
-        """
-        self.llm = llm
-        self.summary_llm = summary_llm
-
-        # Session state (populated in __enter__)
-        self.temp_dir: Optional[str] = None
-        self.original_cwd: Optional[str] = None
-        self.original_pqa_home: Optional[str] = None
-
-        # Paper-qa references (populated after import in __enter__)
-        self._settings_class: Optional[type] = None
-        self._docs_class: Optional[type] = None
-        self._initialized = False
-
-    def __enter__(self) -> 'PaperQASession':
-        """Set up isolated environment and import paper-qa.
-
-        This method performs the critical setup sequence:
-
-        1. Create temporary directory structure
-        2. Save current environment state for later restoration
-        3. Set PQA_HOME to temp directory (BEFORE import!)
-        4. Change working directory to temp (BEFORE import!)
-        5. Import paper-qa (it caches our temp directory)
-        6. Configure litellm if using GPT-5 models
-
-        The order is critical: PQA_HOME and CWD must be set BEFORE
-        importing paperqa, because paperqa reads these at import time
-        and caches them.
-
-        Returns
-        -------
-        PaperQASession
-            Self, for use in 'with' statement.
-
-        Raises
-        ------
-        ImportError
-            If paper-qa is not installed or fails to import.
-        """
-        import tempfile
-
-        # ============================================================
-        # STEP 1: Create session directory structure
-        # ============================================================
-        # We use a unique temp directory per session. All PDFs will be
-        # copied here, processed, then removed.
-        self.temp_dir = tempfile.mkdtemp(prefix='paperqa_session_')
-
-        # ============================================================
-        # STEP 2: Save original environment for restoration in __exit__
-        # ============================================================
-        self.original_cwd = os.getcwd()
-        self.original_pqa_home = os.environ.get('PQA_HOME')
-
-        # ============================================================
-        # STEP 3: Set PQA_HOME BEFORE importing paperqa
-        # ============================================================
-        # CRITICAL: This must happen BEFORE the import statement below.
-        # Paper-qa reads PQA_HOME at import time and uses it for:
-        # - Index storage location (~/.pqa/indexes/ by default)
-        # - Settings defaults
-        # - Other internal paths
-        os.environ['PQA_HOME'] = self.temp_dir
-        logger.debug(f"PaperQASession: Set PQA_HOME to {self.temp_dir}")
-
-        # ============================================================
-        # STEP 4: Change CWD BEFORE importing paperqa
-        # ============================================================
-        # Paper-qa may also use CWD for file discovery. By changing to
-        # the temp directory, we ensure it won't find any files from
-        # the user's home directory (like .claude/plugins/ on VPS).
-        os.chdir(self.temp_dir)
-        logger.debug(f"PaperQASession: Changed CWD to {self.temp_dir}")
-
-        # ============================================================
-        # STEP 5: Import paper-qa (it will cache our temp directory)
-        # ============================================================
-        # This is the key moment: paperqa reads PQA_HOME and CWD NOW,
-        # and caches them for the lifetime of the Python process.
-        # Since we set them to our temp directory above, paperqa will
-        # use our temp directory for everything.
-        try:
-            from paperqa import Settings, Docs
-            self._settings_class = Settings
-            self._docs_class = Docs
-            self._initialized = True
-            logger.debug("PaperQASession: Imported paperqa successfully")
-        except Exception as e:
-            logger.error(f"PaperQASession: Failed to import paperqa: {e}")
-            # Clean up on failure
-            self.__exit__(None, None, None)
-            raise
-
-        # ============================================================
-        # STEP 6: Configure litellm for GPT-5 compatibility (optional)
-        # ============================================================
-        # GPT-5 models have different parameter requirements. Setting
-        # drop_params=True tells litellm to silently drop unsupported
-        # parameters instead of raising errors.
-        try:
-            import litellm
-            is_gpt5 = (self.llm and 'gpt-5' in self.llm.lower()) or \
-                      (self.summary_llm and 'gpt-5' in self.summary_llm.lower())
-            if is_gpt5:
-                litellm.drop_params = True
-                logger.info("Enabled litellm.drop_params for GPT-5 model compatibility")
-        except Exception as e:
-            logger.debug(f"Could not configure litellm: {e}")
-
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Restore original environment and clean up temp directory.
-
-        This method is called automatically when exiting the 'with' block,
-        even if an exception occurred. It restores the original working
-        directory and PQA_HOME, then deletes the temporary directory.
-
-        Parameters
-        ----------
-        exc_type : type or None
-            Exception type if an exception was raised, None otherwise.
-        exc_val : BaseException or None
-            Exception instance if an exception was raised, None otherwise.
-        exc_tb : traceback or None
-            Traceback if an exception was raised, None otherwise.
-
-        Note
-        ----
-        We don't re-raise exceptions here (return value is implicitly None),
-        so any exceptions from the 'with' block propagate normally.
-        """
-        # ============================================================
-        # Restore original working directory
-        # ============================================================
-        if self.original_cwd:
-            try:
-                os.chdir(self.original_cwd)
-                logger.debug(f"PaperQASession: Restored CWD to {self.original_cwd}")
-            except Exception as e:
-                logger.warning(f"Failed to restore working directory: {e}")
-
-        # ============================================================
-        # Restore original PQA_HOME environment variable
-        # ============================================================
-        # If PQA_HOME was set before our session, restore it.
-        # If it wasn't set, remove it from the environment.
-        try:
-            if self.original_pqa_home is not None:
-                os.environ['PQA_HOME'] = self.original_pqa_home
-            elif 'PQA_HOME' in os.environ:
-                del os.environ['PQA_HOME']
-            logger.debug("PaperQASession: Restored PQA_HOME")
-        except Exception as e:
-            logger.warning(f"Failed to restore PQA_HOME: {e}")
-
-        # ============================================================
-        # Delete the temporary session directory
-        # ============================================================
-        # This removes all PDFs, index files, and any other temporary
-        # files created during the session.
-        if self.temp_dir:
-            try:
-                shutil.rmtree(self.temp_dir)
-                logger.debug(f"PaperQASession: Cleaned up {self.temp_dir}")
-            except Exception as e:
-                logger.warning(f"Failed to clean up temp directory: {e}")
-
-    def summarize_pdf(self, pdf_path: str, question: str) -> Optional[str]:
-        """Process a single PDF and return paper-qa's answer as a string.
-
-        This method handles the per-PDF processing workflow:
-
-        1. Create per-PDF paper and index directories
-        2. Copy the PDF into the per-PDF paper directory
-        3. Build paper-qa Settings with those isolated directories
-        3. Run paper-qa's ask() function asynchronously
-        4. Extract the answer string from paper-qa's response object
-        5. Clean up: remove per-PDF directories to keep runs isolated
-
-        Each run uses fresh directories, so paper-qa only sees one PDF
-        per call without having to clear or reconcile a shared index.
-
-        Parameters
-        ----------
-        pdf_path : str
-            Absolute path to the PDF file to process. The file is copied
-            to the session's temp directory, so the original is not modified.
-        question : str
-            The question to ask paper-qa about the PDF. This is typically
-            a prompt asking for a JSON-formatted summary with 'summary'
-            and 'methods' keys.
-
-        Returns
-        -------
-        str or None
-            The answer string from paper-qa if successful, None if:
-            - Session not initialized (called outside 'with' block)
-            - PDF copy failed
-            - paper-qa query failed
-            - Answer extraction failed
-
-        Note
-        ----
-        This method handles async/event loop edge cases:
-        - If asyncio.run() fails due to existing event loop, we spawn
-          a background thread with its own event loop
-        - This is necessary because Jupyter notebooks and some frameworks
-          already have an event loop running
-
-        Example
-        -------
-        .. code-block:: python
-
-            with PaperQASession() as session:
-                answer = session.summarize_pdf(
-                    '/path/to/paper.pdf',
-                    'Summarize this paper. Return JSON with summary and methods.'
-                )
-                if answer:
-                    data = json.loads(answer)
-        """
-        # ============================================================
-        # Validate session state
-        # ============================================================
-        if not self._initialized:
-            logger.error("PaperQASession not initialized")
-            return None
-
-        if self.llm or self.summary_llm:
-            logger.info("Using paper-qa (Docs API) with llm=%s, summary_llm=%s",
-                        self.llm or 'default', self.summary_llm or 'default')
-
-        try:
-            # ============================================================
-            # Build Settings (no agent, no file-path settings needed)
-            # ============================================================
-            settings_kwargs = _build_paperqa_settings_kwargs(
-                self._settings_class,
-                llm=self.llm,
-                summary_llm=self.summary_llm,
-            )
-            settings = self._settings_class(**settings_kwargs)
-
-            # ============================================================
-            # Run Docs.aadd + Docs.aquery asynchronously
-            # Docs manages its own in-memory vector store; each call gets
-            # a fresh Docs instance so there is no cross-PDF contamination.
-            # ============================================================
-            async def _run_async() -> Any:
-                docs = self._docs_class()
-                await docs.aadd(pdf_path, settings=settings)
-                return await docs.aquery(question, settings=settings)
-
-            try:
-                ans_obj = asyncio.run(_run_async())
-            except RuntimeError as exc:
-                if "event loop" not in str(exc).lower():
-                    raise
-                # Fallback for Jupyter / nested event loops
-                outcome: Dict[str, Any] = {}
-                error: Dict[str, BaseException] = {}
-
-                def _worker() -> None:
-                    new_loop = asyncio.new_event_loop()
-                    try:
-                        asyncio.set_event_loop(new_loop)
-                        outcome['value'] = new_loop.run_until_complete(_run_async())
-                    except BaseException as exc:
-                        error['error'] = exc
-                    finally:
-                        asyncio.set_event_loop(None)
-                        new_loop.close()
-
-                thread = threading.Thread(target=_worker)
-                thread.start()
-                thread.join(timeout=300)
-
-                if thread.is_alive():
-                    logger.error("paper-qa thread timed out after 300s for %s", pdf_path)
-                    return None
-
-                if 'error' in error:
-                    raise error['error']
-                ans_obj = outcome.get('value')
-
-            # ============================================================
-            # Extract answer — PQASession.answer is the clean answer string
-            # ============================================================
-            if ans_obj is None:
-                return None
-            answer = getattr(ans_obj, 'answer', None) or getattr(ans_obj, 'raw_answer', None)
-            if isinstance(answer, str) and answer.strip():
-                return answer.strip()
-            logger.error("paperqa returned %s with no usable .answer for %s", type(ans_obj).__name__, pdf_path)
-            return None
-
-        except Exception as e:
-            logger.error(f"paperqa query failed for {pdf_path}: {e}")
-            return None
-
-
-def _normalize_summary_json(raw: str) -> Optional[str]:
-    """Strip code fences, parse JSON, and ensure ``summary`` and ``methods`` keys.
-
-    Processing steps:
-
-    1. Remove Markdown code fences (````` or `````json`).
-    2. Strip standalone paper-qa section headers that may precede the JSON.
-    3. Parse JSON directly, falling back to extracting the outermost ``{…}``.
-    4. If parsing fails, wrap the cleaned text as a plain-text ``summary``.
-    """
-    import json
-
-    if not raw or not raw.strip():
-        return None
-
-    # -- Strip Markdown code fences --
-    cleaned = raw.strip()
-    if cleaned.startswith('```'):
-        nl = cleaned.find('\n')
-        cleaned = cleaned[nl + 1:] if nl != -1 else cleaned.lstrip('`')
-    cleaned = cleaned.rstrip()
-    if cleaned.endswith('```'):
-        cleaned = cleaned[:-3].rstrip()
-
-    # -- Remove standalone paper-qa section headers --
-    cleaned = '\n'.join(
-        line for line in cleaned.split('\n')
-        if line.strip() not in ('Fulltext summary', 'Summary', 'Methods', 'Answer')
-    ).strip()
-
-    # -- Try to parse JSON --
-    def _try_parse(txt: str) -> Optional[dict]:
-        try:
-            obj = json.loads(txt)
-            return obj if isinstance(obj, dict) else None
-        except (json.JSONDecodeError, ValueError, TypeError):
-            return None
-
-    data = _try_parse(cleaned)
-    if data is None:
-        # Fallback: extract outermost {…} block
-        start, end = cleaned.find('{'), cleaned.rfind('}')
-        if start != -1 and end > start:
-            data = _try_parse(cleaned[start:end + 1])
-
-    if data is None:
-        return json.dumps({'summary': cleaned, 'methods': ''}, ensure_ascii=False)
-
-    def _str(v) -> str:
-        if v is None:
-            return ''
-        return v if isinstance(v, str) else str(v)
-
-    summary_val = _str(data.get('summary')).strip()
-    if not summary_val:
-        summary_val = cleaned
-
-    methods_val = _str(data.get('methods')).strip()
-
-    return json.dumps({'summary': summary_val, 'methods': methods_val}, ensure_ascii=False)
-
-
 def _lookup_entry_id_by_arxiv(db: DatabaseManager, arxiv_id: str) -> Optional[str]:
     """Look up an entry_id in the history DB by arXiv ID (matching the link column)."""
     # Strip version suffix for matching (e.g. 2510.13641v2 -> 2510.13641)
@@ -995,14 +421,14 @@ def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: 
             updated_current = cur.rowcount
             if topic:
                 logger.info(
-                    "paper-qa DB write (papers.db): entry_id=%s topic=%s updated_rows=%d",
+                    "Summary DB write (papers.db): entry_id=%s topic=%s updated_rows=%d",
                     entry_id,
                     topic,
                     updated_current,
                 )
             else:
                 logger.info(
-                    "paper-qa DB write (papers.db): entry_id=%s updated_rows=%d",
+                    "Summary DB write (papers.db): entry_id=%s updated_rows=%d",
                     entry_id,
                     updated_current,
                 )
@@ -1014,7 +440,7 @@ def _write_pqa_summary_to_dbs(db: DatabaseManager, entry_id: str, json_summary: 
             cur = conn.cursor()
             cur.execute("UPDATE matched_entries SET paper_qa_summary = ? WHERE entry_id = ?", (json_summary, entry_id))
             updated_history = cur.rowcount
-            logger.info("paper-qa DB write (history.db): entry_id=%s updated_rows=%d", entry_id, updated_history)
+            logger.info("Summary DB write (history.db): entry_id=%s updated_rows=%d", entry_id, updated_history)
     except sqlite3.Error as e:
         logger.debug("Failed to write to matched_entries_history.db for %s: %s", entry_id, e)
 
@@ -1037,6 +463,60 @@ def _normalize_arxiv_arg(arg: str) -> Optional[str]:
     return None
 
 
+def _summarize_targets(
+    db: DatabaseManager,
+    cfg_mgr: ConfigManager,
+    targets: List[Tuple[Optional[str], str, str, Optional[str]]],
+    topic_cfg_cache: Dict[str, Dict[str, Any]],
+) -> int:
+    """Summarize (entry_id, arxiv_id, pdf_path, topic) targets grouped by topic; return count written."""
+    by_topic: Dict[Optional[str], List[Tuple[Optional[str], str, str, Optional[str]]]] = defaultdict(list)
+    for target in targets:
+        by_topic[target[3]].append(target)
+
+    written = 0
+    for topic_name, topic_targets in by_topic.items():
+        if not topic_name:
+            logger.warning("Skipping %d PDFs with no topic context", len(topic_targets))
+            continue
+        try:
+            topic_cfg = topic_cfg_cache.get(topic_name) or cfg_mgr.load_topic_config(topic_name)
+            paperqa_cfg = _get_topic_paperqa_config(topic_cfg, topic_name)
+        except Exception as e:
+            logger.error("Failed to load paperqa config for '%s': %s. Skipping.", topic_name, e)
+            continue
+
+        try:
+            summarizer = PdfSummarizer(
+                paperqa_cfg.get('llm'),
+                reasoning_effort=paperqa_cfg.get('reasoning_effort'),
+            )
+        except Exception as e:
+            logger.error("Cannot create OpenAI client (is OPENAI_API_KEY set?): %s", e)
+            return written
+
+        ranking_query = (topic_cfg.get('ranking') or {}).get('query')
+        instructions = build_instructions(paperqa_cfg.get('prompt'), ranking_query)
+        logger.info("Summarizing %d PDFs for topic '%s' with model=%s", len(topic_targets), topic_name, summarizer.model)
+
+        for eid, aid, pdf_path, tctx in topic_targets:
+            result = summarizer.summarize_pdf(pdf_path, instructions)
+            if not result:
+                logger.warning("No summary produced for arXiv:%s (entry_id=%s)", aid, eid or "-")
+                continue
+            logger.info("Summary for arXiv:%s (entry_id=%s): %s", aid, eid or "-", result['summary'][:300])
+
+            if not eid and aid:
+                # Manual --arxiv mode: look up entry in history DB by arXiv link
+                eid = _lookup_entry_id_by_arxiv(db, aid)
+            if eid:
+                _write_pqa_summary_to_dbs(db, eid, json.dumps(result, ensure_ascii=False), topic=tctx)
+                written += 1
+            else:
+                logger.warning("Got summary for arXiv:%s but no matching entry in DB; not stored", aid)
+    return written
+
+
 def run(
     config_path: str,
     topic: Optional[str] = None,
@@ -1048,8 +528,9 @@ def run(
     use_history: bool = False,
     history_date: Optional[str] = None,
     history_feed_like: Optional[str] = None,
+    summarize: bool = False,
 ) -> None:
-    """Execute the paper-qa download + summarization workflow.
+    """Download arXiv PDFs for ranked entries and optionally summarize them.
 
     Workflow overview
     -----------------
@@ -1061,9 +542,11 @@ def run(
       ``use_history`` is enabled.
     - Resolve arXiv IDs, reuse archived PDFs when possible, download missing
       PDFs under the configured rate limit, and archive successful downloads.
-    - Run ``paper-qa`` on each PDF, normalize the JSON result, and write summaries
-      back to both ``papers.db`` and ``matched_entries_history.db`` when an
+    - When ``summarize`` is True, summarize each PDF with one OpenAI call using
+      the topic's ``paperqa.llm``/``prompt`` and write the JSON result back to
+      both ``papers.db`` and ``matched_entries_history.db`` when an
       ``entry_id`` is available.
+    - ``rps`` overrides the per-topic (or default) arXiv request rate.
     """
     download_dir = str(resolve_data_path('paperqa'))
     archive_dir = str(resolve_data_path('paperqa_archive'))
@@ -1087,13 +570,11 @@ def run(
 
     total_candidates = 0
     total_downloaded = 0
+    # Minimum 3 s between arXiv requests per ToU, whatever rps is configured
+    min_interval_default = max(3.0, 1.0 / max(rps or DEFAULT_RPS, 0.01))
 
     # Manual mode: download specific arXiv IDs/URLs if provided
     if arxiv:
-        # Manual mode: use hardcoded defaults since no topic specified
-        DEFAULT_MAX_RETRIES = 3
-        DEFAULT_RPS = 0.3
-        min_interval_default = max(3.0, 1.0 / max(DEFAULT_RPS, 0.01))
 
         # Resolve topic context for summarization: explicit --topic, or first available topic
         manual_topic_ctx: Optional[str] = topic or (topics[0] if topics else None)
@@ -1152,10 +633,6 @@ def run(
 
     # History-by-IDs mode: look up entries in history DB by entry_id and download
     if entry_ids:
-        # History mode: use hardcoded defaults since entries span multiple topics
-        DEFAULT_MAX_RETRIES = 3
-        DEFAULT_RPS = 0.3
-        min_interval_default = max(3.0, 1.0 / max(DEFAULT_RPS, 0.01))
 
         rows = _fetch_history_entries_by_ids(db, entry_ids, matched_date=history_date, feed_like=history_feed_like if use_history else None)
         logger.info("History lookup: requested=%d, found=%d (date=%s, feed~%s)", len(entry_ids), len(rows), history_date or '-', history_feed_like or '-')
@@ -1238,8 +715,8 @@ def run(
 
             # Extract topic-specific settings
             min_rank_topic = float(paperqa_cfg_topic.get('download_rank_threshold', 0.35))
-            max_retries_topic = int(paperqa_cfg_topic.get('max_retries', 3))
-            rps_topic = float(paperqa_cfg_topic.get('rps', 0.3))
+            max_retries_topic = int(paperqa_cfg_topic.get('max_retries', DEFAULT_MAX_RETRIES))
+            rps_topic = float(rps or paperqa_cfg_topic.get('rps', DEFAULT_RPS))
             min_interval_topic = max(3.0, 1.0 / max(rps_topic, 0.01))
 
             rows = _iter_ranked_entries(db, t, min_rank_topic)
@@ -1299,103 +776,20 @@ def run(
         ap = _find_archived_pdf(archive_dir, aid) or path
         repaired.append((eid, aid, ap, tctx))
     summarize_targets = repaired
-    logger.info("Completed pqa_summary: candidates=%d, downloaded=%d, archived=%d", total_candidates, total_downloaded, len(downloaded_paths))
+    logger.info("Completed PDF download: candidates=%d, downloaded=%d, archived=%d", total_candidates, total_downloaded, len(downloaded_paths))
+
+    if not summarize:
+        logger.info("Summarization not requested (use --summarize); %d PDF(s) ready", len(summarize_targets))
+        _cleanup_archive(archive_dir)
+        return
 
     if not summarize_targets:
         logger.info("No PDFs to summarize.")
         _cleanup_archive(archive_dir)
         return
 
-    summarized = 0
-
-    # Group summarize_targets by topic to batch by LLM models
-    from collections import defaultdict
-    targets_by_topic: Dict[Optional[str], List[Tuple]] = defaultdict(list)
-    for eid, aid, pdf_path, tctx in summarize_targets:
-        targets_by_topic[tctx].append((eid, aid, pdf_path, tctx))
-
-    # Process each topic's PDFs with appropriate LLM models
-    for topic_name, targets in targets_by_topic.items():
-        if not topic_name:
-            logger.warning("Skipping %d PDFs with no topic context", len(targets))
-            continue
-
-        # Reuse topic config loaded during download phase; fall back to fresh load if missing
-        # (e.g. when targets come from --arxiv/--entry-ids with an explicit --topic)
-        try:
-            topic_cfg = topic_cfg_cache.get(topic_name) or cfg_mgr.load_topic_config(topic_name)
-            paperqa_cfg = _get_topic_paperqa_config(topic_cfg, topic_name)
-        except Exception as e:
-            logger.error("Failed to load paperqa config for '%s': %s. Skipping.", topic_name, e)
-            continue
-
-        pqa_llm = paperqa_cfg.get('llm')
-        pqa_summary_llm = paperqa_cfg.get('summary_llm')
-
-        logger.info("Processing %d PDFs for topic '%s' with llm=%s", len(targets), topic_name, pqa_llm)
-
-        # Create session with topic-specific LLM models
-        with PaperQASession(llm=pqa_llm, summary_llm=pqa_summary_llm) as pqa_session:
-            for eid, aid, pdf_path, tctx in targets:
-                # Get prompt from topic's paperqa config
-                question = (paperqa_cfg.get('prompt') or '').strip()
-                if not question:
-                    question = (
-                        "What are the main scientific findings, methods, and experimental details "
-                        "of the indexed paper? Return ONLY a JSON object: "
-                        "{\"summary\": \"...\", \"methods\": \"...\"}. "
-                        "summary: up to 8 information-dense sentences on findings and contributions. "
-                        "methods: experimental setup, parameters, analysis methods, calculation details, tool names."
-                    )
-
-                # Apply {ranking_query} placeholder substitution
-                if '{ranking_query}' in question:
-                    rq = ((topic_cfg.get('ranking') or {}).get('query') or '').strip()
-                    if rq:
-                        question = question.replace('{ranking_query}', rq)
-
-                # Use session to process this PDF
-                raw_ans = pqa_session.summarize_pdf(pdf_path, question)
-
-                if not raw_ans:
-                    logger.warning("No answer returned from paper-qa for arXiv:%s (entry_id=%s)", aid, eid or "-")
-                    continue
-
-                _raw_lower = raw_ans.strip().lower()
-                if 'i cannot answer' in _raw_lower or _raw_lower == 'no answer generated.':
-                    logger.warning(
-                        "paper-qa returned unusable answer (%r) for arXiv:%s (entry_id=%s); skipping DB write",
-                        raw_ans[:50], aid, eid or "-",
-                    )
-                    continue
-
-                # Output the raw paper-qa response for inspection
-                try:
-                    logger.info("=" * 80)
-                    logger.info("Paper-QA Summary for arXiv:%s (entry_id=%s)", aid, eid or "-")
-                    logger.info("Model: llm=%s, summary_llm=%s", pqa_llm or 'default', pqa_summary_llm or 'default')
-                    logger.info("=" * 80)
-                    logger.info("RAW ANSWER (first 500 chars):\n%s", raw_ans[:500] if raw_ans else "None")
-                    logger.info("=" * 80)
-                except Exception as e:
-                    # Best-effort logging; ignore formatting failures
-                    logger.debug("Failed to log paper-qa response: %s", e)
-
-                # Normalize and write
-                norm = _normalize_summary_json(raw_ans)
-                if not norm:
-                    # As a last resort, write the raw response
-                    norm = raw_ans
-                if not eid and aid:
-                    # Manual --arxiv mode: look up entry in history DB by arXiv link
-                    eid = _lookup_entry_id_by_arxiv(db, aid)
-                if eid:
-                    _write_pqa_summary_to_dbs(db, eid, norm, topic=tctx)
-                    summarized += 1
-                else:
-                    logger.warning("Got summary for arXiv:%s but no matching entry in DB; printing to stdout only", aid)
-
-    logger.info("paper-qa summarization completed: wrote %d summaries", summarized)
+    summarized = _summarize_targets(db, cfg_mgr, summarize_targets, topic_cfg_cache)
+    logger.info("PDF summarization completed: wrote %d summaries", summarized)
 
     _cleanup_archive(archive_dir)
 

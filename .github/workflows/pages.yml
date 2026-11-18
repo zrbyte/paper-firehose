@@ -199,7 +199,7 @@ jobs:
 
           echo "Step 4: Abstract summarization skipped"
 
-          paper-firehose --config "$CONFIG_PATH" pqa_summary
+          paper-firehose --config "$CONFIG_PATH" pqa_summary --summarize
           paper-firehose --config "$CONFIG_PATH" email
 
           paper-firehose --config "$CONFIG_PATH" html

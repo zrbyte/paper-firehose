@@ -98,10 +98,9 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
         paperqa:
           download_rank_threshold: 0.0
           rps: 1.0
-          llm: "gpt-4o"
-          summary_llm: "gpt-4o-mini"
+          llm: "gpt-6.2-sol"
           prompt: |
-            Summarize papers about {ranking_query} as concise JSON.
+            Summarize papers about {ranking_query}.
         output:
           filename: "test_topic_filtered.html"
           filename_ranked: "test_topic_ranked.html"
@@ -166,24 +165,18 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
         Path(dest_path).write_bytes(b"0" * 12000)
         return True
 
-    # Mock PaperQASession to avoid actual paper-qa calls
-    class MockPaperQASession:
-        def __init__(self, llm=None, summary_llm=None):
-            self.llm = llm
-            self.summary_llm = summary_llm
+    # Mock PdfSummarizer to avoid OpenAI calls
+    class MockPdfSummarizer:
+        def __init__(self, model=None, *, reasoning_effort=None):
+            self.model = model
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def summarize_pdf(self, pdf_path, question):
-            return json.dumps({"summary": "Graphene summary for experts", "methods": "Graphene methods"})
+        def summarize_pdf(self, pdf_path, instructions):
+            assert "graphene materials" in instructions  # {ranking_query} substituted
+            return {"summary": "Graphene summary for experts", "methods": "Graphene methods"}
 
     monkeypatch.setattr(pqa_cmd, "_download_pdf", fake_download_pdf)
     monkeypatch.setattr(pqa_cmd, "_query_arxiv_api_for_pdf", lambda arxiv_id, *, mailto, session=None: f"https://arxiv.org/pdf/{arxiv_id}.pdf")
-    monkeypatch.setattr(pqa_cmd, "PaperQASession", MockPaperQASession)
+    monkeypatch.setattr(pqa_cmd, "PdfSummarizer", MockPdfSummarizer)
     monkeypatch.setattr(pqa_cmd, "_resolve_arxiv_id", lambda entry: "2501.12345v1")
     monkeypatch.setattr(pqa_cmd.time, "sleep", lambda *_args, **_kwargs: None)
 
@@ -213,8 +206,8 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
         abstracts = conn.execute("SELECT abstract FROM entries WHERE abstract IS NOT NULL").fetchall()
     assert abstracts and abstracts[0][0] == "Filled abstract"
 
-    # Generate paper-qa summaries with deterministic stubs
-    pqa_cmd.run(config_path_str, limit=1)
+    # Generate PDF summaries with deterministic stubs
+    pqa_cmd.run(config_path_str, limit=1, summarize=True)
 
     with sqlite3.connect(db_path) as conn:
         summary_rows = conn.execute("SELECT paper_qa_summary FROM entries WHERE paper_qa_summary IS NOT NULL").fetchall()
@@ -241,7 +234,7 @@ def test_end_to_end_pipeline_generates_html(tmp_path, monkeypatch):
     # Ranked output should include the assigned score badge from DummyRanker
     assert "Score 0.90" in ranked_html
 
-    # PQA summary HTML should include the paper-qa summary content
+    # Summary HTML should include the PDF summary content
     summary_path = html_dir / "test_topic_summary.html"
     assert summary_path.exists(), "PQA summary HTML was not generated"
     summary_html = summary_path.read_text(encoding="utf-8")

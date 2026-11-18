@@ -35,7 +35,7 @@ Wire up secrets
 Add repository secrets under *Settings → Secrets and variables → Actions* as
 needed:
 
-* ``OPENAI_API_KEY`` – enables abstract and paper-qa summaries.
+* ``OPENAI_API_KEY`` – enables full-text PDF summaries (``pqa_summary --summarize``).
 * ``MAILING_LISTS_YAML`` – serialized contents of ``mailing_lists.yaml`` (optional).
 * ``SMTP_PASSWORD`` – password referenced by ``config.email.smtp`` (optional).
 

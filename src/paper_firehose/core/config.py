@@ -122,7 +122,7 @@ _KNOWN_TOPIC_KEYS: Dict[str, Optional[Dict[str, Any]]] = {
     "abstract_fetch": {"enabled", "rank_threshold"},
     "paperqa": {
         "download_rank_threshold", "rps", "max_retries",
-        "llm", "summary_llm", "prompt",
+        "llm", "reasoning_effort", "prompt",
     },
     "output": {"filename", "filename_ranked", "filename_summary", "archive"},
 }

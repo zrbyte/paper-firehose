@@ -102,9 +102,10 @@ def pqa_summary(
     use_history: bool = False,
     history_date: Optional[str] = None,
     history_feed_like: Optional[str] = None,
+    summarize: bool = False,
     config_path: Optional[str] = None,
 ) -> None:
-    """Run the paper-qa pipeline to download PDFs and write grounded summaries.
+    """Download arXiv PDFs for ranked entries and optionally write LLM summaries.
 
     Args:
         topic: Optional topic name to target ranked entries; when omitted and no
@@ -116,6 +117,7 @@ def pqa_summary(
         use_history: When True, resolve `entry_ids` against the history database.
         history_date: Optional YYYY-MM-DD filter when querying history records.
         history_feed_like: Optional substring filter for history feed names.
+        summarize: When True, summarize each PDF with the topic's OpenAI model.
         config_path: Path to main YAML config; defaults to repo config.
     """
     cfg_path = config_path or _DEFAULT_CONFIG
@@ -129,6 +131,7 @@ def pqa_summary(
         use_history=use_history,
         history_date=history_date,
         history_feed_like=history_feed_like,
+        summarize=summarize,
     )
 
 

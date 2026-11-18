@@ -4,7 +4,7 @@ click==8.3.1
 sentence-transformers==5.3.0
 requests==2.32.5
 openai==2.29.0
-paper-qa==2026.3.18
+pypdf==6.0.0
 Pillow==12.1.1
 
 [dev]

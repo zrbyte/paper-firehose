@@ -76,65 +76,6 @@ def test_find_archived_pdf_matches_variants(tmp_path):
     assert path_base.endswith("2401.11111.pdf")
 
 
-def test_normalize_summary_json_handles_code_fence():
-    raw = """```json
-{
-  "summary": "Key findings",
-  "methods": "Method details"
-}
-```"""
-    cleaned = pqa_summary._normalize_summary_json(raw)
-    data = json.loads(cleaned)
-    assert data["summary"] == "Key findings"
-    assert data["methods"] == "Method details"
-
-
-def test_normalize_summary_json_wraps_plain_text():
-    raw = "Plain text response"
-    cleaned = pqa_summary._normalize_summary_json(raw)
-    data = json.loads(cleaned)
-    assert data["summary"] == "Plain text response"
-    assert data["methods"] == ""
-
-
-def test_normalize_summary_json_none_and_empty():
-    assert pqa_summary._normalize_summary_json(None) is None
-    assert pqa_summary._normalize_summary_json("") is None
-    assert pqa_summary._normalize_summary_json("   ") is None
-
-
-def test_normalize_summary_json_extracts_braces():
-    """JSON embedded in surrounding text should be extracted."""
-    raw = 'Here is the result: {"summary": "Found X", "methods": "DFT"} end.'
-    data = json.loads(pqa_summary._normalize_summary_json(raw))
-    assert data["summary"] == "Found X"
-    assert data["methods"] == "DFT"
-
-
-def test_normalize_summary_json_strips_paperqa_headers():
-    """Standalone paper-qa section headers should be removed before parsing."""
-    raw = 'Summary\n{"summary": "Result", "methods": "XRD"}'
-    data = json.loads(pqa_summary._normalize_summary_json(raw))
-    assert data["summary"] == "Result"
-    assert data["methods"] == "XRD"
-
-
-def test_normalize_summary_json_missing_methods_key():
-    """If the LLM omits 'methods', it should default to empty string."""
-    raw = '{"summary": "Only summary here"}'
-    data = json.loads(pqa_summary._normalize_summary_json(raw))
-    assert data["summary"] == "Only summary here"
-    assert data["methods"] == ""
-
-
-def test_normalize_summary_json_empty_summary_falls_back():
-    """If 'summary' is empty, the cleaned text should be used instead."""
-    raw = '{"summary": "", "methods": "PBE+U"}'
-    data = json.loads(pqa_summary._normalize_summary_json(raw))
-    assert data["summary"]  # should not be empty
-    assert data["methods"] == "PBE+U"
-
-
 def test_normalize_arxiv_arg_accepts_variants():
     assert pqa_summary._normalize_arxiv_arg("https://arxiv.org/pdf/2401.00001.pdf") == "2401.00001"
     assert pqa_summary._normalize_arxiv_arg("2401.00002v2") == "2401.00002v2"
@@ -250,3 +191,62 @@ def test_write_pqa_summary_to_dbs_updates_tables(tmp_path):
 
     assert json.loads(current_value) == {"summary": "done", "methods": "m"}
     assert json.loads(history_value) == {"summary": "done", "methods": "m"}
+
+
+class _FakeCfgMgr:
+    def __init__(self, topic_cfg):
+        self.topic_cfg = topic_cfg
+
+    def load_topic_config(self, name):
+        return self.topic_cfg
+
+
+def test_summarize_targets_writes_json_per_entry(monkeypatch):
+    created = {}
+
+    class FakeSummarizer:
+        def __init__(self, model=None, *, reasoning_effort=None):
+            created["model"] = model
+            created["effort"] = reasoning_effort
+            self.model = model
+
+        def summarize_pdf(self, pdf_path, instructions):
+            created["instructions"] = instructions
+            if pdf_path == "bad.pdf":
+                return None
+            return {"summary": f"S for {pdf_path}", "methods": "M"}
+
+    writes = []
+    monkeypatch.setattr(pqa_summary, "PdfSummarizer", FakeSummarizer)
+    monkeypatch.setattr(
+        pqa_summary, "_write_pqa_summary_to_dbs",
+        lambda db, eid, payload, topic=None: writes.append((eid, json.loads(payload), topic)),
+    )
+
+    topic_cfg = {
+        "ranking": {"query": "graphene transport"},
+        "paperqa": {"llm": "gpt-6-luna", "reasoning_effort": "low", "prompt": "For {ranking_query}."},
+    }
+    targets = [
+        ("e1", "2501.00001", "good.pdf", "t"),
+        ("e2", "2501.00002", "bad.pdf", "t"),
+        ("e3", "2501.00003", "x.pdf", None),  # no topic -> skipped
+    ]
+    n = pqa_summary._summarize_targets(None, _FakeCfgMgr(topic_cfg), targets, {})
+
+    assert n == 1
+    assert writes == [("e1", {"summary": "S for good.pdf", "methods": "M"}, "t")]
+    assert created["model"] == "gpt-6-luna"
+    assert created["effort"] == "low"
+    assert "For graphene transport." in created["instructions"]
+
+
+def test_summarize_targets_stops_when_client_cannot_be_created(monkeypatch):
+    class Failing:
+        def __init__(self, *a, **k):
+            raise RuntimeError("OPENAI_API_KEY missing")
+
+    monkeypatch.setattr(pqa_summary, "PdfSummarizer", Failing)
+    topic_cfg = {"paperqa": {"llm": "gpt-6-luna"}}
+    n = pqa_summary._summarize_targets(None, _FakeCfgMgr(topic_cfg), [("e1", "a", "p.pdf", "t")], {})
+    assert n == 0

@@ -43,7 +43,7 @@ these files into your runtime data directory (`~/.paper_firehose` by default).
 
 If you use email digests or LLM summaries, add the following repository secrets:
 
-- `OPENAI_API_KEY` – enables abstract summarisation and paper-qa steps.
+- `OPENAI_API_KEY` – enables the full-text PDF summaries (`pqa_summary --summarize`).
 - `MAILING_LISTS_YAML` – inline contents of `mailing_lists.yaml` (optional).
 - `SMTP_PASSWORD` – SMTP password referenced by the email step (optional).
 

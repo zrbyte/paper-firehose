@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 
 import click
@@ -196,7 +195,7 @@ def abstracts(
 @click.option(
     "--summarize",
     is_flag=True,
-    help="Run paper-qa summarization on the (archived) PDFs after download",
+    help="Summarize the downloaded PDFs with the topic's OpenAI model (needs OPENAI_API_KEY)",
 )
 @click.pass_context
 def pqa_summary(
@@ -211,11 +210,9 @@ def pqa_summary(
     history_feed_like: str | None,
     summarize: bool,
 ) -> None:
-    """Download arXiv PDFs for ranked entries or specific arXiv IDs/URLs."""
+    """Download arXiv PDFs for ranked entries or specific arXiv IDs/URLs; --summarize adds LLM summaries."""
     try:
         effective_use_history = use_history or bool(entry_ids)
-        if summarize:
-            os.environ["PAPERQA_SUMMARIZE"] = "1"
         pqa_cmd.run(
             ctx.obj["config_path"],
             topic,
@@ -226,6 +223,7 @@ def pqa_summary(
             use_history=effective_use_history,
             history_date=history_date,
             history_feed_like=history_feed_like,
+            summarize=summarize,
         )
         if arxiv_ids:
             click.echo("✅ pqa_summary completed for provided arXiv IDs/URLs")

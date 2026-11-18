@@ -13,4 +13,5 @@ paper\_firehose.processors
    emailer
    feed_processor
    html_generator
+   pdf_summarizer
    st_ranker

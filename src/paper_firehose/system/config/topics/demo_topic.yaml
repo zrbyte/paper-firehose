@@ -67,7 +67,7 @@ abstract_fetch:
   enabled: true
   rank_threshold: 0.2 # this overrides the global rank_threshold in config.yaml. Should be smaller than score_cutoff
 
-# Paper-QA configuration (REQUIRED for pqa_summary command)
+# PDF full-text summaries (REQUIRED for pqa_summary command)
 paperqa:
   # Download arXiv PDFs for entries with rank_score >= this threshold
   download_rank_threshold: 0.35
@@ -76,17 +76,16 @@ paperqa:
   rps: 0.3
   max_retries: 3
 
-  # LLM models for paper-qa (topic-specific)
-  llm: "gpt-5.2"
-  summary_llm: "gpt-5.2"
+  # OpenAI model that reads the full text (one call per paper)
+  llm: "gpt-6.2-sol"
+  # Optional: reasoning effort (none, low, medium, high, xhigh, max; model-dependent)
+  # reasoning_effort: "low"
 
-  # Prompt template (supports {ranking_query} placeholder substitution)
+  # Instructions for the summary ({ranking_query} is substituted).
+  # Output is always JSON {"summary", "methods"}; no need to ask for JSON here.
   prompt: |
-    Read the PDF and summarize for an expert reader interested in {ranking_query}.
-    CRITICAL: Return ONLY valid JSON with this structure: {"summary":"...", "methods":"..."}
+    Summarize for an expert reader interested in {ranking_query}.
     Keep text information-dense. Avoid superlatives.
-    summary: up to 8 sentences covering key findings and contributions.
-    methods: experimental setup, parameters, analysis methods, calculation details.
 
 # Output configuration
 output:

@@ -23,4 +23,5 @@ annotations and docstrings.
    paper_firehose.processors.emailer
    paper_firehose.processors.feed_processor
    paper_firehose.processors.html_generator
+   paper_firehose.processors.pdf_summarizer
    paper_firehose.processors.st_ranker
