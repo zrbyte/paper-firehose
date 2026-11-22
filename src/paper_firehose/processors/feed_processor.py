@@ -112,6 +112,17 @@ class FeedProcessor:
             with self.session.get(url, timeout=self.feed_timeout, stream=True) as response:
                 if response.status_code >= 400:
                     raise FeedFetchError(f"HTTP {response.status_code} from {response.url}")
+                # Chained encodings ("gzip, gzip") multiply the expansion
+                # ratio and no feed needs them (issue #91).
+                encodings = [
+                    e.strip().lower()
+                    for e in response.headers.get('Content-Encoding', '').split(',')
+                    if e.strip() and e.strip().lower() != 'identity'
+                ]
+                if len(encodings) > 1:
+                    raise FeedFetchError(
+                        f"refused chained Content-Encoding '{', '.join(encodings)}' from {response.url}"
+                    )
                 chunks = []
                 size = 0
                 while True:

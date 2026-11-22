@@ -224,6 +224,8 @@ class TestSaveAllEntries:
 # ---------------------------------------------------------------------------
 
 import email.utils
+import gzip
+import io
 import threading
 import feedparser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -238,6 +240,10 @@ def _rss(titles):
     )
     return (f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel>'
             f"<title>HTTP Test Feed</title>{items}</channel></rss>").encode("utf-8")
+
+
+_GZIP_BOMB = gzip.compress(b" " * (30 * 1024 * 1024), 9)
+_DOUBLE_GZIP = gzip.compress(gzip.compress(b" " * (8 * 1024 * 1024), 9), 9)
 
 
 class _FeedHandler(BaseHTTPRequestHandler):
@@ -277,6 +283,17 @@ class _FeedHandler(BaseHTTPRequestHandler):
             # The whole answer is the path of a local feed file (issue #90).
             body = str(Path(__file__).parent / "fixtures" / "sample_feed.xml").encode()
             self._send(200, body, {"Content-Type": "application/rss+xml"})
+        elif self.path == "/gzip-bomb":
+            # ~30 KB on the wire, 30 MB unpacked (one gzip layer).
+            self._send(200, _GZIP_BOMB, {"Content-Type": "application/rss+xml",
+                                         "Content-Encoding": "gzip"})
+        elif self.path == "/gzip-gzip":
+            # Packed twice (issue #91). Kept small so a regression stays harmless.
+            self._send(200, _DOUBLE_GZIP, {"Content-Type": "application/rss+xml",
+                                           "Content-Encoding": "gzip, gzip"})
+        elif self.path == "/gzip-ok":
+            self._send(200, gzip.compress(self.feed_body),
+                       {"Content-Type": "application/rss+xml", "Content-Encoding": "gzip"})
         elif self.path == "/huge":
             self._send(200, b"<rss>" + b" " * 5000 + b"</rss>",
                        {"Content-Type": "application/rss+xml"})
@@ -416,3 +433,53 @@ class TestHttpBodyHandling:
         assert proc.fetch_feeds("test_topic") == {"local_feed": []}
         assert time.monotonic() - start < 1.5
         assert "longer than 0.5 s" in proc.failed_feeds[0]["error"]
+
+
+class TestCompressedBodies:
+    """Issue #91: compressed bodies are bounded while they are unpacked."""
+
+    def test_gzip_feed_is_read(self, tmp_path, monkeypatch, feed_server):
+        monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(tmp_path / "data"))
+        cfg_mgr, db = _http_env(tmp_path, f"{feed_server}/gzip-ok")
+        proc = FeedProcessor(db, cfg_mgr)
+        assert len(proc.fetch_feeds("test_topic")["local_feed"]) == 2
+        assert proc.failed_feeds == []
+
+    def test_gzip_bomb_refused_by_size_limit(self, tmp_path, monkeypatch, feed_server):
+        monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(tmp_path / "data"))
+        cfg_mgr, db = _http_env(tmp_path, f"{feed_server}/gzip-bomb")
+        proc = FeedProcessor(db, cfg_mgr)
+        assert proc.fetch_feeds("test_topic") == {"local_feed": []}
+        assert "larger than" in proc.failed_feeds[0]["error"]
+
+    def test_chained_content_encoding_refused(self, tmp_path, monkeypatch, feed_server):
+        monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(tmp_path / "data"))
+        cfg_mgr, db = _http_env(tmp_path, f"{feed_server}/gzip-gzip")
+        proc = FeedProcessor(db, cfg_mgr)
+        assert proc.fetch_feeds("test_topic") == {"local_feed": []}
+        assert "Content-Encoding" in proc.failed_feeds[0]["error"]
+
+    def test_urllib3_read1_bounds_decompression(self):
+        """Guards the urllib3 pin: read1(n) must not unpack far more than n bytes.
+
+        urllib3 < 2.6 returns at most n bytes but first unpacks everything the
+        compressed bytes it read expand to into an internal buffer (here 30 MB
+        from one call), which defeats the size limit in ``_download``.
+        """
+        import tracemalloc
+        import urllib3
+        response = urllib3.HTTPResponse(
+            body=io.BytesIO(_GZIP_BOMB),
+            headers={"content-encoding": "gzip"},
+            preload_content=False,
+        )
+        tracemalloc.start()
+        try:
+            chunk = response.read1(64 * 1024, decode_content=True)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        assert 0 < len(chunk) <= 64 * 1024
+        assert peak < 5 * 1024 * 1024, (
+            f"urllib3 {urllib3.__version__} allocated {peak // (1024 * 1024)} MB to return {len(chunk)} bytes"
+        )
