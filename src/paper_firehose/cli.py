@@ -20,6 +20,7 @@ from .commands import pqa_summary as pqa_cmd
 from .commands import query as query_cmd
 from .commands import rank as rank_cmd
 from .commands import status as status_cmd
+from .commands import synthesize as synthesize_cmd
 from .commands import topic_cmd
 from .core.config import ConfigManager, DEFAULT_CONFIG_PATH
 from .core.exit_codes import ERR_CONFIG, ERR_RUNTIME, ERR_USAGE
@@ -235,6 +236,74 @@ def pqa_summary(
             click.echo("✅ pqa_summary completed for all topics")
     except Exception as exc:  # pragma: no cover
         click.echo(f"❌ pqa_summary failed: {exc}", err=True)
+        sys.exit(ERR_RUNTIME)
+
+
+@cli.command("synthesize")
+@click.option("--topic", help="Synthesize a specific topic (default: every topic with synthesis.enabled: true)")
+@click.option("--days", type=click.IntRange(min=1), default=None,
+              help="Papers matched in the last N days (default: synthesis.days, else 7)")
+@click.option("--limit", type=click.IntRange(min=3), default=None,
+              help="At most this many papers, best rank score first (default: synthesis.max_papers, else 40)")
+@click.option("--min-rank", "min_rank", type=float, default=None,
+              help="Only papers with at least this rank score (default: synthesis.min_rank)")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Show which papers would be sent; make no OpenAI call, store nothing")
+@click.option("--json", "output_json", is_flag=True, help="Output results as JSON")
+@click.pass_context
+def synthesize(
+    ctx: click.Context,
+    topic: str | None,
+    days: int | None,
+    limit: int | None,
+    min_rank: float | None,
+    dry_run: bool,
+    output_json: bool,
+) -> None:
+    """Write a cross-paper synthesis (overview + themes) of a topic's recent papers.
+
+    Reads the history database, makes one OpenAI call per topic (needs
+    OPENAI_API_KEY) and stores the result; `html` and `email` show it above
+    the topic's papers.
+    """
+    try:
+        result = synthesize_cmd.run(
+            ctx.obj["config_path"],
+            topic,
+            days=days,
+            limit=limit,
+            min_rank=min_rank,
+            dry_run=dry_run,
+            output_json=output_json,
+        )
+    except ValueError as exc:
+        click.echo(f"❌ Synthesize command failed: {exc}", err=True)
+        sys.exit(ERR_CONFIG)
+    except Exception as exc:
+        click.echo(f"❌ Synthesize command failed: {exc}", err=True)
+        sys.exit(ERR_RUNTIME)
+
+    if output_json:
+        click.echo(json.dumps(result, indent=2, default=str))
+    else:
+        if not result["topics"]:
+            click.echo("No topic to synthesize: give --topic, or set 'synthesis: {enabled: true}' in a topic.")
+        for name, info in result["topics"].items():
+            status = info.get("status")
+            if status == "stored":
+                click.echo(f"✅ {name}: synthesis of {info['papers']} papers stored ({info['themes']} themes)")
+            elif status == "dry-run":
+                click.echo(
+                    f"{name}: would send {info['papers']} of {info['total']} papers "
+                    f"matched in the last {info['days']} day(s), about {info['input_chars']} characters"
+                )
+                for number, title in enumerate(info.get("titles", []), start=1):
+                    click.echo(f"  [{number}] {title}")
+            elif status == "skipped":
+                click.echo(f"{name}: skipped — {info.get('reason')}")
+            else:
+                click.echo(f"❌ {name}: {info.get('reason')}", err=True)
+    if result["failed"]:
         sys.exit(ERR_RUNTIME)
 
 

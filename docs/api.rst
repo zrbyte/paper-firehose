@@ -18,10 +18,12 @@ annotations and docstrings.
    paper_firehose.commands.pqa_summary
    paper_firehose.commands.rank
    paper_firehose.commands.summarize
+   paper_firehose.commands.synthesize
    paper_firehose.core.config
    paper_firehose.core.database
    paper_firehose.processors.emailer
    paper_firehose.processors.feed_processor
    paper_firehose.processors.html_generator
    paper_firehose.processors.pdf_summarizer
+   paper_firehose.processors.synthesizer
    paper_firehose.processors.st_ranker

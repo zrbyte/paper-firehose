@@ -258,6 +258,54 @@ class EmailRenderer:
         body_parts.append("</body></html>")
         return "\n".join(body_parts)
 
+    def render_synthesis(self, synthesis: Optional[Dict[str, Any]]) -> str:
+        """Render a stored cross-paper synthesis for the email, or '' if there is none to show.
+
+        Inline styles only. Every text is escaped: it was written by a model
+        from feed content. Paper titles and links come from the stored paper
+        list (the database), not from the model; links are http(s) only.
+        """
+        from . import synthesizer as synth
+
+        if not synth.is_fresh(synthesis):
+            return ''
+        content = synthesis.get('content') or {}
+
+        def esc(value: Any) -> str:
+            return html.escape(str(value or ''), quote=True)
+
+        parts: List[str] = [
+            '<div style="margin:8px 0 16px;padding:12px 14px;border:1px solid #ddd;'
+            'border-left:4px solid #1e5aa8;border-radius:6px;background:#f7f9fc;">',
+            '<div style="font-weight:bold;color:#153e75;margin-bottom:2px;">Synthesis across papers</div>',
+            '<div style="font-size:12px;color:#666;margin-bottom:8px;">'
+            f'{esc(synthesis.get("paper_count"))} papers matched {esc(synth.period_label(synthesis))}'
+            ' · written by an AI model from the abstracts; it can be wrong</div>',
+        ]
+        overview = content.get('overview')
+        if isinstance(overview, str) and overview.strip():
+            parts.append(f'<p style="margin:0 0 8px;">{esc(overview)}</p>')
+        themes = content.get('themes')
+        for theme in themes if isinstance(themes, list) else []:
+            if not isinstance(theme, dict):
+                continue
+            title, description = theme.get('title'), theme.get('description')
+            if not isinstance(title, str) or not isinstance(description, str):
+                continue
+            parts.append(f'<p style="margin:10px 0 2px;font-weight:bold;">{esc(title)}</p>')
+            parts.append(f'<p style="margin:0 0 4px;">{esc(description)}</p>')
+            papers = synth.theme_papers(content, theme)
+            if papers:
+                parts.append('<ul style="margin:0 0 4px;padding-left:18px;font-size:13px;">')
+                for paper in papers:
+                    if paper['link']:
+                        parts.append(f'<li><a href="{esc(paper["link"])}">{esc(paper["title"])}</a></li>')
+                    else:
+                        parts.append(f'<li>{esc(paper["title"])}</li>')
+                parts.append('</ul>')
+        parts.append('</div>')
+        return '\n'.join(parts)
+
     def _format_pqa_summary(self, pqa_raw: Optional[str]) -> Optional[str]:
         """Format paper_qa_summary JSON for email.
 

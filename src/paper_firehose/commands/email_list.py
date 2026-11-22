@@ -153,6 +153,15 @@ def run(
             included_count += len(entries)
             if entries:
                 section_html = renderer.render_ranked_entries(display_name, entries, max_items=limit)
+                # The topic's latest cross-paper synthesis (`synthesize` command), if
+                # there is a recent one, goes above its entries.
+                try:
+                    synthesis_html = renderer.render_synthesis(db.get_latest_synthesis(t))
+                except Exception as e:
+                    logger.warning("Could not read the synthesis of topic '%s': %s", t, e)
+                    synthesis_html = ''
+                if synthesis_html:
+                    section_html = synthesis_html + "\n" + section_html
                 sections.append((f"{display_name} — Ranked", section_html))
         return sections, included_count
 

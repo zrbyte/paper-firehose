@@ -125,6 +125,10 @@ _KNOWN_TOPIC_KEYS: Dict[str, Optional[Dict[str, Any]]] = {
         "download_rank_threshold", "rps", "max_retries",
         "llm", "reasoning_effort", "prompt",
     },
+    "synthesis": {
+        "enabled", "days", "max_papers", "min_rank",
+        "model", "reasoning_effort", "prompt",
+    },
     "output": {"filename", "filename_ranked", "filename_summary", "archive"},
 }
 

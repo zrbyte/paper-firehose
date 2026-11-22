@@ -19,6 +19,7 @@ from .commands import pqa_summary as pqa_summary_cmd
 from .commands import email_list as email_cmd
 from .commands import export_recent as export_recent_cmd
 from .commands import query as query_cmd
+from .commands import synthesize as synthesize_cmd
 from .core.config import ConfigManager, DEFAULT_CONFIG_PATH
 from .core.database import DatabaseManager
 from .core.paths import resolve_data_path
@@ -35,6 +36,7 @@ __all__ = [
     'abstracts',
     'pqa_summary',
     'paperqa_summary',
+    'synthesize',
     'email',
     'purge',
     'status',
@@ -132,6 +134,44 @@ def pqa_summary(
         history_date=history_date,
         history_feed_like=history_feed_like,
         summarize=summarize,
+    )
+
+
+def synthesize(
+    topic: Optional[str] = None,
+    *,
+    days: Optional[int] = None,
+    limit: Optional[int] = None,
+    min_rank: Optional[float] = None,
+    dry_run: bool = False,
+    config_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Write a cross-paper synthesis (overview + themes) of a topic's recent papers.
+
+    Reads the history database, makes one OpenAI call per topic (needs
+    ``OPENAI_API_KEY``) and stores the result there; ``html`` and ``email``
+    show the latest one above the topic's papers.
+
+    Args:
+        topic: Topic to synthesize; when omitted, every topic with
+            ``synthesis.enabled: true`` in its configuration.
+        days: Papers matched in the last N days (default: ``synthesis.days``, else 7).
+        limit: At most this many papers, best rank score first.
+        min_rank: Only papers with at least this rank score.
+        dry_run: Report which papers would be sent; no OpenAI call, nothing stored.
+        config_path: Path to main YAML config; defaults to repo config.
+
+    Returns:
+        ``{"command": "synthesize", "topics": {...}, "stored": n, "failed": n}``.
+    """
+    cfg_path = config_path or _DEFAULT_CONFIG
+    return synthesize_cmd.run(
+        cfg_path,
+        topic,
+        days=days,
+        limit=limit,
+        min_rank=min_rank,
+        dry_run=dry_run,
     )
 
 
