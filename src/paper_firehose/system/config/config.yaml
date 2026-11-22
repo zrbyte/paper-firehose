@@ -79,15 +79,15 @@ feeds:
     enabled: true
   nano-lett:
     name: "Nano Letters"
-    url: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=nalefd"
+    url: "https://pubs.acs.org/rss/nalefd/asap.xml"
     enabled: true
   acs-nano:
     name: "ACS Nano"
-    url: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ancac3"
+    url: "https://pubs.acs.org/rss/ancac3/asap.xml"
     enabled: true
   acs-en-lett:
     name: "ACS Energy Letters"
-    url: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=aelccp"
+    url: "https://pubs.acs.org/rss/aelccp/asap.xml"
     enabled: true
   en-env-sci:
     name: "Energy & Environmental Science"
@@ -167,6 +167,8 @@ priority_journal_boost: 0.20
 defaults:
   # Max age of feed entries to accumulate in all_feed_entries.db (days)
   time_window_days: 365
+  # Per-feed HTTP timeout when fetching RSS feeds (seconds)
+  feed_timeout_seconds: 30
 
   top_n_per_topic: 10
   # Above this threshold, the abstract is fetched

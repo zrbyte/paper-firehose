@@ -324,6 +324,7 @@ def test_json_output_filter(tmp_path, monkeypatch):
     assert "topics" in result
     assert "total_matched" in result
     assert isinstance(result["total_matched"], int)
+    assert result["failed_feeds"] == []
 
 
 @pytest.mark.usefixtures("monkeypatch")

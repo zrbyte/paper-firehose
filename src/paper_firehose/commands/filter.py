@@ -50,8 +50,11 @@ def run(
         # Initialize database manager
         db_manager = DatabaseManager(config)
         
-        # Local safety: backup important databases before we modify them
-        db_manager.backup_important_databases()
+        # Local safety: backup important databases before we modify them.
+        # Once per day is enough: the copy is as large as the database, and a
+        # backup made earlier today (or by `purge` just before) is still a
+        # valid restore point.
+        db_manager.backup_important_databases(once_per_day=True)
         
         # Clear current run database
         db_manager.clear_current_db()
@@ -112,6 +115,15 @@ def run(
         # so all_feed_entries.db stays bounded instead of growing indefinitely.
         feed_processor.prune_old_feed_entries()
 
+        failed_feeds = feed_processor.failed_feeds
+        if failed_feeds:
+            logger.warning(
+                "%d feed(s) could not be read: %s",
+                len(failed_feeds),
+                ", ".join(f"{f['name']} ({f['error']})" for f in failed_feeds),
+            )
+        feed_processor.session.close()
+
         # Close database connections
         db_manager.close_all_connections()
         
@@ -122,6 +134,7 @@ def run(
                 "command": "filter",
                 "topics": topic_counts,
                 "total_matched": sum(topic_counts.values()),
+                "failed_feeds": failed_feeds,
             }
 
     except Exception as e:

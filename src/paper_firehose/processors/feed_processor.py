@@ -4,11 +4,15 @@ Fetches RSS feeds, applies regex filters, and manages entry storage.
 """
 
 import feedparser
+import feedparser.http
 import re
 import time
 import datetime
+import urllib.parse
 from typing import Dict, List, Any
 import logging
+
+import requests
 
 from ..core.database import DatabaseManager
 from ..core.config import ConfigManager
@@ -18,19 +22,78 @@ logger = logging.getLogger(__name__)
 # Default time window for processing entries (days); can be overridden by config.defaults.time_window_days
 DEFAULT_TIME_WINDOW_DAYS = 365
 
+# Per-feed HTTP timeout (seconds); can be overridden by config.defaults.feed_timeout_seconds
+DEFAULT_FEED_TIMEOUT_SECONDS = 30
+
+
+class FeedFetchError(Exception):
+    """A feed could not be fetched or parsed."""
+
 
 class FeedProcessor:
     """Processes RSS feeds with regex filtering and database storage."""
-    
+
     def __init__(self, db_manager: DatabaseManager, config_manager: ConfigManager):
         """Bind database/config managers and derive the time window constraint."""
         self.db = db_manager
         self.config = config_manager
         # Resolve time window from config (defaults.time_window_days)
         cfg = self.config.load_config()
-        days = int((cfg.get('defaults') or {}).get('time_window_days', DEFAULT_TIME_WINDOW_DAYS))
+        defaults = cfg.get('defaults') or {}
+        days = int(defaults.get('time_window_days', DEFAULT_TIME_WINDOW_DAYS))
         self.time_delta = datetime.timedelta(days=days)
-    
+        self.feed_timeout = float(defaults.get('feed_timeout_seconds', DEFAULT_FEED_TIMEOUT_SECONDS))
+
+        # One session for the whole run: it keeps cookies across redirects,
+        # which publishers that answer with a cookie check need (Atypon
+        # ``/action/showFeed`` feeds such as ChemRxiv). Same User-Agent and
+        # Accept header as feedparser sends on its own.
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': feedparser.USER_AGENT,
+            'Accept': feedparser.http.ACCEPT_HEADER,
+        })
+
+        # Feeds that could not be fetched or parsed during this run, so that
+        # callers can tell "nothing new" from "could not read the feed".
+        self.failed_feeds: List[Dict[str, Any]] = []
+
+    def _fetch_feed(self, url: str) -> feedparser.FeedParserDict:
+        """Fetch and parse one feed; raise :class:`FeedFetchError` if it cannot be read.
+
+        HTTP(S) feeds go through ``self.session`` with a timeout; other URLs
+        (``file://``, local paths) are handed to feedparser directly.
+        """
+        scheme = urllib.parse.urlparse(url).scheme.lower()
+        if scheme in ('http', 'https'):
+            try:
+                response = self.session.get(url, timeout=self.feed_timeout)
+            except requests.RequestException as e:
+                raise FeedFetchError(f"request failed: {e}") from e
+            if response.status_code >= 400:
+                raise FeedFetchError(f"HTTP {response.status_code} from {response.url}")
+            headers = {k.lower(): v for k, v in response.headers.items()}
+            # Resolve relative links against the final URL after redirects.
+            headers.setdefault('content-location', response.url)
+            feed = feedparser.parse(response.content, response_headers=headers)
+            feed['status'] = response.status_code
+            feed['href'] = response.url
+        else:
+            feed = feedparser.parse(url)
+            status = feed.get('status')
+            if status is not None and status >= 400:
+                raise FeedFetchError(f"HTTP {status}")
+
+        if feed.bozo and not feed.entries:
+            raise FeedFetchError(f"could not parse feed: {feed.get('bozo_exception')}")
+        return feed
+
+    def _record_failure(self, feed_key: str, name: str, url: str, error: str) -> None:
+        """Remember a feed that could not be read (once per feed per run)."""
+        if any(f['feed'] == feed_key for f in self.failed_feeds):
+            return
+        self.failed_feeds.append({'feed': feed_key, 'name': name, 'url': url, 'error': error})
+
     def fetch_feeds(self, topic_name: str) -> Dict[str, List[Dict[str, Any]]]:
         """
         Fetch RSS feeds for a topic and return new entries.
@@ -58,7 +121,13 @@ class FeedProcessor:
             
             try:
                 # Fetch and parse RSS feed
-                feed = feedparser.parse(feed_url)
+                try:
+                    feed = self._fetch_feed(feed_url)
+                except FeedFetchError as e:
+                    logger.warning(f"Could not read feed '{feed_display_name}' ({feed_url}): {e}")
+                    self._record_failure(feed_key, feed_display_name, feed_url, str(e))
+                    new_entries_per_feed[feed_key] = []
+                    continue
                 if feed.bozo:
                     logger.warning(f"Feed '{feed_display_name}' has parsing issues: {feed.bozo_exception}")
                 
@@ -70,12 +139,9 @@ class FeedProcessor:
                 for entry in feed_entries:
                     entry['feed_title'] = feed_title
                 
-                new_entries = []
-                
+                candidates = []
+
                 for entry in feed_entries:
-                    # Generate stable entry ID
-                    entry_id = self.db.compute_entry_id(entry)
-                    
                     # Check if entry is within time window
                     entry_published = entry.get('published_parsed') or entry.get('updated_parsed')
                     if entry_published:
@@ -90,17 +156,23 @@ class FeedProcessor:
                     if (current_time - entry_datetime) > self.time_delta:
                         continue
                     
-                    # Check if this is a new entry (by title)
-                    title = entry.get('title', '').strip()
-                    if self.db.is_new_entry(title):
-                        new_entries.append(entry)
-                        logger.debug(f"New entry found: {title[:50]}...")
-                
+                    candidates.append(entry)
+
+                # Keep entries whose title is not in the dedup DB yet
+                # (one batched lookup per feed).
+                new_titles = self.db.filter_new_titles(
+                    [e.get('title', '').strip() for e in candidates]
+                )
+                new_entries = [e for e in candidates if e.get('title', '').strip() in new_titles]
+                for entry in new_entries:
+                    logger.debug(f"New entry found: {entry.get('title', '').strip()[:50]}...")
+
                 new_entries_per_feed[feed_key] = new_entries
                 logger.info(f"Found {len(new_entries)} new entries in feed '{feed_display_name}'")
-                
+
             except Exception as e:
                 logger.error(f"Error processing feed '{feed_display_name}': {e}")
+                self._record_failure(feed_key, feed_display_name, feed_url, f"processing error: {e}")
                 new_entries_per_feed[feed_key] = []
         
         return new_entries_per_feed
@@ -191,12 +263,13 @@ class FeedProcessor:
     def save_all_entries_to_dedup_db(self, all_entries_per_feed: Dict[str, List[Dict[str, Any]]]):
         """Save ALL processed entries to all_feed_entries.db for deduplication."""
         enabled_feeds = self.config.get_enabled_feeds()
+        items = []
         for feed_key, entries in all_entries_per_feed.items():
             display_name = enabled_feeds.get(feed_key, {}).get('name', feed_key)
             for entry in entries:
-                entry_id = self.db.compute_entry_id(entry)
-                self.db.save_feed_entry(entry, display_name, entry_id)
-        
+                items.append((entry, display_name, self.db.compute_entry_id(entry)))
+        self.db.save_feed_entries(items)
+
         logger.info(f"Saved all processed entries to deduplication database")
 
     def prune_old_feed_entries(self) -> int:

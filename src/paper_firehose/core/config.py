@@ -95,6 +95,7 @@ _KNOWN_MAIN_KEYS: Dict[str, Optional[Dict[str, Any]]] = {
     "priority_journal_boost": None,
     "defaults": {
         "time_window_days": None,
+        "feed_timeout_seconds": None,
         "top_n_per_topic": None,
         "rank_threshold": None,
         "ranking_negative_penalty": None,

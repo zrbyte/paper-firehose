@@ -196,16 +196,20 @@ class DatabaseManager:
             except Exception as e:
                 logger.warning(f"Failed to remove old backup {fp}: {e}")
 
-    def backup_important_databases(self) -> Dict[str, str]:
+    def backup_important_databases(self, once_per_day: bool = False) -> Dict[str, str]:
         """Backup history and all_feeds databases with timestamped rotation.
 
         - Writes timestamped backups alongside the source DBs in the runtime data directory.
         - Keeps only the most recent backup per database, pruning older ones.
+        - With ``once_per_day=True``, a database that already has a backup
+          from today is not copied again (the copy is as large as the
+          database itself); the existing backup's path is returned instead.
 
-        Returns a dict mapping logical db keys to the created backup file paths.
+        Returns a dict mapping logical db keys to the backup file paths.
         """
         backups = {}
         now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        today = now.split('-')[0]
         mappings = {
             'all_feeds': ('all_feed_entries', self.db_paths['all_feeds']),
             'history': ('matched_entries_history', self.db_paths['history']),
@@ -215,6 +219,12 @@ class DatabaseManager:
             if not os.path.exists(path):
                 continue
             directory = os.path.dirname(path)
+            if once_per_day:
+                todays = sorted(glob.glob(os.path.join(directory, f"{stem}.{today}-*.backup.db")))
+                if todays:
+                    backups[key] = todays[-1]
+                    logger.info(f"Database '{key}' already backed up today ({todays[-1]}), skipping")
+                    continue
             dest = os.path.join(directory, f"{stem}.{now}.backup.db")
             try:
                 self._backup_sqlite(path, dest)
@@ -256,7 +266,15 @@ class DatabaseManager:
             CREATE INDEX IF NOT EXISTS idx_feed_entries_first_seen 
             ON feed_entries(first_seen)
         ''')
-        
+
+        # Dedup lookups (filter_new_titles / is_new_entry) and the first_seen
+        # COALESCE in save_feed_entries match on title; without this index
+        # every lookup is a full table scan.
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_feed_entries_title
+            ON feed_entries(title)
+        ''')
+
         self._create_fts5_trigram(conn, 'feed_entries', ['title', 'summary', 'authors'])
         self._create_fts5_keyword(conn, 'feed_entries', ['title', 'summary', 'authors'])
         conn.commit()
@@ -428,13 +446,42 @@ class DatabaseManager:
         conn.commit()
         conn.close()
 
+    # Query parameters that publishers append to feed links for tracking only
+    # (Wiley/Atypon ``?af=R``, Cell ``?rss=yes``, ``utm_*``). They are removed
+    # before hashing; every other parameter is kept, because some feeds
+    # (Optica ``abstract.cfm?URI=...``, WordPress ``/?p=...``) tell their
+    # papers apart only by the query string.
+    TRACKING_QUERY_PARAMS = frozenset({
+        "af", "rss", "ref", "source", "via",
+        "fbclid", "gclid", "mc_cid", "mc_eid", "cookieset",
+    })
+
+    @classmethod
+    def _strip_tracking_params(cls, query: str) -> str:
+        """Drop tracking parameters from a raw query string, keeping the rest verbatim."""
+        kept = []
+        for part in query.split("&"):
+            if not part:
+                continue
+            key = urllib.parse.unquote_plus(part.split("=", 1)[0]).lower()
+            if key.startswith("utm_") or key in cls.TRACKING_QUERY_PARAMS:
+                continue
+            kept.append(part)
+        return "&".join(kept)
+
     def compute_entry_id(self, entry: Dict[str, Any]) -> str:
-        """Generate a stable SHA-1 based ID for a feed entry."""
+        """Generate a stable SHA-1 based ID for a feed entry.
+
+        Hashes the entry's ``id`` (or ``link``) without its fragment and
+        tracking query parameters. A link whose query held only tracking
+        parameters hashes exactly as it did when the whole query was dropped,
+        so existing rows keep their keys.
+        """
         candidate = entry.get("id") or entry.get("link")
         if candidate:
             parsed = urllib.parse.urlparse(candidate)
             candidate = urllib.parse.urlunparse(
-                parsed._replace(query="", fragment="")
+                parsed._replace(query=self._strip_tracking_params(parsed.query), fragment="")
             )
             return hashlib.sha1(candidate.encode("utf-8")).hexdigest()
 
@@ -455,35 +502,60 @@ class DatabaseManager:
             )
             result = cursor.fetchone()
             return result is None
-    
-    def save_feed_entry(self, entry: Dict[str, Any], feed_name: str, entry_id: str):
-        """Save an entry to all_feed_entries.db with proper date formatting."""
+
+    def filter_new_titles(self, titles: List[str]) -> set:
+        """Return the subset of *titles* not yet in all_feed_entries.db.
+
+        Uses one connection for the whole batch instead of one per title.
+        """
+        unique = set(titles)
+        if not unique:
+            return set()
         with self.get_connection('all_feeds', row_factory=False) as conn:
             cursor = conn.cursor()
+            known = {
+                t for t in unique
+                if cursor.execute(
+                    "SELECT 1 FROM feed_entries WHERE title = ? LIMIT 1", (t,)
+                ).fetchone() is not None
+            }
+        return unique - known
 
-            authors = self._extract_authors(entry)
+    def save_feed_entry(self, entry: Dict[str, Any], feed_name: str, entry_id: str):
+        """Save an entry to all_feed_entries.db with proper date formatting."""
+        self.save_feed_entries([(entry, feed_name, entry_id)])
 
-            # Ensure published_date is in YYYY-MM-DD format
-            published_date = self._format_published_date(entry)
+    def save_feed_entries(self, items: List[tuple]) -> None:
+        """Save ``(entry, feed_name, entry_id)`` tuples to all_feed_entries.db.
+
+        Uses a single connection and ``executemany``. ``first_seen`` is kept
+        from any earlier row with the same title.
+        """
+        rows = []
+        for entry, feed_name, entry_id in items:
             title = entry.get('title', '').strip()
-
-            cursor.execute('''
+            rows.append((
+                entry_id, feed_name,
+                title,
+                entry.get('link', ''),
+                entry.get('summary', entry.get('description', '')),
+                self._extract_authors(entry),
+                # Ensure published_date is in YYYY-MM-DD format
+                self._format_published_date(entry),
+                title,  # for COALESCE subquery
+            ))
+        if not rows:
+            return
+        with self.get_connection('all_feeds', row_factory=False) as conn:
+            conn.executemany('''
                 INSERT OR REPLACE INTO feed_entries
                 (entry_id, feed_name, title, link, summary, authors, published_date,
                  first_seen, last_seen)
                 VALUES (?, ?, ?, ?, ?, ?, ?,
                         COALESCE((SELECT first_seen FROM feed_entries WHERE title = ?), datetime('now')),
                         datetime('now'))
-            ''', (
-                entry_id, feed_name,
-                title,
-                entry.get('link', ''),
-                entry.get('summary', entry.get('description', '')),
-                authors,
-                published_date,
-                title,  # for COALESCE subquery
-            ))
-    
+            ''', rows)
+
     # Note: helper methods `is_entry_in_history` and `get_entry_topics_from_history`
     # were unused and have been removed to reduce surface area.
     

@@ -541,3 +541,121 @@ class TestAuthorExtraction:
         db.save_current_entry(entry, "Feed", "topic", eid)
         rows = db.get_current_entries()
         assert rows[0]["authors"] == "Charlie"
+
+
+# ---------------------------------------------------------------------------
+# Entry IDs keep identifying query parameters (issue #88)
+# ---------------------------------------------------------------------------
+
+class TestEntryIdQueryParams:
+    def _sha1(self, s):
+        import hashlib
+        return hashlib.sha1(s.encode("utf-8")).hexdigest()
+
+    @pytest.mark.parametrize("link", [
+        "https://www.science.org/doi/abs/10.1126/science.aeh7895?af=R",
+        "https://www.cell.com/joule/fulltext/S2542-4351(26)00430-7?rss=yes",
+        "https://example.com/paper/1?utm_source=rss&utm_medium=feed",
+        "https://example.com/paper/1?ref=rss#sec2",
+    ])
+    def test_tracking_only_query_keeps_old_id(self, tmp_path, link):
+        """Links whose query is pure tracking hash as before (query dropped)."""
+        db = DatabaseManager(_make_config(tmp_path))
+        bare = link.split("?")[0]
+        assert db.compute_entry_id({"link": link}) == self._sha1(bare)
+
+    @pytest.mark.parametrize("a,b", [
+        ("https://opg.optica.org/abstract.cfm?URI=optica-13-12-2495",
+         "https://opg.optica.org/abstract.cfm?URI=optica-13-12-2501"),
+        ("https://quantum-journal.org/?post_type=paper&p=19280",
+         "https://quantum-journal.org/?post_type=paper&p=19281"),
+    ])
+    def test_identifying_query_gives_distinct_ids(self, tmp_path, a, b):
+        db = DatabaseManager(_make_config(tmp_path))
+        assert db.compute_entry_id({"link": a}) != db.compute_entry_id({"link": b})
+
+    def test_tracking_params_removed_identifying_params_kept(self, tmp_path):
+        db = DatabaseManager(_make_config(tmp_path))
+        with_tracking = {"link": "https://opg.optica.org/abstract.cfm?URI=optica-13-12-2495&af=R&utm_campaign=x"}
+        without = {"link": "https://opg.optica.org/abstract.cfm?URI=optica-13-12-2495"}
+        assert db.compute_entry_id(with_tracking) == db.compute_entry_id(without)
+
+    def test_entries_differing_only_in_query_stored_separately(self, tmp_path):
+        db = DatabaseManager(_make_config(tmp_path))
+        e1 = _sample_entry(title="Paper one", link="https://opg.optica.org/abstract.cfm?URI=optica-13-12-2495")
+        e2 = _sample_entry(title="Paper two", link="https://opg.optica.org/abstract.cfm?URI=optica-13-12-2501")
+        for e in (e1, e2):
+            eid = db.compute_entry_id(e)
+            db.save_current_entry(e, "Optica", "test_topic", eid)
+            db.save_matched_entry(e, "Optica", "test_topic", eid)
+            db.save_feed_entry(e, "Optica", eid)
+        with db.get_connection("current") as conn:
+            assert conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0] == 2
+        with db.get_connection("history") as conn:
+            assert conn.execute("SELECT COUNT(*) FROM matched_entries").fetchone()[0] == 2
+        with db.get_connection("all_feeds") as conn:
+            assert conn.execute("SELECT COUNT(*) FROM feed_entries").fetchone()[0] == 2
+
+
+# ---------------------------------------------------------------------------
+# Dedup lookups use an index and batch connections (issue #89)
+# ---------------------------------------------------------------------------
+
+class TestDedupPerformance:
+    def test_title_index_exists_and_is_used(self, tmp_path):
+        db = DatabaseManager(_make_config(tmp_path))
+        with db.get_connection("all_feeds", row_factory=False) as conn:
+            names = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='feed_entries'")}
+            assert "idx_feed_entries_title" in names
+            plan = " ".join(str(r) for r in conn.execute(
+                "EXPLAIN QUERY PLAN SELECT 1 FROM feed_entries WHERE title = ?", ("x",)))
+            assert "idx_feed_entries_title" in plan
+
+    def test_index_added_to_existing_database(self, tmp_path):
+        path = tmp_path / "all_feed_entries.db"
+        conn = sqlite3.connect(path)
+        conn.execute("""CREATE TABLE feed_entries (
+            entry_id TEXT PRIMARY KEY, feed_name TEXT NOT NULL, title TEXT NOT NULL,
+            link TEXT NOT NULL, summary TEXT, authors TEXT, published_date TEXT,
+            first_seen TEXT DEFAULT (datetime('now')), last_seen TEXT DEFAULT (datetime('now')),
+            UNIQUE(feed_name, entry_id))""")
+        conn.commit()
+        conn.close()
+        DatabaseManager(_make_config(tmp_path))
+        conn = sqlite3.connect(path)
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+        conn.close()
+        assert "idx_feed_entries_title" in names
+
+    def test_filter_new_titles(self, tmp_path):
+        db = DatabaseManager(_make_config(tmp_path))
+        seen = _sample_entry(title="Already seen")
+        db.save_feed_entry(seen, "Feed", db.compute_entry_id(seen))
+        assert db.filter_new_titles(["Already seen", "Brand new", "Brand new"]) == {"Brand new"}
+        assert db.filter_new_titles([]) == set()
+
+    def test_save_feed_entries_batch(self, tmp_path):
+        db = DatabaseManager(_make_config(tmp_path))
+        entries = [_sample_entry(title=f"Paper {i}", link=f"http://example.com/{i}") for i in range(5)]
+        db.save_feed_entries([(e, "Feed", db.compute_entry_id(e)) for e in entries])
+        with db.get_connection("all_feeds") as conn:
+            assert conn.execute("SELECT COUNT(*) FROM feed_entries").fetchone()[0] == 5
+        assert db.filter_new_titles([e["title"] for e in entries]) == set()
+
+    def test_backup_once_per_day_reuses_todays_backup(self, tmp_path):
+        import glob as globmod
+        db = DatabaseManager(_make_config(tmp_path))
+        first = db.backup_important_databases()
+        second = db.backup_important_databases(once_per_day=True)
+        assert second == first
+        assert len(globmod.glob(str(tmp_path / "all_feed_entries.*.backup.db"))) == 1
+
+    def test_backup_once_per_day_ignores_older_backups(self, tmp_path):
+        db = DatabaseManager(_make_config(tmp_path))
+        stale = tmp_path / "all_feed_entries.20000101-000000.backup.db"
+        stale.write_bytes(b"")
+        backups = db.backup_important_databases(once_per_day=True)
+        assert Path(backups["all_feeds"]) != stale
+        assert Path(backups["all_feeds"]).exists()
+        assert not stale.exists()  # rotated away

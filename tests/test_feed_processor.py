@@ -217,3 +217,142 @@ class TestSaveAllEntries:
         entries_per_feed2 = proc.fetch_feeds("test_topic")
         total_new = sum(len(v) for v in entries_per_feed2.values())
         assert total_new == 0
+
+
+# ---------------------------------------------------------------------------
+# HTTP fetching: cookie checks, HTTP errors, timeouts (issue #87)
+# ---------------------------------------------------------------------------
+
+import email.utils
+import threading
+import feedparser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+def _rss(titles):
+    now = email.utils.formatdate(usegmt=True)
+    items = "".join(
+        f"<item><title>{t}</title><link>http://example.com/{i}</link>"
+        f"<description>graphene {i}</description><pubDate>{now}</pubDate></item>"
+        for i, t in enumerate(titles)
+    )
+    return (f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel>'
+            f"<title>HTTP Test Feed</title>{items}</channel></rss>").encode("utf-8")
+
+
+class _FeedHandler(BaseHTTPRequestHandler):
+    """Mimics an Atypon-style cookie check plus error/slow endpoints."""
+
+    feed_body = _rss(["Graphene paper A", "Graphene paper B"])
+
+    def log_message(self, *args):  # keep pytest output quiet
+        pass
+
+    def _send(self, code, body=b"", headers=None):
+        self.send_response(code)
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        has_cookie = "session=ok" in (self.headers.get("Cookie") or "")
+        if self.path == "/action/showFeed":
+            self._send(302, headers={"Location": "/action/showFeed?cookieSet=1",
+                                     "Set-Cookie": "session=ok; Path=/"})
+        elif self.path == "/action/showFeed?cookieSet=1":
+            if has_cookie:
+                self._send(200, self.feed_body, {"Content-Type": "application/rss+xml"})
+            else:
+                self._send(302, headers={"Location": "/action/cookieAbsent"})
+        elif self.path == "/action/cookieAbsent":
+            self._send(403, b"cookies required")
+        elif self.path == "/forbidden":
+            self._send(403, b"no")
+        elif self.path == "/slow":
+            time.sleep(2)
+            self._send(200, self.feed_body, {"Content-Type": "application/rss+xml"})
+        else:
+            self._send(404, b"not found")
+
+
+@pytest.fixture
+def feed_server():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _FeedHandler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+def _http_env(tmp_path, url, timeout=None):
+    extra = f"\n  feed_timeout_seconds: {timeout}" if timeout is not None else ""
+    config_yaml = textwrap.dedent(f"""
+        database:
+          path: "{tmp_path}/papers.db"
+          all_feeds_path: "{tmp_path}/all_feed_entries.db"
+          history_path: "{tmp_path}/matched_entries_history.db"
+        feeds:
+          local_feed:
+            name: "HTTP Test Feed"
+            url: "{url}"
+            enabled: true
+        priority_journals: []
+        defaults:
+          time_window_days: 365
+    """).strip() + extra + "\n"
+    return _make_env(tmp_path, config_yaml=config_yaml)
+
+
+class TestHttpFetching:
+    def test_cookie_check_feed_is_read(self, tmp_path, monkeypatch, feed_server):
+        monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(tmp_path / "data"))
+        url = f"{feed_server}/action/showFeed"
+        # Sanity check: plain feedparser drops the cookie and gets nothing.
+        assert len(feedparser.parse(url).entries) == 0
+
+        cfg_mgr, db = _http_env(tmp_path, url)
+        proc = FeedProcessor(db, cfg_mgr)
+        entries = proc.fetch_feeds("test_topic")["local_feed"]
+        assert sorted(e["title"] for e in entries) == ["Graphene paper A", "Graphene paper B"]
+        assert proc.failed_feeds == []
+
+    def test_http_error_recorded_as_failed(self, tmp_path, monkeypatch, feed_server):
+        monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(tmp_path / "data"))
+        url = f"{feed_server}/forbidden"
+        cfg_mgr, db = _http_env(tmp_path, url)
+        proc = FeedProcessor(db, cfg_mgr)
+        assert proc.fetch_feeds("test_topic") == {"local_feed": []}
+        assert len(proc.failed_feeds) == 1
+        failure = proc.failed_feeds[0]
+        assert failure["feed"] == "local_feed"
+        assert failure["url"] == url
+        assert "403" in failure["error"]
+
+    def test_failure_recorded_once_per_feed(self, tmp_path, monkeypatch, feed_server):
+        monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(tmp_path / "data"))
+        cfg_mgr, db = _http_env(tmp_path, f"{feed_server}/forbidden")
+        proc = FeedProcessor(db, cfg_mgr)
+        proc.fetch_feeds("test_topic")
+        proc.fetch_feeds("test_topic")
+        assert len(proc.failed_feeds) == 1
+
+    def test_slow_feed_times_out(self, tmp_path, monkeypatch, feed_server):
+        monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(tmp_path / "data"))
+        cfg_mgr, db = _http_env(tmp_path, f"{feed_server}/slow", timeout=0.5)
+        proc = FeedProcessor(db, cfg_mgr)
+        start = time.monotonic()
+        assert proc.fetch_feeds("test_topic") == {"local_feed": []}
+        assert time.monotonic() - start < 1.9
+        assert len(proc.failed_feeds) == 1
+
+    def test_unreadable_local_feed_recorded(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(tmp_path / "data"))
+        missing = (tmp_path / "missing.xml").as_uri()
+        cfg_mgr, db = _http_env(tmp_path, missing)
+        proc = FeedProcessor(db, cfg_mgr)
+        assert proc.fetch_feeds("test_topic") == {"local_feed": []}
+        assert [f["feed"] for f in proc.failed_feeds] == ["local_feed"]

@@ -70,7 +70,8 @@ Global options
 Commands
 - `filter [--topic TOPIC]`
   - Fetch RSS feeds, dedup by title, apply per‑topic regex, write matches to databases.
-  - Backs up `all_feed_entries.db` and `matched_entries_history.db`, then clears current `papers.db` working table.
+  - Backs up `all_feed_entries.db` and `matched_entries_history.db` (at most once per day), then clears current `papers.db` working table.
+  - Feeds are fetched with a cookie-keeping HTTP session and a per-feed timeout (`defaults.feed_timeout_seconds`, default 30). Feeds that could not be read are logged and, with `--json`, listed under `failed_feeds`.
 
 - `rank [--topic TOPIC]`
   - Compute `rank_score` using Sentence‑Transformers similarity to `ranking.query`.
