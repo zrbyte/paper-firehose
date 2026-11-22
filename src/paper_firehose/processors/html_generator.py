@@ -14,6 +14,7 @@ from typing import Dict, List, Any, Optional
 CUSTOM_TEMPLATE_MARKER = "paper-firehose:custom-template"
 
 from ..core.paths import get_system_path, resolve_data_path
+from . import synthesizer as synth
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,73 @@ class HTMLGenerator:
         
         return text
     
+    def _render_synthesis_block(self, db_manager, topic_name: str) -> str:
+        """HTML for the topic's latest cross-paper synthesis, or '' if there is none to show.
+
+        Put first into a page's content, above the entries. Three things about it:
+
+        - Its styles are inline. The ranked and summary templates are copied
+          into the data directory once and then left alone (custom-template
+          marker), so existing installations never receive new CSS.
+        - It does not use the class ``entry``: the pages' search box, entry
+          counter and carousel all work on ``.entry`` elements.
+        - Every text is escaped with ``html.escape`` — not ``process_text``,
+          which un-escapes ``<`` and ``>`` again for LaTeX. The text was
+          written by a model from feed content; ``$...$`` formulas survive
+          escaping and are still typeset by MathJax. Links are http(s) only.
+        """
+        try:
+            synthesis = db_manager.get_latest_synthesis(topic_name)
+        except Exception as exc:
+            logger.warning("Could not read the synthesis of topic '%s': %s", topic_name, exc)
+            return ''
+        if not synth.is_fresh(synthesis):
+            return ''
+        content = synthesis.get('content') or {}
+
+        def esc(value: Any) -> str:
+            return html.escape(str(value or ''), quote=True)
+
+        parts: List[str] = [
+            # <details open>: shown at once, and the reader can fold it away to get
+            # to the papers (it is long on a phone). The browser does that; no script.
+            '<details class="synthesis" open '
+            'style="margin:12px 0 24px;padding:16px 20px;border:1px solid rgba(128,128,128,0.35);'
+            'border-left:4px solid #1e5aa8;border-radius:8px;">',
+            '  <summary style="cursor:pointer;font-weight:600;font-size:1.15em;margin:0 0 4px;">'
+            'Synthesis across papers</summary>',
+            '  <p style="margin:0 0 12px;font-size:0.85em;opacity:0.75;">'
+            f'{esc(synthesis.get("paper_count"))} papers matched {esc(synth.period_label(synthesis))}'
+            ' · written by an AI model from the abstracts; it can be wrong</p>',
+        ]
+        overview = content.get('overview')
+        if isinstance(overview, str) and overview.strip():
+            parts.append(f'  <p style="margin:0 0 12px;">{esc(overview)}</p>')
+
+        themes = content.get('themes')
+        for theme in themes if isinstance(themes, list) else []:
+            if not isinstance(theme, dict):
+                continue
+            title, description = theme.get('title'), theme.get('description')
+            if not isinstance(title, str) or not isinstance(description, str):
+                continue
+            parts.append(f'  <h3 style="margin:14px 0 4px;font-size:1em;">{esc(title)}</h3>')
+            parts.append(f'  <p style="margin:0 0 6px;">{esc(description)}</p>')
+            papers = synth.theme_papers(content, theme)
+            if papers:
+                parts.append('  <ul style="margin:0 0 4px;padding-left:1.2em;font-size:0.9em;">')
+                for paper in papers:
+                    if paper['link']:
+                        parts.append(
+                            f'    <li><a href="{esc(paper["link"])}" target="_blank" '
+                            f'rel="noopener noreferrer">{esc(paper["title"])}</a></li>'
+                        )
+                    else:
+                        parts.append(f'    <li>{esc(paper["title"])}</li>')
+                parts.append('  </ul>')
+        parts.append('</details>')
+        return '\n'.join(parts)
+
     def generate_html_from_database(self, db_manager, topic_name: str, output_path: str, heading: str = None, description: str = None) -> None:
         """
         Generate an HTML file for filtered entries pulled directly from papers.db.
@@ -70,6 +138,11 @@ class HTMLGenerator:
         
         # Generate HTML for entries
         entries_html = self._generate_entries_html_from_db(entries_per_feed)
+
+        # The topic's latest cross-paper synthesis goes above the entries
+        synthesis_html = self._render_synthesis_block(db_manager, topic_name)
+        if synthesis_html:
+            entries_html = [synthesis_html] + list(entries_html)
         
         # Read the template file we just created
         with open(output_path, 'r', encoding='utf-8') as f:
@@ -112,6 +185,10 @@ class HTMLGenerator:
         ranked.sort(key=lambda e: (e.get('rank_score') or 0.0), reverse=True)
 
         html_parts: List[str] = []
+        # The topic's latest cross-paper synthesis goes above the entries
+        synthesis_html = self._render_synthesis_block(db_manager, topic_name)
+        if synthesis_html:
+            html_parts.append(synthesis_html)
         if not ranked:
             html_parts.append('<p class="no-entries">No ranked entries available.</p>')
         else:
@@ -213,8 +290,12 @@ class HTMLGenerator:
         entries = db_manager.get_current_entries(topic=topic_name)
         ranked_entries = [e for e in entries if e.get('rank_score') is not None]
 
+        # The topic's latest cross-paper synthesis goes above the entries
+        synthesis_html = self._render_synthesis_block(db_manager, topic_name)
+        html_parts = [synthesis_html] if synthesis_html else []
+
         if not ranked_entries:
-            html_parts = ['<p class="no-entries">No ranked entries available for this topic.</p>']
+            html_parts.append('<p class="no-entries">No ranked entries available for this topic.</p>')
         else:
             # Sort by rank_score descending (same as ranked HTML)
             ranked_entries.sort(key=lambda e: (e.get('rank_score') or 0.0), reverse=True)
@@ -222,7 +303,6 @@ class HTMLGenerator:
             # Count entries with summaries
             summarized_count = sum(1 for e in ranked_entries if e.get('paper_qa_summary') and e.get('paper_qa_summary').strip())
 
-            html_parts = []
             html_parts.append(f'<div class="entry-count" data-entry-counter="true">{len(ranked_entries)} ranked entries (highest score first, {summarized_count} with PDF summaries)</div>')
 
             for idx, entry in enumerate(ranked_entries):

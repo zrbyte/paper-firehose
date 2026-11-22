@@ -23,7 +23,7 @@ Set up an `OPENAI_API_KEY` environment variable for full-text summarization to w
 - Copy `github_actions_config/topics/topic-template.yaml` to create topic files, or tweak the existing ones. See `github_actions_config/README.md` for a guided walkthrough.
 - Edit the `pages.yml` file in the `schedule.cron` part to set when the automated job runs.
 - Set up GitHub Secrets under Secrets and Variables / Actions. You don't need this step if you're only running the `filter` and `rank` commands. If you want the summarization to work setup an `OPENAI_API_KEY` environment variable. For email alert functionality, you will need `MAILING_LISTS_YAML` and `SMTP_PASSWORD` env variables.
-  - `OPENAI_API_KEY`. Only needed for the full-text summarization (`pqa_summary --summarize`). Set up as a GitHub actions environment secret.
+  - `OPENAI_API_KEY`. Only needed for the full-text summarization (`pqa_summary --summarize`) and the cross-paper synthesis (`synthesize`). Set up as a GitHub actions environment secret.
   - `MAILING_LISTS_YAML`. This contains the emails and other config that the email alert functionality needs. Just copy the contents of your `mailing_lists.yaml` file. This is a GitHub actions secret so you don't expose user info to the outside world in the repo.
   - `SMTP_PASSWORD`. The password for your email server. Set up as a GitHub actions secret.
 
@@ -55,7 +55,16 @@ paper-firehose pqa_summary --summarize
 ```
 The PDF text is extracted locally and sent to the model in a single request; the answer is stored as JSON with `summary` and `methods` fields. A typical arXiv paper is 7k–40k tokens, so a summary costs roughly 0.03 USD with `gpt-6.2-sol` and well under a cent with `gpt-6-luna`.
 
-4) Email newsletter
+4) Optional: a synthesis across the papers of a topic
+```
+# What do this week's papers have in common? One OpenAI call per topic.
+paper-firehose synthesize --topic YOUR_TOPIC --dry-run   # show which papers would be sent, call nothing
+paper-firehose synthesize                                # every topic with `synthesis: {enabled: true}`
+paper-firehose html                                      # the pages now start with the synthesis
+```
+`synthesize` reads the titles and abstracts of the papers a topic matched in the last days (from `matched_entries_history.db`, so the topic needs `output.archive: true`), and asks the model for a short overview and 2–5 themes, each naming the papers it rests on. The answer is stored in the history database; `html` and `email` show the latest one above the topic's papers while it is recent. With the defaults (7 days, at most 40 papers, 1500 characters of each abstract) one call sends about 15k tokens. Run it before `html` in a scheduled job, and let the job go on if it fails (`paper-firehose synthesize || true`): it exits with an error when `OPENAI_API_KEY` is missing or a call fails.
+
+5) Email newsletter
 ```
 # Send a ranked email digest (SMTP config required)
 paper-firehose email
@@ -93,6 +102,13 @@ Commands
 - `pqa_summary [--topic TOPIC] [--rps FLOAT] [--limit N] [--arxiv ID|URL ...] [--entry-id ID ...] [--use-history] [--history-date YYYY-MM-DD] [--history-feed-like STR] [--summarize]`
   - Download arXiv PDFs for ranked entries (or explicit IDs/URLs) with polite rate limiting, archive them, optionally run paper‑qa, and write normalized JSON into DBs. Old PDFs are discarded from the archive. We don't do scraping.
   - Accepts `--arxiv` values like `2501.12345`, `2501.12345v2`, `https://arxiv.org/abs/2501.12345`, or `https://arxiv.org/pdf/2501.12345.pdf`.
+
+- `synthesize [--topic TOPIC] [--days N] [--limit N] [--min-rank FLOAT] [--dry-run] [--json]`
+  - Write a cross-paper synthesis (an overview and a few themes, each with its papers) of what a topic matched in the last `N` days and store it in `matched_entries_history.db` (table `syntheses`). One OpenAI call per topic; needs `OPENAI_API_KEY`.
+  - Without `--topic`: every topic whose config has `synthesis.enabled: true`. With `--topic`: that topic, enabled or not.
+  - `--days`, `--limit` (most papers sent, best rank score first) and `--min-rank` override the topic's `synthesis` section. Fewer than 3 papers: nothing is sent.
+  - `--dry-run` lists the papers that would be sent and the size of the request; it makes no call and needs no key.
+  - Exit code 1 when the key is missing or a topic's call failed; the other topics are still processed.
 
 - `email [--topic TOPIC] [--mode auto|ranked] [--limit N] [--recipients PATH] [--dry-run]`
   - Send a compact HTML digest via SMTP (SSL). In dry‑run, writes a preview HTML to the data dir.
@@ -143,7 +159,7 @@ Import functions directly from the package for programmatic workflows:
 
 ```python
 from paper_firehose import (
-    filter, rank, abstracts, pqa_summary, email, purge, status, html, export_recent, query,
+    filter, rank, abstracts, pqa_summary, synthesize, email, purge, status, html, export_recent, query,
 )
 
 # Run steps
@@ -162,6 +178,10 @@ export_recent(days=30, output_name="matched_entries_history.recent.db")
 # Download arXiv PDFs (+ summarize with summarize=True)
 pqa_summary(topic="perovskites", rps=0.33, limit=10)
 pqa_summary(arxiv=["2501.12345", "https://arxiv.org/abs/2501.12345v2"], summarize=True)
+
+# Cross-paper synthesis of a topic's last 7 days (one OpenAI call; dry_run=True calls nothing)
+result = synthesize(topic="perovskites", days=7, dry_run=True)
+print(result["topics"]["perovskites"]["titles"])
 
 # Email digest
 email(limit=10, dry_run=True)
@@ -207,23 +227,25 @@ Key config fields
 - `priority_journals` and `priority_journal_boost`: optional global score boost by feed key.
 - Topic `ranking`: `query`, `model`, optional `negative_queries`, `preferred_authors`, `priority_author_boost`.
 - Topic `output`: `filename`, `filename_ranked`, `archive: true|false`.
+- `synthesis` (cross-paper synthesis, optional): `enabled` (include the topic when `synthesize` runs without `--topic`), `days` (default 7), `max_papers` (default 40), optional `min_rank`, `model` (OpenAI model; default as for `paperqa.llm`), `reasoning_effort`, and `prompt` (`{ranking_query}` is substituted; output is always JSON with `overview` and `themes`).
 - `paperqa` (full-text summaries; name kept for compatibility): `download_rank_threshold`, `rps` (≤ 0.33 recommended), `max_retries`, `llm` (OpenAI model), optional `reasoning_effort`, and `prompt` (`{ranking_query}` is substituted; output is always JSON with `summary` and `methods`).
 
 Environment variables
 - `PAPER_FIREHOSE_DATA_DIR` select/override the runtime data location
-- `OPENAI_API_KEY` for `pqa_summary --summarize`
+- `OPENAI_API_KEY` for `pqa_summary --summarize` and `synthesize`
 - `MAILTO` used for polite arXiv/Crossref User‑Agent when not specified on CLI
 
 ## Data & Outputs
 
 Databases (under the data dir unless absolute paths are used)
 - `all_feed_entries.db` (table `feed_entries`): every fetched item for deduplication
-- `matched_entries_history.db` (table `matched_entries`): historical archive of matches, optional JSON summaries
+- `matched_entries_history.db` (table `matched_entries`): historical archive of matches, optional JSON summaries; (table `syntheses`): the cross-paper syntheses written by `synthesize`
 - `matched_entries_history.recent.db` (table `matched_entries`): recent entries only (default: last 60 days), used for fast initial page loads
 - `papers.db` (table `entries`): current‑run working set with `status`, `rank_score`, `paper_qa_summary`
 
 HTML
 - Generated by the `html` command from `papers.db` using templates in `templates/`. Ranked pages are produced when configured.
+- When a topic has a recent synthesis (see `synthesize`), each of its pages starts with it. It is shown as long as it is not older than the period it covers plus one day.
 - The history viewer HTML (`history_viewer_cards_pf.html`) loads the recent database by default for faster initial load, with a "Load Full Archive" button to access the complete history.
 
 Email

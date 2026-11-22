@@ -9,6 +9,7 @@ import sqlite3
 import os
 import datetime
 import hashlib
+import json
 import re
 import urllib.parse
 from typing import Dict, List, Any, Optional, Iterator
@@ -363,6 +364,27 @@ class DatabaseManager:
 
         self._create_fts5_trigram(conn, 'matched_entries', ['title', 'summary', 'abstract', 'authors'])
         self._create_fts5_keyword(conn, 'matched_entries', ['title', 'summary', 'abstract', 'authors'])
+
+        # Cross-paper syntheses (the ``synthesize`` command): one row per
+        # generated text. ``content`` is a JSON object, see save_synthesis().
+        # IF NOT EXISTS brings databases of earlier versions up to date.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS syntheses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic TEXT NOT NULL,
+                period_start TEXT NOT NULL,
+                period_end TEXT NOT NULL,
+                paper_count INTEGER NOT NULL,
+                model TEXT,
+                created TEXT NOT NULL DEFAULT (datetime('now')),
+                content TEXT NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_syntheses_topic_created
+            ON syntheses(topic, created)
+        ''')
+
         conn.commit()
         conn.close()
 
@@ -1044,6 +1066,148 @@ class DatabaseManager:
             cursor.execute(query, entry_ids)
             for row in cursor:
                 yield row
+
+    # ------------------------------------------------------------------
+    # Cross-paper synthesis (used by the ``synthesize`` command)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _sqlite_datetime(value) -> str:
+        """Format a datetime (naive = UTC) or pass a string through, as SQLite's ``datetime('now')`` writes it."""
+        if isinstance(value, datetime.datetime):
+            if value.tzinfo is not None:
+                value = value.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+            return value.strftime('%Y-%m-%d %H:%M:%S')
+        return str(value)
+
+    def get_history_matches(
+        self,
+        topic: str,
+        since=None,
+        until=None,
+        min_rank: Optional[float] = None,
+        limit: Optional[int] = None,
+    ) -> tuple:
+        """Papers of *topic* in the history database, by the time they were matched.
+
+        Args:
+            topic: Topic key. Matched as an exact member of the comma-joined
+                ``topics`` column — ``rg`` does not match a paper of ``org``.
+            since: Only papers with ``matched_date`` later than this (UTC
+                datetime or ``'YYYY-MM-DD HH:MM:SS'`` string). None = no lower bound.
+            until: Only papers with ``matched_date`` up to and including this.
+            min_rank: Only papers with at least this ``rank_score`` (papers
+                without a score are left out when a minimum is given).
+            limit: At most this many rows (best score first).
+
+        Returns:
+            ``(rows, total)``: the rows (highest ``rank_score`` first, unscored
+            papers last) and the number of papers that satisfied the
+            conditions before ``limit`` was applied.
+        """
+        # ``topics`` holds e.g. "catalysis, primary". Strip the blanks and wrap
+        # both sides in commas, then look for ",<topic>,": exact membership
+        # without LIKE (a topic key may contain "_" or "%").
+        conditions = ["instr(',' || REPLACE(topics, ' ', '') || ',', ',' || ? || ',') > 0"]
+        params: List[Any] = [str(topic).replace(' ', '')]
+        if since is not None:
+            conditions.append("matched_date > ?")
+            params.append(self._sqlite_datetime(since))
+        if until is not None:
+            conditions.append("matched_date <= ?")
+            params.append(self._sqlite_datetime(until))
+        if min_rank is not None:
+            conditions.append("rank_score >= ?")
+            params.append(float(min_rank))
+        where = " AND ".join(conditions)
+
+        query = f"""
+            SELECT entry_id, feed_name, topics, title, link, summary, authors,
+                   abstract, doi, published_date, matched_date, rank_score
+            FROM matched_entries
+            WHERE {where}
+            ORDER BY rank_score IS NULL, rank_score DESC, matched_date DESC, entry_id
+        """
+        row_params = list(params)
+        if limit is not None:
+            query += " LIMIT ?"
+            row_params.append(int(limit))
+
+        with self.get_connection('history') as conn:
+            cursor = conn.cursor()
+            total = cursor.execute(
+                f"SELECT COUNT(*) FROM matched_entries WHERE {where}", params
+            ).fetchone()[0]
+            rows = cursor.execute(query, row_params).fetchall()
+        return rows, total
+
+    def save_synthesis(
+        self,
+        topic: str,
+        period_start,
+        period_end,
+        paper_count: int,
+        model: Optional[str],
+        content: Dict[str, Any],
+    ) -> int:
+        """Store one cross-paper synthesis in the history database; returns its row id.
+
+        ``content`` is stored as JSON. The ``synthesize`` command writes::
+
+            {"overview": str,
+             "themes": [{"title": str, "description": str, "papers": [int, ...]}],
+             "papers": [{"entry_id": str, "title": str, "link": str, "feed_name": str}, ...]}
+
+        where the numbers in ``themes[].papers`` are positions in ``papers``
+        (0-based).
+        """
+        with self.get_connection('history', row_factory=False) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO syntheses (topic, period_start, period_end, paper_count, model, content)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    topic,
+                    self._sqlite_datetime(period_start),
+                    self._sqlite_datetime(period_end),
+                    int(paper_count),
+                    model,
+                    json.dumps(content, ensure_ascii=False),
+                ),
+            )
+            return cursor.lastrowid
+
+    def get_latest_synthesis(self, topic: str) -> Optional[Dict[str, Any]]:
+        """The most recently stored synthesis of *topic*, or None.
+
+        Returns a dict with ``topic``, ``period_start``, ``period_end``,
+        ``paper_count``, ``model``, ``created`` (all as stored) and
+        ``content`` (the parsed JSON object). A row whose content is not a
+        JSON object is treated as absent.
+        """
+        with self.get_connection('history') as conn:
+            row = conn.execute(
+                """
+                SELECT topic, period_start, period_end, paper_count, model, created, content
+                FROM syntheses
+                WHERE topic = ?
+                ORDER BY created DESC, id DESC
+                LIMIT 1
+                """,
+                (topic,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            content = json.loads(row['content'])
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(content, dict):
+            return None
+        result = {key: row[key] for key in ('topic', 'period_start', 'period_end', 'paper_count', 'model', 'created')}
+        result['content'] = content
+        return result
 
     # ------------------------------------------------------------------
     # General-purpose query (used by the ``query`` CLI command)

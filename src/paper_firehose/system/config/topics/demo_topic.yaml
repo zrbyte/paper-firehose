@@ -87,6 +87,27 @@ paperqa:
     Summarize for an expert reader interested in {ranking_query}.
     Keep text information-dense. Avoid superlatives.
 
+# Cross-paper synthesis (optional; `paper-firehose synthesize`).
+# One OpenAI call per topic reads the titles and abstracts of the papers this
+# topic matched in the last `days` days and writes an overview plus a few
+# themes. `html` and `email` show it above the topic's papers.
+synthesis:
+  # Without --topic, `synthesize` only processes topics that set this to true
+  enabled: false
+  # Papers matched in the last N days (run it daily with 1, or weekly with 7)
+  days: 7
+  # At most this many papers are sent, best rank score first
+  max_papers: 40
+  # Optional: only papers with at least this rank score
+  # min_rank: 0.3
+  # OpenAI model (default: the same as paperqa.llm's default)
+  # model: "gpt-6.2-sol"
+  # reasoning_effort: "low"
+  # Extra instructions ({ranking_query} is substituted). The output is always
+  # JSON {"overview", "themes"}; no need to ask for JSON here.
+  # prompt: |
+  #   Write for an expert reader interested in {ranking_query}.
+
 # Output configuration
 output:
   filename: "results_demo.html"
