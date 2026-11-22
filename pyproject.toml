@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper_firehose"
-version = "0.5.1"
+version = "0.5.2"
 description = "Filter, rank, and summarize research-paper RSS feeds."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -21,6 +21,7 @@ dependencies = [
     "click==8.3.1",
     "sentence-transformers==5.3.0",
     "requests==2.32.5",
+    "urllib3==2.5.0",
     "openai==2.29.0",
     "pypdf==6.0.0",
     "Pillow==12.1.1",

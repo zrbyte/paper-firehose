@@ -5,6 +5,7 @@ Fetches RSS feeds, applies regex filters, and manages entry storage.
 
 import feedparser
 import feedparser.http
+import io
 import re
 import time
 import datetime
@@ -13,6 +14,7 @@ from typing import Dict, List, Any
 import logging
 
 import requests
+import urllib3.exceptions
 
 from ..core.database import DatabaseManager
 from ..core.config import ConfigManager
@@ -22,8 +24,13 @@ logger = logging.getLogger(__name__)
 # Default time window for processing entries (days); can be overridden by config.defaults.time_window_days
 DEFAULT_TIME_WINDOW_DAYS = 365
 
-# Per-feed HTTP timeout (seconds); can be overridden by config.defaults.feed_timeout_seconds
+# Per-feed HTTP timeout (seconds); can be overridden by config.defaults.feed_timeout_seconds.
+# Bounds each read and the download as a whole.
 DEFAULT_FEED_TIMEOUT_SECONDS = 30
+
+# Largest feed body accepted (bytes, after decompression). The biggest
+# configured feeds (Wiley, ~500 entries) are a few MB.
+FEED_MAX_BYTES = 20 * 1024 * 1024
 
 
 class FeedFetchError(Exception):
@@ -43,6 +50,7 @@ class FeedProcessor:
         days = int(defaults.get('time_window_days', DEFAULT_TIME_WINDOW_DAYS))
         self.time_delta = datetime.timedelta(days=days)
         self.feed_timeout = float(defaults.get('feed_timeout_seconds', DEFAULT_FEED_TIMEOUT_SECONDS))
+        self.feed_max_bytes = FEED_MAX_BYTES
 
         # One session for the whole run: it keeps cookies across redirects,
         # which publishers that answer with a cookie check need (Atypon
@@ -66,18 +74,15 @@ class FeedProcessor:
         """
         scheme = urllib.parse.urlparse(url).scheme.lower()
         if scheme in ('http', 'https'):
-            try:
-                response = self.session.get(url, timeout=self.feed_timeout)
-            except requests.RequestException as e:
-                raise FeedFetchError(f"request failed: {e}") from e
-            if response.status_code >= 400:
-                raise FeedFetchError(f"HTTP {response.status_code} from {response.url}")
-            headers = {k.lower(): v for k, v in response.headers.items()}
+            body, status, final_url, headers = self._download(url)
             # Resolve relative links against the final URL after redirects.
-            headers.setdefault('content-location', response.url)
-            feed = feedparser.parse(response.content, response_headers=headers)
-            feed['status'] = response.status_code
-            feed['href'] = response.url
+            headers.setdefault('content-location', final_url)
+            # Wrap the body in a stream: given bare bytes, feedparser first
+            # tries open() on them as a file name, so a server answering with
+            # a path would make us read that local file (issue #90).
+            feed = feedparser.parse(io.BytesIO(body), response_headers=headers)
+            feed['status'] = status
+            feed['href'] = final_url
         else:
             feed = feedparser.parse(url)
             status = feed.get('status')
@@ -87,6 +92,48 @@ class FeedProcessor:
         if feed.bozo and not feed.entries:
             raise FeedFetchError(f"could not parse feed: {feed.get('bozo_exception')}")
         return feed
+
+    def _download(self, url: str):
+        """GET *url* through the session with bounded size and time.
+
+        Returns ``(body, status_code, final_url, lowercased_headers)``. The
+        body is streamed and the download is abandoned once it exceeds
+        ``self.feed_max_bytes`` (counted after gzip/deflate decoding) or once
+        ``self.feed_timeout`` seconds have passed in total. The per-read
+        ``timeout`` alone would not stop a server that trickles bytes.
+
+        Reads with urllib3's ``read1``, which returns whatever has arrived
+        instead of waiting for a full chunk (``iter_content`` would block until
+        64 KB or the end of a small body), so the deadline is checked as data
+        trickles in.
+        """
+        deadline = time.monotonic() + self.feed_timeout
+        try:
+            with self.session.get(url, timeout=self.feed_timeout, stream=True) as response:
+                if response.status_code >= 400:
+                    raise FeedFetchError(f"HTTP {response.status_code} from {response.url}")
+                chunks = []
+                size = 0
+                while True:
+                    chunk = response.raw.read1(64 * 1024, decode_content=True)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > self.feed_max_bytes:
+                        raise FeedFetchError(
+                            f"response larger than {self.feed_max_bytes} bytes from {response.url}"
+                        )
+                    if time.monotonic() > deadline:
+                        raise FeedFetchError(
+                            f"download took longer than {self.feed_timeout:g} s from {response.url}"
+                        )
+                    chunks.append(chunk)
+                headers = {k.lower(): v for k, v in response.headers.items()}
+                return b"".join(chunks), response.status_code, response.url, headers
+        except (requests.RequestException, urllib3.exceptions.HTTPError) as e:
+            # urllib3 errors come from reading ``response.raw`` directly
+            # (read timeouts, broken connections, bad gzip data).
+            raise FeedFetchError(f"request failed: {e}") from e
 
     def _record_failure(self, feed_key: str, name: str, url: str, error: str) -> None:
         """Remember a feed that could not be read (once per feed per run)."""

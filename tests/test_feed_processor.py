@@ -273,6 +273,28 @@ class _FeedHandler(BaseHTTPRequestHandler):
         elif self.path == "/slow":
             time.sleep(2)
             self._send(200, self.feed_body, {"Content-Type": "application/rss+xml"})
+        elif self.path == "/filename":
+            # The whole answer is the path of a local feed file (issue #90).
+            body = str(Path(__file__).parent / "fixtures" / "sample_feed.xml").encode()
+            self._send(200, body, {"Content-Type": "application/rss+xml"})
+        elif self.path == "/huge":
+            self._send(200, b"<rss>" + b" " * 5000 + b"</rss>",
+                       {"Content-Type": "application/rss+xml"})
+        elif self.path == "/trickle":
+            # Each read is quick, but the whole answer takes ~2 s.
+            body = self.feed_body
+            self.send_response(200)
+            self.send_header("Content-Type", "application/rss+xml")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            step = max(1, len(body) // 20)
+            try:
+                for i in range(0, len(body), step):
+                    self.wfile.write(body[i:i + step])
+                    self.wfile.flush()
+                    time.sleep(0.1)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
         else:
             self._send(404, b"not found")
 
@@ -356,3 +378,41 @@ class TestHttpFetching:
         proc = FeedProcessor(db, cfg_mgr)
         assert proc.fetch_feeds("test_topic") == {"local_feed": []}
         assert [f["feed"] for f in proc.failed_feeds] == ["local_feed"]
+
+
+class TestHttpBodyHandling:
+    """Issue #90: the response body is data, never a file name; size and time are bounded."""
+
+    def test_body_naming_a_local_file_is_not_opened(self, tmp_path, monkeypatch, feed_server):
+        monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(tmp_path / "data"))
+        cfg_mgr, db = _http_env(tmp_path, f"{feed_server}/filename")
+        proc = FeedProcessor(db, cfg_mgr)
+        # The named file is a valid feed: reading it would yield its entries.
+        assert proc.fetch_feeds("test_topic") == {"local_feed": []}
+        assert [f["feed"] for f in proc.failed_feeds] == ["local_feed"]
+        assert "could not parse feed" in proc.failed_feeds[0]["error"]
+
+    def test_oversized_body_rejected(self, tmp_path, monkeypatch, feed_server):
+        monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(tmp_path / "data"))
+        cfg_mgr, db = _http_env(tmp_path, f"{feed_server}/huge")
+        proc = FeedProcessor(db, cfg_mgr)
+        proc.feed_max_bytes = 1000
+        assert proc.fetch_feeds("test_topic") == {"local_feed": []}
+        assert "larger than 1000 bytes" in proc.failed_feeds[0]["error"]
+
+    def test_body_within_limit_accepted(self, tmp_path, monkeypatch, feed_server):
+        monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(tmp_path / "data"))
+        cfg_mgr, db = _http_env(tmp_path, f"{feed_server}/action/showFeed")
+        proc = FeedProcessor(db, cfg_mgr)
+        proc.feed_max_bytes = len(_FeedHandler.feed_body)
+        assert len(proc.fetch_feeds("test_topic")["local_feed"]) == 2
+        assert proc.failed_feeds == []
+
+    def test_trickling_body_bounded_by_total_timeout(self, tmp_path, monkeypatch, feed_server):
+        monkeypatch.setenv("PAPER_FIREHOSE_DATA_DIR", str(tmp_path / "data"))
+        cfg_mgr, db = _http_env(tmp_path, f"{feed_server}/trickle", timeout=0.5)
+        proc = FeedProcessor(db, cfg_mgr)
+        start = time.monotonic()
+        assert proc.fetch_feeds("test_topic") == {"local_feed": []}
+        assert time.monotonic() - start < 1.5
+        assert "longer than 0.5 s" in proc.failed_feeds[0]["error"]
